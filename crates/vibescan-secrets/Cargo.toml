@@ -1,0 +1,17 @@
+[package]
+name = "vibescan-secrets"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "LocalStatic secret detection substrate for vibescan."
+
+[dependencies]
+regex.workspace = true
+serde.workspace = true
+toml.workspace = true
+vibescan-types.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

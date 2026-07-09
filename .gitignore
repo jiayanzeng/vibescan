@@ -1,0 +1,42 @@
+# Rust build output
+/target/
+
+# Local binaries and generated artifacts
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+
+# Local reports and scan outputs
+/reports/
+/coverage/
+/tmp/
+/temp/
+*.sarif
+*.html
+*.log
+
+# Environment and secret files
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Codex/local workspace state
+.codex/
+.agents/
+
+# Archive/package output
+*.tar
+*.tar.gz
+*.tgz
+*.zip
