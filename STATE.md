@@ -5,12 +5,19 @@ Updated: 2026-07-09
 
 ## Overall Status
 
-The project now satisfies the local-first v1 architecture much more closely.
-The release gates listed in the previous audit pass, including strict clippy in
-both default and `network` feature builds.
+Task A1 is implemented: the LocalStatic/Network boundary is now asserted by a
+fixture-free, feature-aware CI check instead of the old local hardening helper.
+The release gates listed below pass in both default and `network` feature
+builds.
 
 Implemented and verified:
 
+- Added fixture-free, feature-aware network-boundary assertion in
+  `scripts/check-network-boundary.sh`.
+- Added `.github/workflows/ci.yml` with fmt, default/network clippy,
+  default/network tests, and the boundary gate.
+- Made `scripts/verify-hardening-checks.sh` skip the optional real-repo scan
+  when no fixture is provided and removed personal path assumptions.
 - Removed the stale `vibescan-hardening-instructions.md` reference from
   `README.md`.
 - Fixed strict clippy failures in `vibescan-report` and the same pattern in
@@ -48,40 +55,43 @@ Still intentionally not implemented:
 
 The worktree was already dirty before the original audit. Existing user-owned
 modified/deleted files were left in place and worked with rather than reverted.
+The current A1 changes are limited to docs, scripts, and CI workflow plumbing.
 
-Files touched by this pass include:
+Files currently changed for A1:
 
+- `.github/workflows/ci.yml`
 - `README.md`
 - `STATE.md`
-- `crates/vibescan-core/src/lib.rs`
-- `crates/vibescan-git/src/lib.rs`
-- `crates/vibescan-report/src/lib.rs`
-- `crates/vibescan-secrets/src/lib.rs`
-- `crates/vibescan-secrets/src/rules/default-rules.toml`
-- `crates/vibescan-supabase/src/lib.rs`
+- `scripts/check-network-boundary.sh`
+- `scripts/verify-hardening-checks.sh`
 
-Pre-existing dirty files still present include:
-
-- `Cargo.lock`
-- `crates/vibescan-cli/Cargo.toml`
-- `crates/vibescan-cli/src/main.rs`
-- `crates/vibescan-core/Cargo.toml`
-- `crates/vibescan-supabase/Cargo.toml`
-- deleted: `vibescan-hardening-instructions.md`
+Temporary negative-control edits to `crates/vibescan-git/Cargo.toml`,
+`crates/vibescan-report/Cargo.toml`, and `Cargo.lock` were reverted.
 
 ## Verification Results
 
 Passed:
 
 - `cargo fmt --all -- --check`
-- `cargo test --workspace`
-- `cargo test --workspace --features network`
-- `cargo clippy --workspace --all-targets --no-default-features --locked --offline -- -D warnings`
-- `cargo clippy --workspace --all-targets --features network --locked --offline -- -D warnings`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo clippy --workspace --all-targets --features network --locked -- -D warnings`
+- `cargo test --workspace --locked`
+- `cargo test --workspace --features network --locked`
+- `bash scripts/check-network-boundary.sh`
 - `bash scripts/verify-hardening-checks.sh`
 
-The hardening script also passed its sanitized real-repo scan and planted
-gitignored `.env` Supabase secret check.
+The hardening script now exits successfully with a skipped notice when no
+real-repo fixture is supplied. The optional sanitized real-repo scan remains
+available when a fixture path or `VIBESCAN_REAL_REPO` is provided.
+`grep -rn '/Users/' scripts/` returned no matches.
+
+Negative controls were also run and reverted:
+
+- Adding non-optional `reqwest` to `vibescan-git` made the boundary script fail
+  and name `vibescan-git` and `reqwest`.
+- Adding non-optional `reqwest` to `vibescan-report` made the network
+  reachability check fail because transport became nearest-parented by
+  `vibescan-report` as well as `vibescan-supabase`.
 
 ## Architecture Completion Matrix
 
@@ -92,6 +102,9 @@ Status: complete for v1.
 The seven-crate workspace remains intact. The default/no-network dependency
 tree keeps network and transport crates out of LocalStatic code paths. The
 optional Tier 0 probe remains behind the `network` feature and explicit opt-in.
+The invariant is asserted in CI via `scripts/check-network-boundary.sh`, using
+exact resolved package names from Cargo metadata rather than substring matches
+over rendered `cargo tree` output.
 
 ### 2. Data Model
 

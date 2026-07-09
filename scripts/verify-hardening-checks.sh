@@ -2,8 +2,20 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-real_repo="${1:-${VIBESCAN_REAL_REPO:-/Users/yzjia/codexbuildapp/fintelcore/dashboard}}"
-denylist='reqwest|hyper|tokio|ureq|isahc|curl|openssl|native-tls|rustls|gix-protocol|gix-transport|blocking-http'
+real_repo="${1:-${VIBESCAN_REAL_REPO:-}}"
+
+cd "$repo_root"
+
+echo "== cargo test --workspace =="
+cargo test --workspace
+
+echo "== network boundary =="
+bash scripts/check-network-boundary.sh
+
+if [[ -z "$real_repo" ]]; then
+  echo "skipped: no real-repo fixture provided via argv[1] or VIBESCAN_REAL_REPO"
+  exit 0
+fi
 
 if [[ ! -d "$real_repo" ]]; then
   echo "real repo not found: $real_repo" >&2
@@ -11,23 +23,10 @@ if [[ ! -d "$real_repo" ]]; then
   exit 2
 fi
 
-cd "$repo_root"
-
-echo "== cargo test --workspace =="
-cargo test --workspace
-
-echo "== cargo tree --workspace --edges normal =="
-tree_file="$(mktemp)"
-cargo tree --workspace --edges normal | tee "$tree_file"
-if rg "$denylist" "$tree_file"; then
-  echo "network/transport crate entered the workspace dependency tree" >&2
-  exit 1
-fi
-
 tmp_dir="$(mktemp -d)"
 clean_json="$(mktemp)"
 planted_json=""
-trap 'rm -rf "$tmp_dir" "$tree_file" "$clean_json" "${planted_json:-}"' EXIT
+trap 'rm -rf "$tmp_dir" "$clean_json" "${planted_json:-}"' EXIT
 
 copy_dir="$tmp_dir/repo"
 mkdir -p "$copy_dir"

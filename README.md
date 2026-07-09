@@ -49,13 +49,29 @@ cargo test --workspace
 To run the hardening verification used during development:
 
 ```sh
+bash scripts/verify-hardening-checks.sh
+```
+
+That script runs the workspace tests and the fixture-free network-boundary
+assertion. The optional real-repo scan is a developer convenience only:
+
+```sh
 bash scripts/verify-hardening-checks.sh /path/to/nextjs-supabase-repo
 ```
 
-That script runs the workspace tests, prints the normal dependency tree, checks
-for denied network/transport crates in LocalStatic crates, scans a sanitized
-clean copy of the supplied repo, and verifies that a planted gitignored `.env`
-secret is reported.
+When a fixture path is supplied, the script scans a sanitized clean copy of that
+repo and verifies that a planted gitignored `.env` secret is reported. Without a
+fixture path, it exits successfully with a skipped notice.
+
+The CI boundary gate is:
+
+```sh
+bash scripts/check-network-boundary.sh
+```
+
+It asserts exact resolved package names from Cargo metadata: default builds must
+contain no transport crates, and `--features network` may reach transport only
+through `vibescan-supabase`.
 
 ## Usage
 
