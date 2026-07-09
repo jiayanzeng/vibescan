@@ -18,6 +18,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::overrides::{Override, OverrideBuilder};
 use ignore::{DirEntry, Match, WalkBuilder};
+use sha2::{Digest, Sha256};
 use vibescan_types::{LocationClass, Provenance, RepoPath, ScannableUnit, ScopeWarning};
 
 pub const DEFAULT_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -847,33 +848,38 @@ const ALWAYS_SKIP_PATTERNS: &[&str] = &[
 
 #[derive(Debug)]
 struct UnitCollector {
-    by_content: BTreeMap<Vec<u8>, usize>,
+    by_content_hash: BTreeMap<[u8; 32], usize>,
     units: Vec<ScannableUnit>,
 }
 
 impl UnitCollector {
     fn new() -> Self {
         Self {
-            by_content: BTreeMap::new(),
+            by_content_hash: BTreeMap::new(),
             units: Vec::new(),
         }
     }
 
     fn push(&mut self, unit: ScannableUnit) {
-        if let Some(existing) = self.by_content.get(&unit.content).copied() {
+        let content_hash = content_hash(&unit.content);
+        if let Some(existing) = self.by_content_hash.get(&content_hash).copied() {
             self.units[existing]
                 .additional_provenance
                 .push(unit.provenance);
             return;
         }
         let index = self.units.len();
-        self.by_content.insert(unit.content.clone(), index);
+        self.by_content_hash.insert(content_hash, index);
         self.units.push(unit);
     }
 
     fn into_units(self) -> Vec<ScannableUnit> {
         self.units
     }
+}
+
+fn content_hash(content: &[u8]) -> [u8; 32] {
+    Sha256::digest(content).into()
 }
 
 #[derive(Debug)]

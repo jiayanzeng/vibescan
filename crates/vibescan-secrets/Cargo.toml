@@ -8,6 +8,7 @@ rust-version.workspace = true
 description = "LocalStatic secret detection substrate for vibescan."
 
 [dependencies]
+rayon.workspace = true
 regex.workspace = true
 serde.workspace = true
 toml.workspace = true

@@ -46,7 +46,7 @@
 
 ## 3. Crate architecture
 
-A Cargo workspace. Six crates in a strict acyclic dependency layering. The shared-types crate exists to give every module a common vocabulary and to prevent module-to-module coupling (modules communicate only through types defined there; orchestration is `core`'s job).
+A Cargo workspace. Seven crates in a strict acyclic dependency layering: one thin CLI crate plus six library crates. The shared-types crate exists to give every module a common vocabulary and to prevent module-to-module coupling (modules communicate only through types defined there; orchestration is `core`'s job).
 
 ```mermaid
 graph TD
@@ -74,7 +74,7 @@ graph TD
 | `vibescan-core` | LocalStatic (+ orchestrates Network) | The scan pipeline (§6); the correlation engine (§7.4); config + ignore-file + baseline loading; the severity gate policy. | Format-specific rendering; low-level detection. |
 | `vibescan-cli` | — | Arg parsing (clap), config resolution, invoking `core`, streaming progress, printing. A thin shell. | Any scanning logic. |
 
-**Over-crating watch.** Six crates is justified by the module DAG and by the fact that `core`, `secrets`, `supabase`, and `report` will be reused by the future web/CI layer. Do **not** split further in v1 (no separate `entropy` crate, no `config` crate). Reporting starts as a crate because the hosted tier will consume it independently; everything else earns its boundary through the no-cycles rule.
+**Over-crating watch.** Seven crates is justified by the module DAG: `cli` is a thin binary shell, while `core`, `secrets`, `supabase`, and `report` will be reused by the future web/CI layer. Do **not** split further in v1 (no separate `entropy` crate, no `config` crate). Reporting starts as a crate because the hosted tier will consume it independently; everything else earns its boundary through the no-cycles rule.
 
 ---
 

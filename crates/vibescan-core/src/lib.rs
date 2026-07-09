@@ -882,6 +882,176 @@ mod tests {
     }
 
     #[test]
+    fn clean_control_fixture_produces_zero_findings() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package.json",
+            r#"{"dependencies":{"@supabase/supabase-js":"2.0.0","next":"15.0.0"}}"#,
+        );
+        repo.write(
+            "src/app/page.tsx",
+            "export default function Page() { return <main>clean</main>; }\n",
+        );
+        repo.write(
+            "supabase/functions/ping/index.ts",
+            "Deno.serve(() => new Response('ok'));\n",
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+
+        assert_eq!(result.findings, Vec::new());
+    }
+
+    #[test]
+    fn elevated_key_committed_then_removed_fixture_is_history_only_critical() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.git(["config", "user.email", "vibescan@example.invalid"]);
+        repo.git(["config", "user.name", "vibescan test"]);
+        repo.write(
+            "src/history.ts",
+            "export const key = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';\n",
+        );
+        repo.git(["add", "src/history.ts"]);
+        repo.git(["commit", "-m", "add historical secret"]);
+        repo.write("src/history.ts", "export const ok = true;\n");
+        repo.git(["add", "src/history.ts"]);
+        repo.git(["commit", "-m", "remove historical secret"]);
+
+        let result = scan(repo.path(), ScanConfig::default()).expect("scan succeeds");
+        let findings = result
+            .findings
+            .iter()
+            .filter(|finding| {
+                matches!(
+                    finding.evidence,
+                    Evidence::SupabaseKey {
+                        class: SupabaseKeyClass::SecretNew,
+                        ..
+                    }
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, Category::SecretExposure);
+        assert_eq!(findings[0].severity, Severity::Critical);
+        assert!(findings[0].locations.iter().any(|location| {
+            location.path.0 == "src/history.ts"
+                && matches!(location.provenance, Provenance::Commit { .. })
+        }));
+    }
+
+    #[test]
+    fn gitignored_env_fixture_has_exact_elevated_key_finding() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(".gitignore", ".env\n");
+        repo.write(
+            ".env",
+            "SUPABASE_SERVICE_ROLE_KEY=sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF\n",
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+        let findings = result
+            .findings
+            .iter()
+            .filter(|finding| {
+                finding
+                    .locations
+                    .iter()
+                    .any(|location| location.path.0 == ".env")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].category, Category::SecretExposure);
+        assert_eq!(findings[0].severity, Severity::High);
+        assert!(matches!(
+            findings[0].evidence,
+            Evidence::SupabaseKey {
+                class: SupabaseKeyClass::SecretNew,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn next_build_tree_fixture_is_clean_after_ignore_overrides() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(".gitignore", ".next/\n");
+        repo.write(
+            "dashboard/.next/server/vendor-chunks/prop-types.js",
+            "var x='abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ';\n",
+        );
+        repo.write(
+            "dashboard/.next/static/chunks/app.js",
+            "self.__next_f.push(['clean static bundle']);\n",
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+
+        assert_eq!(result.findings, Vec::new());
+    }
+
+    #[test]
+    fn invalid_dependency_fixture_has_exact_integrity_finding() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package.json",
+            r#"{"dependencies":{"Bad Package":"1.0.0"}}"#,
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+
+        assert_eq!(result.findings.len(), 1);
+        let finding = &result.findings[0];
+        assert_eq!(finding.category, Category::DependencyIntegrity);
+        assert_eq!(finding.severity, Severity::High);
+        assert!(matches!(
+            finding.evidence,
+            Evidence::Dependency {
+                ref package,
+                reason: vibescan_types::DependencyIntegrityReason::InvalidPackageName,
+                ..
+            } if package == "Bad Package"
+        ));
+    }
+
+    #[test]
     fn dependency_integrity_flags_invalid_package_names() {
         let repo = TestRepo::new();
         repo.git(["init"]);
@@ -1068,6 +1238,129 @@ mod tests {
 
         assert_eq!(finding.severity, Severity::Medium);
         assert_eq!(finding.confidence, Confidence::Review);
+    }
+
+    #[test]
+    fn localstatic_dependency_boundary_excludes_network_crates() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+        let rustc = Command::new("rustc")
+            .arg("-vV")
+            .output()
+            .expect("rustc version query runs");
+        assert!(
+            rustc.status.success(),
+            "rustc -vV failed: {}",
+            String::from_utf8_lossy(&rustc.stderr)
+        );
+        let rustc_stdout = String::from_utf8(rustc.stdout).expect("rustc output is UTF-8");
+        let host = rustc_stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("host: "))
+            .expect("rustc reports host triple");
+        let output = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--locked",
+                "--offline",
+                "--filter-platform",
+                host,
+            ])
+            .current_dir(workspace_root)
+            .output()
+            .expect("cargo metadata runs");
+        assert!(
+            output.status.success(),
+            "cargo metadata failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("metadata JSON parses");
+        let packages = metadata["packages"]
+            .as_array()
+            .expect("metadata contains packages");
+        let mut names_by_id = BTreeMap::new();
+        let mut ids_by_name = BTreeMap::new();
+        for package in packages {
+            let id = package["id"].as_str().expect("package id").to_owned();
+            let name = package["name"].as_str().expect("package name").to_owned();
+            names_by_id.insert(id.clone(), name.clone());
+            ids_by_name.entry(name).or_insert(id);
+        }
+
+        let mut normal_edges = BTreeMap::<String, Vec<String>>::new();
+        for node in metadata["resolve"]["nodes"]
+            .as_array()
+            .expect("metadata contains resolve nodes")
+        {
+            let id = node["id"].as_str().expect("node id").to_owned();
+            let mut deps = Vec::new();
+            for dep in node["deps"].as_array().expect("node deps") {
+                if dep["dep_kinds"]
+                    .as_array()
+                    .expect("dependency kinds")
+                    .iter()
+                    .any(|kind| kind["kind"].is_null() || kind["kind"] == "normal")
+                {
+                    deps.push(dep["pkg"].as_str().expect("dep package id").to_owned());
+                }
+            }
+            normal_edges.insert(id, deps);
+        }
+
+        let localstatic_crates = [
+            "vibescan-types",
+            "vibescan-git",
+            "vibescan-secrets",
+            "vibescan-supabase",
+            "vibescan-report",
+            "vibescan-core",
+        ];
+        let denied = BTreeSet::from([
+            "reqwest",
+            "hyper",
+            "tokio",
+            "ureq",
+            "isahc",
+            "curl",
+            "openssl",
+            "native-tls",
+            "rustls",
+            "gix-protocol",
+            "gix-transport",
+            "gix-transport-http",
+            "gix-transport-http-client",
+        ]);
+
+        let mut violations = Vec::new();
+        for crate_name in localstatic_crates {
+            let root_id = ids_by_name.get(crate_name).expect("local crate present");
+            let mut seen = BTreeSet::new();
+            let mut stack = vec![root_id.clone()];
+            while let Some(id) = stack.pop() {
+                if !seen.insert(id.clone()) {
+                    continue;
+                }
+                let name = names_by_id.get(&id).expect("package name");
+                if denied.contains(name.as_str()) {
+                    violations.push(format!("{crate_name} reaches {name}"));
+                }
+                if let Some(deps) = normal_edges.get(&id) {
+                    stack.extend(deps.iter().cloned());
+                }
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "LocalStatic network boundary violated: {}",
+            violations.join(", ")
+        );
     }
 
     fn public_key_finding() -> Finding {

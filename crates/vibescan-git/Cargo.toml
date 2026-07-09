@@ -14,7 +14,10 @@ gix-object.workspace = true
 gix-odb.workspace = true
 globset.workspace = true
 ignore.workspace = true
+sha2.workspace = true
 vibescan-types.workspace = true
 
 [dev-dependencies]
+# Test-only exception to the production layering rule: git fixtures feed
+# collected units through the detector to assert end-to-end walker behavior.
 vibescan-secrets = { path = "../vibescan-secrets" }

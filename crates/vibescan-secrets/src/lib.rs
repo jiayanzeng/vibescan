@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use rayon::prelude::*;
 use regex::Regex;
 use serde::Deserialize;
 use vibescan_types::{
@@ -44,6 +45,18 @@ impl Detector {
 
     /// Scan all supplied units and return raw candidates.
     pub fn detect_units<'a>(
+        &self,
+        units: impl IntoIterator<Item = &'a ScannableUnit>,
+    ) -> Vec<SecretCandidate> {
+        let units = units.into_iter().collect::<Vec<_>>();
+        units
+            .par_iter()
+            .flat_map(|unit| self.detect_unit(unit))
+            .collect()
+    }
+
+    #[cfg(test)]
+    fn detect_units_serial<'a>(
         &self,
         units: impl IntoIterator<Item = &'a ScannableUnit>,
     ) -> Vec<SecretCandidate> {
@@ -548,6 +561,30 @@ mod tests {
     }
 
     #[test]
+    fn parallel_unit_detection_matches_serial_results() {
+        let detector = Detector::default_rules().expect("default rules compile");
+        let units = (0..128)
+            .map(|index| {
+                let content = if index % 2 == 0 {
+                    format!(
+                        "const key{index} = 'sb_secret_{index:04}abcdefghijklmnopqrstuvwxyzABCDEF';\n"
+                    )
+                } else {
+                    format!(
+                        "const stripe{index} = 'sk_live_abcdefghijklmnopqrstuvwxyz{index:06}';\n"
+                    )
+                };
+                working_tree_unit(format!("src/file-{index}.ts"), content)
+            })
+            .collect::<Vec<_>>();
+
+        let serial = candidate_snapshot(detector.detect_units_serial(&units));
+        let parallel = candidate_snapshot(detector.detect_units(&units));
+
+        assert_eq!(parallel, serial);
+    }
+
+    #[test]
     fn reports_one_based_spans() {
         let findings = detect("const key = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890';");
         let anthropic = findings
@@ -558,5 +595,30 @@ mod tests {
         assert_eq!(anthropic.span.line, 1);
         assert!(anthropic.span.col_start > 1);
         assert!(anthropic.span.col_end > anthropic.span.col_start);
+    }
+
+    fn candidate_snapshot(mut candidates: Vec<SecretCandidate>) -> Vec<String> {
+        candidates.sort_by(|left, right| {
+            left.unit_ref
+                .path
+                .cmp(&right.unit_ref.path)
+                .then_with(|| left.span.line.cmp(&right.span.line))
+                .then_with(|| left.span.col_start.cmp(&right.span.col_start))
+                .then_with(|| left.rule_id.cmp(&right.rule_id))
+                .then_with(|| left.raw_match.cmp(&right.raw_match))
+        });
+        candidates
+            .into_iter()
+            .map(|candidate| {
+                format!(
+                    "{}:{}:{}:{}:{}",
+                    candidate.unit_ref.path.0,
+                    candidate.span.line,
+                    candidate.span.col_start,
+                    candidate.rule_id.0,
+                    String::from_utf8_lossy(&candidate.raw_match)
+                )
+            })
+            .collect()
     }
 }
