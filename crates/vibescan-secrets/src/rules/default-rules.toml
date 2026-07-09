@@ -1,7 +1,11 @@
 # Embedded default detection corpus for vibescan v1.
-# This is a compact, gitleaks-style ruleset inspired by public provider key
-# formats. Supabase-shaped rules are deliberately handed off as
-# PossibleSupabaseKey for semantic classification in vibescan-supabase.
+#
+# Generic provider rules are an attributed compatibility subset adapted from
+# the Gitleaks default ruleset conventions (MIT license):
+# https://github.com/gitleaks/gitleaks
+#
+# Supabase-shaped rules are project-owned additions and are deliberately handed
+# off as PossibleSupabaseKey for semantic classification in vibescan-supabase.
 
 [[allowlists]]
 paths = [

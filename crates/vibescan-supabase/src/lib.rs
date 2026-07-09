@@ -1,8 +1,12 @@
 //! Supabase domain intelligence.
 //!
-//! Step 4 is intentionally LocalStatic only: this crate classifies Supabase key
-//! candidates and emits linkable findings. RLS probing is deferred to the
-//! Network tier.
+//! By default this crate is LocalStatic only: it classifies Supabase key
+//! candidates and emits linkable findings. The Tier 0 read probe is compiled
+//! only with the `network` feature and must be explicitly enabled by callers.
+
+use std::fmt;
+#[cfg(feature = "network")]
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -64,6 +68,161 @@ impl SupabaseClassifier {
             .filter_map(|candidate| self.classify_candidate(candidate))
             .collect()
     }
+}
+
+/// Inputs for the opt-in Tier 0 read probe.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Tier0RlsProbeInput {
+    pub project: SupabaseProject,
+    pub public_key: String,
+    pub key_location: Location,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RlsHttpResponse {
+    pub status: u16,
+    pub body: String,
+}
+
+pub trait RlsHttpClient {
+    fn get(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<RlsHttpResponse, RlsProbeError>;
+}
+
+#[derive(Debug)]
+pub enum RlsProbeError {
+    Http { url: String, source: String },
+    InvalidProjectUrl(String),
+    Json(serde_json::Error),
+    OpenApi { url: String, status: u16 },
+}
+
+impl fmt::Display for RlsProbeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Http { url, source } => {
+                write!(formatter, "RLS probe HTTP failed for {url}: {source}")
+            }
+            Self::InvalidProjectUrl(url) => {
+                write!(
+                    formatter,
+                    "RLS probe refused non-Supabase project URL: {url}"
+                )
+            }
+            Self::Json(source) => write!(formatter, "RLS probe JSON parse failed: {source}"),
+            Self::OpenApi { url, status } => {
+                write!(
+                    formatter,
+                    "RLS probe OpenAPI enumeration failed for {url}: HTTP {status}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for RlsProbeError {}
+
+/// Run the Tier 0 read probe using a supplied HTTP client.
+///
+/// This function never writes to the target project. It enumerates PostgREST
+/// OpenAPI paths, performs read-only `select=*&limit=1` requests, and emits
+/// findings only for tables that return rows to the public key.
+pub fn probe_tier0_read_with_client(
+    client: &impl RlsHttpClient,
+    input: &Tier0RlsProbeInput,
+) -> Result<Vec<Finding>, RlsProbeError> {
+    let base_url = normalized_supabase_url(&input.project.url)?;
+    let headers = public_key_headers(&input.public_key, "application/openapi+json");
+    let openapi_url = format!("{base_url}/rest/v1/");
+    let openapi = client.get(&openapi_url, &headers)?;
+    if openapi.status != 200 {
+        return Err(RlsProbeError::OpenApi {
+            url: openapi_url,
+            status: openapi.status,
+        });
+    }
+
+    let tables = tables_from_openapi(&openapi.body)?;
+    let mut findings = Vec::new();
+    for table in tables {
+        let endpoint = format!("{base_url}/rest/v1/{table}?select=*&limit=1");
+        let headers = public_key_headers(&input.public_key, "application/json");
+        let response = client.get(&endpoint, &headers)?;
+        if response.status == 401 || response.status == 403 {
+            continue;
+        }
+        if response.status != 200 {
+            continue;
+        }
+
+        let body = serde_json::from_str::<Value>(&response.body).map_err(RlsProbeError::Json)?;
+        let observed_row_count = body.as_array().map_or(0, Vec::len) as u64;
+        if observed_row_count > 0 {
+            findings.push(rls_exposed_finding(
+                &input.project,
+                &input.key_location,
+                &table,
+                &endpoint,
+                observed_row_count,
+            ));
+        }
+    }
+
+    Ok(findings)
+}
+
+#[cfg(feature = "network")]
+#[derive(Debug)]
+pub struct ReqwestRlsHttpClient {
+    client: reqwest::blocking::Client,
+}
+
+#[cfg(feature = "network")]
+impl ReqwestRlsHttpClient {
+    pub fn new() -> Result<Self, RlsProbeError> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("vibescan")
+            .build()
+            .map_err(|source| RlsProbeError::Http {
+                url: "client setup".to_owned(),
+                source: source.to_string(),
+            })?;
+        Ok(Self { client })
+    }
+}
+
+#[cfg(feature = "network")]
+impl RlsHttpClient for ReqwestRlsHttpClient {
+    fn get(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<RlsHttpResponse, RlsProbeError> {
+        let mut request = self.client.get(url);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        let response = request.send().map_err(|source| RlsProbeError::Http {
+            url: url.to_owned(),
+            source: source.to_string(),
+        })?;
+        let status = response.status().as_u16();
+        let body = response.text().map_err(|source| RlsProbeError::Http {
+            url: url.to_owned(),
+            source: source.to_string(),
+        })?;
+        Ok(RlsHttpResponse { status, body })
+    }
+}
+
+#[cfg(feature = "network")]
+pub fn probe_tier0_read(input: &Tier0RlsProbeInput) -> Result<Vec<Finding>, RlsProbeError> {
+    let client = ReqwestRlsHttpClient::new()?;
+    probe_tier0_read_with_client(&client, input)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -131,7 +290,7 @@ fn classify_raw_key(
     if raw.starts_with("sb_secret_") {
         return elevated(
             SupabaseKeyClass::SecretNew,
-            None,
+            project_hint,
             location_class,
             provenance,
             "Supabase secret key exposed",
@@ -190,19 +349,14 @@ fn low_privilege(
 fn elevated(
     class: SupabaseKeyClass,
     project: Option<SupabaseProject>,
-    location_class: LocationClass,
-    provenance: &Provenance,
+    _location_class: LocationClass,
+    _provenance: &Provenance,
     title: &str,
     detail: &str,
 ) -> KeyClassification {
-    let severity = match (provenance, location_class) {
-        (Provenance::Commit { .. }, _) | (_, LocationClass::ClientReachable) => Severity::Critical,
-        (_, LocationClass::ServerOnly | LocationClass::Unknown) => Severity::High,
-    };
-
     KeyClassification {
         class,
-        severity,
+        severity: Severity::Critical,
         confidence: Confidence::Likely,
         project,
         title: title.to_owned(),
@@ -322,8 +476,88 @@ fn redact_secret(raw: &str) -> String {
     format!("{prefix}...{suffix}")
 }
 
+fn normalized_supabase_url(url: &str) -> Result<String, RlsProbeError> {
+    let normalized = url.trim_end_matches('/').to_owned();
+    let host = normalized
+        .strip_prefix("https://")
+        .ok_or_else(|| RlsProbeError::InvalidProjectUrl(url.to_owned()))?;
+    if host.contains('/') || !host.ends_with(SUPABASE_URL_SUFFIX) {
+        return Err(RlsProbeError::InvalidProjectUrl(url.to_owned()));
+    }
+    let ref_id = host.trim_end_matches(SUPABASE_URL_SUFFIX);
+    if !is_valid_project_ref(ref_id) {
+        return Err(RlsProbeError::InvalidProjectUrl(url.to_owned()));
+    }
+    Ok(normalized)
+}
+
+fn public_key_headers(public_key: &str, accept: &str) -> Vec<(String, String)> {
+    vec![
+        ("apikey".to_owned(), public_key.to_owned()),
+        ("authorization".to_owned(), format!("Bearer {public_key}")),
+        ("accept".to_owned(), accept.to_owned()),
+    ]
+}
+
+fn tables_from_openapi(body: &str) -> Result<Vec<String>, RlsProbeError> {
+    let value = serde_json::from_str::<Value>(body).map_err(RlsProbeError::Json)?;
+    let Some(paths) = value.get("paths").and_then(Value::as_object) else {
+        return Ok(Vec::new());
+    };
+    let mut tables = paths
+        .iter()
+        .filter_map(|(path, methods)| {
+            let table = path.strip_prefix('/')?;
+            if table.is_empty() || table.contains('/') || table.starts_with("rpc/") {
+                return None;
+            }
+            methods.get("get")?;
+            Some(table.to_owned())
+        })
+        .collect::<Vec<_>>();
+    tables.sort();
+    tables.dedup();
+    Ok(tables)
+}
+
+fn rls_exposed_finding(
+    project: &SupabaseProject,
+    key_location: &Location,
+    table: &str,
+    endpoint: &str,
+    observed_row_count: u64,
+) -> Finding {
+    let mut hasher = Sha256::new();
+    hasher.update(project.url.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(table.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(endpoint.as_bytes());
+
+    Finding {
+        id: FindingId(format!("rls-{}", hex::encode(&hasher.finalize()[..12]))),
+        category: Category::Rls,
+        severity: Severity::Critical,
+        title: format!("Supabase table {table} is readable with the public key"),
+        detail: "A read-only Tier 0 probe confirmed that PostgREST returned rows to the discovered public Supabase key.".to_owned(),
+        locations: vec![key_location.clone()],
+        evidence: Evidence::RlsProbe {
+            project: project.clone(),
+            table: table.to_owned(),
+            endpoint: endpoint.to_owned(),
+            observed_row_count,
+            exposure: vibescan_types::RlsExposure::Exposed,
+        },
+        remediation: "Enable and tighten RLS policies for this table, then rerun the read probe to confirm anonymous reads no longer return rows.".to_owned(),
+        related: Vec::new(),
+        confidence: Confidence::Confirmed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use vibescan_secrets::{Detector, working_tree_unit};
     use vibescan_types::{RepoPath, RuleId, Span, UnitRef};
@@ -395,6 +629,31 @@ mod tests {
     }
 
     #[test]
+    fn classifies_new_secret_key_with_colocated_project_url() {
+        let raw = "sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF";
+        let content = format!(
+            "const url = 'https://abcdefghijklmnopqrst.supabase.co';\nconst key = '{raw}';\n"
+        );
+        let finding = SupabaseClassifier::new()
+            .classify_candidate_with_unit_content(
+                &candidate(raw, LocationClass::ServerOnly),
+                Some(content.as_bytes()),
+            )
+            .expect("finding emitted");
+
+        let Evidence::SupabaseKey { class, project, .. } = finding.evidence else {
+            panic!("expected Supabase evidence");
+        };
+
+        assert_eq!(class, SupabaseKeyClass::SecretNew);
+        assert_eq!(finding.severity, Severity::Critical);
+        assert_eq!(
+            project.expect("co-located project URL extracted").url,
+            "https://abcdefghijklmnopqrst.supabase.co"
+        );
+    }
+
+    #[test]
     fn classifies_new_secret_key_as_critical_when_client_reachable() {
         let finding = SupabaseClassifier::new()
             .classify_candidate(&candidate(
@@ -436,7 +695,7 @@ mod tests {
             .classify_candidate(&candidate(&raw, LocationClass::ServerOnly))
             .expect("finding emitted");
 
-        assert_eq!(finding.severity, Severity::High);
+        assert_eq!(finding.severity, Severity::Critical);
         assert!(matches!(
             finding.evidence,
             Evidence::SupabaseKey {
@@ -497,10 +756,152 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tier0_read_probe_emits_exposed_table_without_row_data() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 200,
+                    body: r#"{"paths":{"/profiles":{"get":{}},"/rpc/ping":{"post":{}}}}"#
+                        .to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 200,
+                    body: r#"[{"id":1,"email":"not included in finding"}]"#.to_owned(),
+                },
+            ),
+        ]);
+        let input = tier0_input();
+
+        let findings = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        assert_eq!(findings.len(), 1);
+        let finding = &findings[0];
+        assert_eq!(finding.category, Category::Rls);
+        assert_eq!(finding.severity, Severity::Critical);
+        let Evidence::RlsProbe {
+            project,
+            table,
+            endpoint,
+            observed_row_count,
+            exposure,
+        } = &finding.evidence
+        else {
+            panic!("expected RLS evidence");
+        };
+        assert_eq!(project.url, "https://abcdefghijklmnopqrst.supabase.co");
+        assert_eq!(table, "profiles");
+        assert_eq!(
+            endpoint,
+            "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1"
+        );
+        assert_eq!(*observed_row_count, 1);
+        assert_eq!(*exposure, vibescan_types::RlsExposure::Exposed);
+        assert!(!format!("{finding:?}").contains("not included in finding"));
+    }
+
+    #[test]
+    fn tier0_read_probe_omits_protected_or_empty_tables() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 200,
+                    body: r#"{"paths":{"/private_table":{"get":{}},"/empty_table":{"get":{}}}}"#
+                        .to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/empty_table?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 200,
+                    body: "[]".to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_table?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 403,
+                    body: r#"{"message":"forbidden"}"#.to_owned(),
+                },
+            ),
+        ]);
+
+        let findings =
+            probe_tier0_read_with_client(&client, &tier0_input()).expect("probe succeeds");
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn tier0_read_probe_refuses_non_supabase_urls() {
+        let client = FakeRlsClient::default();
+        let mut input = tier0_input();
+        input.project.url = "https://example.com".to_owned();
+
+        let error =
+            probe_tier0_read_with_client(&client, &input).expect_err("invalid URL rejected");
+
+        assert!(matches!(error, RlsProbeError::InvalidProjectUrl(_)));
+    }
+
     fn jwt_with_payload(payload: &str) -> String {
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
         let payload = URL_SAFE_NO_PAD.encode(payload.as_bytes());
         let signature = "abcdefghijklmnopqrstuvwxyz1234567890";
         format!("{header}.{payload}.{signature}")
+    }
+
+    fn tier0_input() -> Tier0RlsProbeInput {
+        Tier0RlsProbeInput {
+            project: SupabaseProject {
+                ref_id: Some("abcdefghijklmnopqrst".to_owned()),
+                url: "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+            },
+            public_key: "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789".to_owned(),
+            key_location: Location {
+                path: RepoPath("src/app.tsx".to_owned()),
+                span: None,
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ClientReachable,
+            },
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeRlsClient {
+        responses: BTreeMap<String, RlsHttpResponse>,
+    }
+
+    impl FakeRlsClient {
+        fn new<const N: usize>(responses: [(&str, RlsHttpResponse); N]) -> Self {
+            Self {
+                responses: responses
+                    .into_iter()
+                    .map(|(url, response)| (url.to_owned(), response))
+                    .collect(),
+            }
+        }
+    }
+
+    impl RlsHttpClient for FakeRlsClient {
+        fn get(
+            &self,
+            url: &str,
+            _headers: &[(String, String)],
+        ) -> Result<RlsHttpResponse, RlsProbeError> {
+            self.responses
+                .get(url)
+                .cloned()
+                .ok_or_else(|| RlsProbeError::Http {
+                    url: url.to_owned(),
+                    source: "missing fake response".to_owned(),
+                })
+        }
     }
 }

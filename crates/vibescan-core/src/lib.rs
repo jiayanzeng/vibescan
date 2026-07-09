@@ -14,10 +14,14 @@ use std::time::Instant;
 use jiff::Timestamp;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use vibescan_git::{WalkOptions, collect_repository};
+use vibescan_git::{WalkOptions, collect_repository, discover_repository_root};
 use vibescan_report::{ReportFormat, TtyStyle, render, render_tty};
 use vibescan_secrets::Detector;
 use vibescan_supabase::SupabaseClassifier;
+#[cfg(feature = "network")]
+use vibescan_supabase::Tier0RlsProbeInput;
+#[cfg(feature = "network")]
+use vibescan_supabase::probe_tier0_read;
 use vibescan_types::{
     Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope, Location,
     NetworkScope, Provenance, ScanResult, ScanScope, ScanStats, ScopeWarning, SecretCandidate,
@@ -37,6 +41,7 @@ pub struct ScanConfig {
     pub severity_gate: Severity,
     pub path_allowlists: Vec<String>,
     pub baseline_path: Option<PathBuf>,
+    pub tier0_read_probe: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,6 +79,7 @@ impl Default for ScanConfig {
             severity_gate: Severity::High,
             path_allowlists: Vec::new(),
             baseline_path: None,
+            tier0_read_probe: false,
         }
     }
 }
@@ -83,7 +89,8 @@ impl ScanConfig {
     pub fn load(target: impl AsRef<Path>) -> Result<Self, CoreError> {
         let target = target.as_ref();
         let mut config = Self::default();
-        let config_path = target.join("vibescan.toml");
+        let config_root = discover_repository_root(target).map_err(CoreError::Git)?;
+        let config_path = config_root.join("vibescan.toml");
 
         if config_path.exists() {
             let parsed: FileConfig =
@@ -121,6 +128,12 @@ impl ScanConfig {
         if let Some(baseline) = parsed.baseline {
             self.baseline_path = baseline.path.map(PathBuf::from);
         }
+
+        if let Some(network) = parsed.network {
+            if let Some(tier0_read_probe) = network.tier0_read_probe {
+                self.tier0_read_probe = tier0_read_probe;
+            }
+        }
     }
 }
 
@@ -129,6 +142,7 @@ struct FileConfig {
     scan: Option<ScanSection>,
     ignore: Option<IgnoreSection>,
     baseline: Option<BaselineSection>,
+    network: Option<NetworkSection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,6 +163,11 @@ struct IgnoreSection {
 #[derive(Debug, Deserialize)]
 struct BaselineSection {
     path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NetworkSection {
+    tier0_read_probe: Option<bool>,
 }
 
 /// Run the offline scan pipeline.
@@ -180,23 +199,52 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
         .iter()
         .map(|unit| (unit.path.0.as_str(), unit.content.as_slice()))
         .collect::<BTreeMap<_, _>>();
-    let mut findings = candidates
+    let supabase_classifications = candidates
         .iter()
         .filter_map(|candidate| {
-            classifier.classify_candidate_with_unit_content(
-                candidate,
-                unit_content
-                    .get(candidate.unit_ref.path.0.as_str())
-                    .copied(),
-            )
+            classifier
+                .classify_candidate_with_unit_content(
+                    candidate,
+                    unit_content
+                        .get(candidate.unit_ref.path.0.as_str())
+                        .copied(),
+                )
+                .map(|finding| (candidate, finding))
         })
         .collect::<Vec<_>>();
+    let mut findings = supabase_classifications
+        .iter()
+        .map(|(_, finding)| finding.clone())
+        .collect::<Vec<_>>();
     findings.extend(resolve_generic_candidates(&candidates));
-    findings.extend(scan_dependency_integrity(target_path)?);
+    findings.extend(scan_dependency_integrity(&walk.repo_root)?);
+
+    if config.tier0_read_probe {
+        #[cfg(feature = "network")]
+        {
+            for input in tier0_probe_inputs(&supabase_classifications) {
+                match probe_tier0_read(&input) {
+                    Ok(mut rls_findings) => findings.append(&mut rls_findings),
+                    Err(error) => warnings.push(ScopeWarning::Other {
+                        message: format!(
+                            "Tier 0 RLS read probe failed for {}: {error}",
+                            input.project.url
+                        ),
+                    }),
+                }
+            }
+        }
+        #[cfg(not(feature = "network"))]
+        warnings.push(ScopeWarning::Other {
+            message: "Tier 0 RLS read probe requested but this binary was built without the network feature".to_owned(),
+        });
+    }
+
     findings.extend(correlate_findings(&findings));
 
     let mut findings = dedup_findings(findings);
     findings.retain(|finding| !baseline.contains(&finding.id));
+    absorb_correlated_constituents(&mut findings);
     sort_findings(&mut findings);
 
     let stats = compute_stats(&findings, &warnings);
@@ -213,8 +261,8 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
             working_tree: config.include_working_tree,
             history: history_scope(config.include_history, config.max_commits, &walk.history),
             network: NetworkScope {
-                enabled: false,
-                tier0_read_probe: false,
+                enabled: config.tier0_read_probe && cfg!(feature = "network"),
+                tier0_read_probe: config.tier0_read_probe && cfg!(feature = "network"),
                 tier1_introspection: false,
             },
             warnings,
@@ -250,23 +298,46 @@ pub fn scan_and_render(
 
 /// Compute whether a result meets the configured severity gate.
 pub fn exit_code(result: &ScanResult, gate: Severity) -> i32 {
-    result
+    if result
         .findings
         .iter()
         .any(|finding| finding.severity >= gate)
-        .then_some(1)
-        .unwrap_or(0)
+    {
+        1
+    } else {
+        0
+    }
 }
 
-/// Apply the two v1 correlation rules.
+/// Apply the registered v1 correlation rules.
 pub fn correlate_findings(findings: &[Finding]) -> Vec<Finding> {
-    let mut correlations = Vec::new();
-    correlations.extend(correlate_exposed_public_key(findings));
-    correlations.extend(correlate_elevated_key_moots_rls(findings));
-    correlations
+    CORRELATION_RULES
+        .iter()
+        .flat_map(|rule| (rule.apply)(rule, findings))
+        .collect()
 }
 
-fn correlate_exposed_public_key(findings: &[Finding]) -> Vec<Finding> {
+#[derive(Clone, Copy)]
+struct CorrelationRule {
+    id: &'static str,
+    absorbs_related_in_summary: bool,
+    apply: fn(&CorrelationRule, &[Finding]) -> Vec<Finding>,
+}
+
+const CORRELATION_RULES: &[CorrelationRule] = &[
+    CorrelationRule {
+        id: "exposed-public-key-chain",
+        absorbs_related_in_summary: true,
+        apply: correlate_exposed_public_key,
+    },
+    CorrelationRule {
+        id: "elevated-key-in-tree",
+        absorbs_related_in_summary: false,
+        apply: correlate_elevated_key_moots_rls,
+    },
+];
+
+fn correlate_exposed_public_key(rule: &CorrelationRule, findings: &[Finding]) -> Vec<Finding> {
     let public_keys = findings.iter().filter(|finding| {
         matches!(
             finding.evidence,
@@ -298,7 +369,7 @@ fn correlate_exposed_public_key(findings: &[Finding]) -> Vec<Finding> {
                     return None;
                 };
 
-                let rule_id = CorrelationRuleId("exposed-public-key-chain".to_owned());
+                let rule_id = CorrelationRuleId(rule.id.to_owned());
                 let id = correlation_id(&rule_id, &[&key_finding.id, &rls_finding.id]);
                 Some(Finding {
                     id,
@@ -327,7 +398,7 @@ fn correlate_exposed_public_key(findings: &[Finding]) -> Vec<Finding> {
         .collect()
 }
 
-fn correlate_elevated_key_moots_rls(findings: &[Finding]) -> Vec<Finding> {
+fn correlate_elevated_key_moots_rls(rule: &CorrelationRule, findings: &[Finding]) -> Vec<Finding> {
     findings
         .iter()
         .filter(|finding| {
@@ -358,7 +429,7 @@ fn correlate_elevated_key_moots_rls(findings: &[Finding]) -> Vec<Finding> {
 
             let mut related = vec![key_finding.id.clone()];
             related.extend(related_rls);
-            let rule_id = CorrelationRuleId("elevated-key-in-tree".to_owned());
+            let rule_id = CorrelationRuleId(rule.id.to_owned());
             let related_refs = related.iter().collect::<Vec<_>>();
             Some(Finding {
                 id: correlation_id(&rule_id, &related_refs),
@@ -379,11 +450,59 @@ fn correlate_elevated_key_moots_rls(findings: &[Finding]) -> Vec<Finding> {
         .collect()
 }
 
+fn absorb_correlated_constituents(findings: &mut Vec<Finding>) {
+    let absorbed = findings
+        .iter()
+        .filter_map(|finding| {
+            let Evidence::Correlation { rule_id, .. } = &finding.evidence else {
+                return None;
+            };
+            CORRELATION_RULES
+                .iter()
+                .find(|rule| rule.id == rule_id.0 && rule.absorbs_related_in_summary)
+                .map(|_| finding.related.clone())
+        })
+        .flatten()
+        .collect::<BTreeSet<_>>();
+
+    if absorbed.is_empty() {
+        return;
+    }
+
+    findings.retain(|finding| {
+        finding.category == Category::Correlation || !absorbed.contains(&finding.id)
+    });
+}
+
 fn resolve_generic_candidates(candidates: &[SecretCandidate]) -> Vec<Finding> {
     candidates
         .iter()
         .filter(|candidate| candidate.kind != vibescan_types::CandidateKind::PossibleSupabaseKey)
         .map(generic_candidate_finding)
+        .collect()
+}
+
+#[cfg(feature = "network")]
+fn tier0_probe_inputs(classifications: &[(&SecretCandidate, Finding)]) -> Vec<Tier0RlsProbeInput> {
+    classifications
+        .iter()
+        .filter_map(|(candidate, finding)| {
+            let Evidence::SupabaseKey {
+                class: SupabaseKeyClass::PublishableNew | SupabaseKeyClass::AnonLegacy,
+                project: Some(project),
+                ..
+            } = &finding.evidence
+            else {
+                return None;
+            };
+            let public_key = std::str::from_utf8(&candidate.raw_match).ok()?.to_owned();
+            let key_location = finding.locations.first()?.clone();
+            Some(Tier0RlsProbeInput {
+                project: project.clone(),
+                public_key,
+                key_location,
+            })
+        })
         .collect()
 }
 
@@ -432,15 +551,98 @@ fn generic_candidate_severity(candidate: &SecretCandidate) -> (Severity, Confide
     }
 }
 
-fn scan_dependency_integrity(target: &Path) -> Result<Vec<Finding>, CoreError> {
-    let package_json = target.join("package.json");
-    if !package_json.exists() {
-        return Ok(Vec::new());
-    }
-
-    let content = fs::read_to_string(&package_json).map_err(CoreError::Io)?;
-    let value = serde_json::from_str::<serde_json::Value>(&content).map_err(CoreError::Json)?;
+fn scan_dependency_integrity(repo_root: &Path) -> Result<Vec<Finding>, CoreError> {
     let mut findings = Vec::new();
+    for manifest in collect_manifest_paths(repo_root)? {
+        match manifest.kind {
+            DependencyManifestKind::PackageJson => {
+                scan_package_json(repo_root, &manifest.path, &mut findings)?;
+            }
+            DependencyManifestKind::PackageLock => {
+                scan_package_lock(repo_root, &manifest.path, &mut findings)?;
+            }
+            DependencyManifestKind::Pyproject => {
+                scan_pyproject(repo_root, &manifest.path, &mut findings)?;
+            }
+            DependencyManifestKind::RequirementsTxt => {
+                scan_requirements_txt(repo_root, &manifest.path, &mut findings)?;
+            }
+        }
+    }
+    Ok(findings)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DependencyManifestKind {
+    PackageJson,
+    PackageLock,
+    Pyproject,
+    RequirementsTxt,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DependencyManifest {
+    path: PathBuf,
+    kind: DependencyManifestKind,
+}
+
+fn collect_manifest_paths(repo_root: &Path) -> Result<Vec<DependencyManifest>, CoreError> {
+    let mut manifests = Vec::new();
+    collect_manifest_paths_in(repo_root, repo_root, &mut manifests)?;
+    manifests.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(manifests)
+}
+
+fn collect_manifest_paths_in(
+    repo_root: &Path,
+    dir: &Path,
+    manifests: &mut Vec<DependencyManifest>,
+) -> Result<(), CoreError> {
+    for entry in fs::read_dir(dir).map_err(CoreError::Io)? {
+        let entry = entry.map_err(CoreError::Io)?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(CoreError::Io)?;
+        if file_type.is_dir() {
+            if should_skip_dependency_dir(repo_root, &path) {
+                continue;
+            }
+            collect_manifest_paths_in(repo_root, &path, manifests)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let Some(kind) = dependency_manifest_kind(&path) else {
+            continue;
+        };
+        manifests.push(DependencyManifest { path, kind });
+    }
+    Ok(())
+}
+
+fn should_skip_dependency_dir(repo_root: &Path, path: &Path) -> bool {
+    let relative = repo_relative_path(repo_root, path);
+    relative
+        .split('/')
+        .any(|component| matches!(component, ".git" | "node_modules" | "target" | ".next"))
+}
+
+fn dependency_manifest_kind(path: &Path) -> Option<DependencyManifestKind> {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("package.json") => Some(DependencyManifestKind::PackageJson),
+        Some("package-lock.json") => Some(DependencyManifestKind::PackageLock),
+        Some("pyproject.toml") => Some(DependencyManifestKind::Pyproject),
+        Some("requirements.txt") => Some(DependencyManifestKind::RequirementsTxt),
+        _ => None,
+    }
+}
+
+fn scan_package_json(
+    repo_root: &Path,
+    manifest_path: &Path,
+    findings: &mut Vec<Finding>,
+) -> Result<(), CoreError> {
+    let value = read_json_manifest(manifest_path)?;
     for section in [
         "dependencies",
         "devDependencies",
@@ -449,26 +651,154 @@ fn scan_dependency_integrity(target: &Path) -> Result<Vec<Finding>, CoreError> {
     ] {
         if let Some(deps) = value.get(section).and_then(serde_json::Value::as_object) {
             for (name, version) in deps {
-                if !valid_npm_name(name) {
-                    findings.push(dependency_finding(
-                        target,
-                        name,
-                        &format!("invalid npm package name in {section}"),
-                        vibescan_types::DependencyIntegrityReason::InvalidPackageName,
-                    ));
-                }
-                if version.as_str().is_some_and(|spec| spec.trim().is_empty()) {
-                    findings.push(dependency_finding(
-                        target,
-                        name,
-                        &format!("empty version specifier in {section}"),
-                        vibescan_types::DependencyIntegrityReason::EmptyVersionSpecifier,
-                    ));
-                }
+                check_npm_dependency(repo_root, manifest_path, section, name, version, findings);
             }
         }
     }
-    Ok(findings)
+    Ok(())
+}
+
+fn scan_package_lock(
+    repo_root: &Path,
+    manifest_path: &Path,
+    findings: &mut Vec<Finding>,
+) -> Result<(), CoreError> {
+    let value = read_json_manifest(manifest_path)?;
+    if let Some(deps) = value
+        .get("dependencies")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (name, metadata) in deps {
+            check_npm_dependency(
+                repo_root,
+                manifest_path,
+                "lockfile dependencies",
+                name,
+                metadata,
+                findings,
+            );
+        }
+    }
+    if let Some(packages) = value.get("packages").and_then(serde_json::Value::as_object) {
+        for (path, metadata) in packages {
+            let Some(name) = path.strip_prefix("node_modules/") else {
+                continue;
+            };
+            if name.is_empty() || name.contains("/node_modules/") {
+                continue;
+            }
+            check_npm_dependency(
+                repo_root,
+                manifest_path,
+                "lockfile packages",
+                name,
+                metadata,
+                findings,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn scan_pyproject(
+    repo_root: &Path,
+    manifest_path: &Path,
+    findings: &mut Vec<Finding>,
+) -> Result<(), CoreError> {
+    let content = fs::read_to_string(manifest_path).map_err(CoreError::Io)?;
+    let value = toml::from_str::<toml::Value>(&content).map_err(CoreError::Toml)?;
+    if let Some(deps) = value
+        .get("project")
+        .and_then(|project| project.get("dependencies"))
+        .and_then(toml::Value::as_array)
+    {
+        for dep in deps.iter().filter_map(toml::Value::as_str) {
+            check_python_requirement(
+                repo_root,
+                manifest_path,
+                "project.dependencies",
+                dep,
+                findings,
+            );
+        }
+    }
+    if let Some(deps) = value
+        .get("tool")
+        .and_then(|tool| tool.get("poetry"))
+        .and_then(|poetry| poetry.get("dependencies"))
+        .and_then(toml::Value::as_table)
+    {
+        for (name, version) in deps {
+            if name == "python" {
+                continue;
+            }
+            check_python_dependency_name(
+                repo_root,
+                manifest_path,
+                "tool.poetry.dependencies",
+                name,
+                findings,
+            );
+            if version.as_str().is_some_and(|spec| spec.trim().is_empty()) {
+                findings.push(dependency_finding(
+                    repo_root,
+                    manifest_path,
+                    name,
+                    "empty version specifier in tool.poetry.dependencies",
+                    vibescan_types::DependencyIntegrityReason::EmptyVersionSpecifier,
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn scan_requirements_txt(
+    repo_root: &Path,
+    manifest_path: &Path,
+    findings: &mut Vec<Finding>,
+) -> Result<(), CoreError> {
+    let content = fs::read_to_string(manifest_path).map_err(CoreError::Io)?;
+    for line in content.lines() {
+        check_python_requirement(repo_root, manifest_path, "requirements.txt", line, findings);
+    }
+    Ok(())
+}
+
+fn read_json_manifest(path: &Path) -> Result<serde_json::Value, CoreError> {
+    let content = fs::read_to_string(path).map_err(CoreError::Io)?;
+    serde_json::from_str::<serde_json::Value>(&content).map_err(CoreError::Json)
+}
+
+fn check_npm_dependency(
+    repo_root: &Path,
+    manifest_path: &Path,
+    section: &str,
+    name: &str,
+    version: &serde_json::Value,
+    findings: &mut Vec<Finding>,
+) {
+    if !valid_npm_name(name) {
+        findings.push(dependency_finding(
+            repo_root,
+            manifest_path,
+            name,
+            &format!("invalid npm package name in {section}"),
+            vibescan_types::DependencyIntegrityReason::InvalidPackageName,
+        ));
+    }
+    let version = version
+        .as_str()
+        .or_else(|| version.get("version").and_then(serde_json::Value::as_str));
+    if version.is_some_and(|spec| spec.trim().is_empty()) {
+        findings.push(dependency_finding(
+            repo_root,
+            manifest_path,
+            name,
+            &format!("empty version specifier in {section}"),
+            vibescan_types::DependencyIntegrityReason::EmptyVersionSpecifier,
+        ));
+    }
 }
 
 fn valid_npm_name(name: &str) -> bool {
@@ -491,14 +821,83 @@ fn valid_npm_name(name: &str) -> bool {
     }
 }
 
+fn check_python_requirement(
+    repo_root: &Path,
+    manifest_path: &Path,
+    section: &str,
+    requirement: &str,
+    findings: &mut Vec<Finding>,
+) {
+    let requirement = requirement
+        .split_once('#')
+        .map_or(requirement, |(before_comment, _)| before_comment)
+        .trim();
+    if requirement.is_empty()
+        || requirement.starts_with('-')
+        || requirement.contains("://")
+        || requirement.starts_with("git+")
+    {
+        return;
+    }
+    let name = python_requirement_name(requirement);
+    check_python_dependency_name(repo_root, manifest_path, section, name, findings);
+}
+
+fn check_python_dependency_name(
+    repo_root: &Path,
+    manifest_path: &Path,
+    section: &str,
+    name: &str,
+    findings: &mut Vec<Finding>,
+) {
+    if !valid_python_package_name(name) {
+        findings.push(dependency_finding(
+            repo_root,
+            manifest_path,
+            name,
+            &format!("invalid Python package name in {section}"),
+            vibescan_types::DependencyIntegrityReason::InvalidPackageName,
+        ));
+    }
+}
+
+fn python_requirement_name(requirement: &str) -> &str {
+    let version_start = requirement
+        .find(['=', '<', '>', '!', '~'])
+        .unwrap_or(requirement.len());
+    let extras_start = requirement.find('[').unwrap_or(version_start);
+    requirement[..version_start.min(extras_start)].trim()
+}
+
+fn valid_python_package_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+        && trimmed
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric())
+        && trimmed
+            .chars()
+            .last()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric())
+}
+
 fn dependency_finding(
-    target: &Path,
+    repo_root: &Path,
+    manifest_path: &Path,
     package: &str,
     detail: &str,
     reason: vibescan_types::DependencyIntegrityReason,
 ) -> Finding {
+    let manifest_path = vibescan_types::RepoPath(repo_relative_path(repo_root, manifest_path));
     let mut hasher = Sha256::new();
+    hasher.update(manifest_path.0.as_bytes());
+    hasher.update(b"\0");
     hasher.update(package.as_bytes());
+    hasher.update(b"\0");
     hasher.update(detail.as_bytes());
     Finding {
         id: FindingId(format!(
@@ -510,14 +909,7 @@ fn dependency_finding(
         title: format!("Dependency requires review: {package}"),
         detail: detail.to_owned(),
         locations: vec![Location {
-            path: vibescan_types::RepoPath(
-                target
-                    .join("package.json")
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-            ),
+            path: manifest_path.clone(),
             span: None,
             provenance: Provenance::WorkingTree,
             additional_provenance: Vec::new(),
@@ -525,13 +917,22 @@ fn dependency_finding(
         }],
         evidence: Evidence::Dependency {
             package: package.to_owned(),
-            manifest_path: vibescan_types::RepoPath("package.json".to_owned()),
+            manifest_path,
             reason,
         },
         remediation: "Correct or remove the dependency before install or deployment.".to_owned(),
         related: Vec::new(),
         confidence: Confidence::Review,
     }
+}
+
+fn repo_relative_path(repo_root: &Path, path: &Path) -> String {
+    path.strip_prefix(repo_root)
+        .unwrap_or(path)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn project_url_from_key(finding: &Finding) -> Option<&str> {
@@ -755,7 +1156,7 @@ mod tests {
                 .iter()
                 .any(|finding| finding.category == Category::SecretExposure)
         );
-        assert_eq!(result.scope.network.enabled, false);
+        assert!(!result.scope.network.enabled);
     }
 
     #[test]
@@ -882,6 +1283,23 @@ mod tests {
     }
 
     #[test]
+    fn config_loads_from_repo_root_when_target_is_subdirectory() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write("vibescan.toml", "[ignore]\npaths = [\"src/**\"]\n");
+        repo.write(
+            "src/app.ts",
+            "const key = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';\n",
+        );
+
+        let target = repo.path().join("src");
+        let config = ScanConfig::load(&target).expect("config loads from repo root");
+        let result = scan(&target, config).expect("scan succeeds");
+
+        assert!(result.findings.is_empty());
+    }
+
+    #[test]
     fn clean_control_fixture_produces_zero_findings() {
         let repo = TestRepo::new();
         repo.git(["init"]);
@@ -982,7 +1400,7 @@ mod tests {
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].category, Category::SecretExposure);
-        assert_eq!(findings[0].severity, Severity::High);
+        assert_eq!(findings[0].severity, Severity::Critical);
         assert!(matches!(
             findings[0].evidence,
             Evidence::SupabaseKey {
@@ -1111,6 +1529,77 @@ mod tests {
     }
 
     #[test]
+    fn dependency_integrity_scans_package_lock() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package-lock.json",
+            r#"{"packages":{"node_modules/Bad Package":{"version":"1.0.0"}}}"#,
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+
+        assert!(result.findings.iter().any(|finding| {
+            matches!(
+                finding.evidence,
+                Evidence::Dependency {
+                    ref manifest_path,
+                    ref package,
+                    reason: vibescan_types::DependencyIntegrityReason::InvalidPackageName,
+                } if manifest_path.0 == "package-lock.json" && package == "Bad Package"
+            )
+        }));
+    }
+
+    #[test]
+    fn dependency_integrity_scans_python_manifests() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "pyproject.toml",
+            "[project]\ndependencies = [\"bad package>=1\"]\n",
+        );
+        repo.write("requirements.txt", "also bad==1\n");
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+
+        assert!(result.findings.iter().any(|finding| {
+            matches!(
+                finding.evidence,
+                Evidence::Dependency {
+                    ref manifest_path,
+                    ref package,
+                    reason: vibescan_types::DependencyIntegrityReason::InvalidPackageName,
+                } if manifest_path.0 == "pyproject.toml" && package == "bad package"
+            )
+        }));
+        assert!(result.findings.iter().any(|finding| {
+            matches!(
+                finding.evidence,
+                Evidence::Dependency {
+                    ref manifest_path,
+                    ref package,
+                    reason: vibescan_types::DependencyIntegrityReason::InvalidPackageName,
+                } if manifest_path.0 == "requirements.txt" && package == "also bad"
+            )
+        }));
+    }
+
+    #[test]
     fn baseline_suppresses_existing_findings() {
         let repo = TestRepo::new();
         repo.git(["init"]);
@@ -1190,6 +1679,21 @@ mod tests {
     }
 
     #[test]
+    fn exposed_public_key_correlation_absorbs_constituents_in_summary() {
+        let key = public_key_finding();
+        let rls = rls_finding();
+        let correlation = correlate_findings(&[key.clone(), rls.clone()])
+            .into_iter()
+            .next()
+            .expect("correlation emitted");
+        let mut findings = vec![key, rls, correlation.clone()];
+
+        absorb_correlated_constituents(&mut findings);
+
+        assert_eq!(findings, vec![correlation]);
+    }
+
+    #[test]
     fn exit_code_respects_severity_gate() {
         let mut result = empty_result();
         result
@@ -1242,6 +1746,10 @@ mod tests {
 
     #[test]
     fn localstatic_dependency_boundary_excludes_network_crates() {
+        if cfg!(feature = "network") {
+            return;
+        }
+
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)

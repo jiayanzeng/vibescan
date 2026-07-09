@@ -62,15 +62,7 @@ pub fn collect_repository(
     target: impl AsRef<Path>,
     options: WalkOptions,
 ) -> Result<WalkOutput, GitWalkError> {
-    let (git_dir, worktree_dir) = gix_discover::upwards(target.as_ref())
-        .map_err(|source| GitWalkError::Discover {
-            target: target.as_ref().to_path_buf(),
-            source: Box::new(source),
-        })?
-        .0
-        .into_repository_and_work_tree_directories();
-    let repo_root =
-        worktree_dir.unwrap_or_else(|| git_dir.parent().unwrap_or(&git_dir).to_path_buf());
+    let (git_dir, repo_root) = discover_repository_dirs(target.as_ref())?;
 
     let mut collector = UnitCollector::new();
     let mut warnings = Vec::new();
@@ -105,6 +97,24 @@ pub fn collect_repository(
         warnings,
         history,
     })
+}
+
+/// Discover the repository root from a target path.
+pub fn discover_repository_root(target: impl AsRef<Path>) -> Result<PathBuf, GitWalkError> {
+    discover_repository_dirs(target.as_ref()).map(|(_, repo_root)| repo_root)
+}
+
+fn discover_repository_dirs(target: &Path) -> Result<(PathBuf, PathBuf), GitWalkError> {
+    let (git_dir, worktree_dir) = gix_discover::upwards(target)
+        .map_err(|source| GitWalkError::Discover {
+            target: target.to_path_buf(),
+            source: Box::new(source),
+        })?
+        .0
+        .into_repository_and_work_tree_directories();
+    let repo_root =
+        worktree_dir.unwrap_or_else(|| git_dir.parent().unwrap_or(&git_dir).to_path_buf());
+    Ok((git_dir, repo_root))
 }
 
 fn collect_working_tree(

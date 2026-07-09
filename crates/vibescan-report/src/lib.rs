@@ -94,7 +94,7 @@ pub fn render_tty(result: &ScanResult, style: TtyStyle) -> String {
             &mut output,
             &format!("  confidence: {}", confidence_name(finding.confidence)),
         );
-        if let Some(location) = finding.locations.first() {
+        for location in &finding.locations {
             push_line(
                 &mut output,
                 &format!("  location: {}", location_summary(location)),
@@ -190,7 +190,7 @@ pub fn render_html(result: &ScanResult) -> String {
             confidence_name(finding.confidence)
         ));
         html.push_str(&format!("<p>{}</p>", escape_html(&finding.detail)));
-        if let Some(location) = finding.locations.first() {
+        for location in &finding.locations {
             html.push_str(&format!(
                 "<p class=\"mono\">{}</p>",
                 escape_html(&location_summary(location))
@@ -212,12 +212,15 @@ pub fn render_html(result: &ScanResult) -> String {
 
 /// Compute process exit code from a severity gate.
 pub fn exit_code(result: &ScanResult, gate: Severity) -> i32 {
-    result
+    if result
         .findings
         .iter()
         .any(|finding| finding.severity >= gate)
-        .then_some(1)
-        .unwrap_or(0)
+    {
+        1
+    } else {
+        0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -391,13 +394,61 @@ fn location_summary(location: &Location) -> String {
         .span
         .map(|span| format!(":{}:{}-{}", span.line, span.col_start, span.col_end))
         .unwrap_or_default();
+    let history = history_range_summary(location)
+        .map(|summary| format!("; {summary}"))
+        .unwrap_or_default();
     format!(
-        "{}{} ({}, {})",
+        "{}{} ({}, {}{})",
         location.path.0,
         span,
         provenance_summary(&location.provenance),
-        format!("{:?}", location.location_class).to_ascii_lowercase()
+        format!("{:?}", location.location_class).to_ascii_lowercase(),
+        history
     )
+}
+
+fn history_range_summary(location: &Location) -> Option<String> {
+    let mut commits = std::iter::once(&location.provenance)
+        .chain(location.additional_provenance.iter())
+        .filter_map(commit_sort_key)
+        .collect::<Vec<_>>();
+    if commits.len() < 2 {
+        return None;
+    }
+
+    commits.sort_by(|left, right| {
+        left.timestamp
+            .cmp(&right.timestamp)
+            .then_with(|| left.sha.cmp(right.sha))
+    });
+    let first = commits.first()?;
+    let last = commits.last()?;
+    Some(format!(
+        "first seen commit {}; last seen commit {}",
+        short_sha(first.sha),
+        short_sha(last.sha)
+    ))
+}
+
+struct CommitSortKey<'a> {
+    sha: &'a str,
+    timestamp: i64,
+}
+
+fn commit_sort_key(provenance: &Provenance) -> Option<CommitSortKey<'_>> {
+    let Provenance::Commit { sha, date, .. } = provenance else {
+        return None;
+    };
+    let timestamp = date
+        .as_deref()
+        .and_then(|value| value.split_whitespace().next())
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or_default();
+    Some(CommitSortKey { sha, timestamp })
+}
+
+fn short_sha(sha: &str) -> &str {
+    sha.get(..12).unwrap_or(sha)
 }
 
 fn provenance_summary(provenance: &Provenance) -> String {
@@ -555,6 +606,32 @@ mod tests {
     }
 
     #[test]
+    fn tty_render_surfaces_all_locations_and_history_range() {
+        let mut result = sample_result();
+        result.findings[0].locations.push(Location {
+            path: RepoPath("src/other.ts".to_owned()),
+            span: None,
+            provenance: Provenance::Commit {
+                sha: "1111111111111111111111111111111111111111".to_owned(),
+                author: None,
+                date: Some("10 +0000".to_owned()),
+            },
+            additional_provenance: vec![Provenance::Commit {
+                sha: "2222222222222222222222222222222222222222".to_owned(),
+                author: None,
+                date: Some("20 +0000".to_owned()),
+            }],
+            location_class: LocationClass::ServerOnly,
+        });
+
+        let output = render_tty(&result, TtyStyle::Plain);
+
+        assert!(output.contains("src/app.tsx"));
+        assert!(output.contains("src/other.ts"));
+        assert!(output.contains("first seen commit 111111111111; last seen commit 222222222222"));
+    }
+
+    #[test]
     fn html_render_escapes_content() {
         let mut result = sample_result();
         result.findings[0].title = "<script>alert(1)</script>".to_owned();
@@ -604,9 +681,11 @@ mod tests {
             related: Vec::new(),
             confidence: Confidence::Likely,
         };
-        let mut stats = ScanStats::default();
-        stats.by_severity = BTreeMap::from([(Severity::Critical, 1)]);
-        stats.by_category = BTreeMap::from([(Category::SecretExposure, 1)]);
+        let stats = ScanStats {
+            by_severity: BTreeMap::from([(Severity::Critical, 1)]),
+            by_category: BTreeMap::from([(Category::SecretExposure, 1)]),
+            ..ScanStats::default()
+        };
 
         ScanResult {
             findings: vec![finding],

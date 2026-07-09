@@ -4,9 +4,10 @@ vibescan is a local-first Rust CLI for scanning Supabase + Next.js/TypeScript
 apps for secret exposure, Supabase key semantics, dependency-integrity issues,
 and offline correlations.
 
-The current implementation ships the free local tier only. It scans the working
+The current implementation defaults to the free local tier. It scans the working
 tree and local git object store, classifies Supabase keys, renders local reports,
-and keeps network probing disabled.
+and keeps network probing disabled unless the binary is built with the `network`
+feature and the user explicitly opts in.
 
 ## Safety Model
 
@@ -16,7 +17,10 @@ and keeps network probing disabled.
   high-risk files such as real `.env` files.
 - `.env.example`, `.env.sample`, dependency folders, caches, and server/vendor
   build output are skipped.
-- Network RLS probing is intentionally not wired in this tier.
+- Tier 0 RLS probing is read-only, feature-gated, and opt-in. It only talks to
+  Supabase project URLs discovered from keys in the scanned repository.
+- Generic secret rules use an attributed Gitleaks-compatible subset; Supabase
+  key semantics and correlation remain vibescan-specific.
 
 ## Workspace
 
@@ -91,6 +95,12 @@ Use a baseline file:
 cargo run -p vibescan-cli -- /path/to/repo --baseline baseline.json
 ```
 
+Build with Tier 0 network probing support and opt in to read-only RLS probes:
+
+```sh
+cargo run -p vibescan-cli --features network -- /path/to/repo --rls-tier0-read-probe
+```
+
 The process exit code is controlled by `--severity-gate`, which defaults to
 `high`.
 
@@ -111,6 +121,9 @@ paths = ["docs/**"]
 
 [baseline]
 path = "baseline.json"
+
+[network]
+tier0_read_probe = false
 ```
 
 Config ignore paths are fed through the same override layer as git ignores. They
@@ -121,5 +134,3 @@ cannot hide real `.env` files from the local scanner.
 - Keep `Cargo.lock` committed because this workspace builds a CLI binary.
 - Do not commit `target/`, local reports, temporary fixtures, or real secrets.
 - See `vibescan-architecture.md` for the architecture contract.
-- See `vibescan-hardening-instructions.md` for the hardening sequence and
-  verification ground rules.

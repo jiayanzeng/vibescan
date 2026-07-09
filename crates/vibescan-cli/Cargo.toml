@@ -11,6 +11,10 @@ description = "Command-line interface for vibescan."
 name = "vibescan"
 path = "src/main.rs"
 
+[features]
+default = []
+network = ["vibescan-core/network"]
+
 [dependencies]
 clap.workspace = true
 vibescan-core.workspace = true

@@ -7,9 +7,14 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Supabase domain intelligence for vibescan."
 
+[features]
+default = []
+network = ["dep:reqwest"]
+
 [dependencies]
 base64.workspace = true
 hex.workspace = true
+reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 serde_json.workspace = true
 sha2.workspace = true
 vibescan-types.workspace = true

@@ -10,7 +10,7 @@ use vibescan_types::Severity;
     name = "vibescan",
     version,
     about = "Scan local Supabase + Next.js apps for correlated secret and RLS risk.",
-    long_about = "vibescan runs the free local tier: working tree/history collection, secret detection, Supabase key classification, offline correlation, and local reporting. Network RLS probes are intentionally not wired in this tier yet."
+    long_about = "vibescan runs local-first scans by default: working tree/history collection, secret detection, Supabase key classification, offline correlation, and local reporting. Tier 0 RLS read probes are available only in builds compiled with the network feature and require an explicit opt-in flag."
 )]
 struct Cli {
     /// Target repository path.
@@ -52,6 +52,11 @@ struct Cli {
     /// Print ANSI colors in TTY output.
     #[arg(long)]
     color: bool,
+
+    /// Opt in to read-only Supabase Tier 0 RLS probing for discovered public keys.
+    #[cfg(feature = "network")]
+    #[arg(long)]
+    rls_tier0_read_probe: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -121,6 +126,10 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     }
     if let Some(baseline) = cli.baseline {
         config.baseline_path = Some(baseline);
+    }
+    #[cfg(feature = "network")]
+    {
+        config.tier0_read_probe = cli.rls_tier0_read_probe;
     }
     config.severity_gate = cli.severity_gate.into();
 

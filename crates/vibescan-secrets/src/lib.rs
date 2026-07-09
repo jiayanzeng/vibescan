@@ -162,6 +162,8 @@ impl CompiledRule {
                     path: &unit.path.0,
                     secret: secret.as_str(),
                     line,
+                    provenance: &unit.provenance,
+                    additional_provenance: &unit.additional_provenance,
                 };
                 if self
                     .allowlists
@@ -201,12 +203,15 @@ struct AllowlistContext<'a> {
     path: &'a str,
     secret: &'a str,
     line: &'a str,
+    provenance: &'a Provenance,
+    additional_provenance: &'a [Provenance],
 }
 
 #[derive(Debug)]
 struct CompiledAllowlist {
     paths: Vec<Regex>,
     regexes: Vec<Regex>,
+    commits: BTreeSet<String>,
     stopwords: BTreeSet<String>,
 }
 
@@ -217,10 +222,22 @@ impl CompiledAllowlist {
                 .regexes
                 .iter()
                 .any(|regex| regex.is_match(context.line))
+            || self.matches_commit(context.provenance)
+            || context
+                .additional_provenance
+                .iter()
+                .any(|provenance| self.matches_commit(provenance))
             || self
                 .stopwords
                 .iter()
                 .any(|stopword| context.secret.contains(stopword))
+    }
+
+    fn matches_commit(&self, provenance: &Provenance) -> bool {
+        let Provenance::Commit { sha, .. } = provenance else {
+            return false;
+        };
+        self.commits.contains(sha)
     }
 }
 
@@ -334,6 +351,8 @@ pub struct AllowlistConfig {
     #[serde(default)]
     pub regexes: Vec<String>,
     #[serde(default)]
+    pub commits: Vec<String>,
+    #[serde(default)]
     pub stopwords: Vec<String>,
 }
 
@@ -342,6 +361,7 @@ impl AllowlistConfig {
         Ok(CompiledAllowlist {
             paths: compile_regexes(self.paths)?,
             regexes: compile_regexes(self.regexes)?,
+            commits: self.commits.into_iter().collect(),
             stopwords: self.stopwords.into_iter().collect(),
         })
     }
@@ -556,6 +576,31 @@ mod tests {
         )
         .expect("ruleset compiles");
         let unit = working_tree_unit("src/app.ts", br#"token = "PLACEHOLDER_TOKEN""#.to_vec());
+
+        assert!(detector.detect_unit(&unit).is_empty());
+    }
+
+    #[test]
+    fn configured_allowlist_suppresses_commit_id() {
+        let detector = Detector::from_toml(
+            r#"
+            [[rules]]
+            id = "toy"
+            kind = "provider_secret"
+            regex = '''token = "([A-Za-z0-9_]{8,})"'''
+            keywords = ["token"]
+
+            [[rules.allowlists]]
+            commits = ["abc123"]
+            "#,
+        )
+        .expect("ruleset compiles");
+        let mut unit = working_tree_unit("src/app.ts", br#"token = "REAL_TOKEN_VALUE""#.to_vec());
+        unit.provenance = Provenance::Commit {
+            sha: "abc123".to_owned(),
+            author: None,
+            date: None,
+        };
 
         assert!(detector.detect_unit(&unit).is_empty());
     }
