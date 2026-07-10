@@ -9,10 +9,7 @@ Three dependency-ordered tasks that close the gaps the `astroscout` real-repo
 scan exposed after Tier A1 + Tier B3 landed. Each is self-contained: spec basis,
 root-caused problem with file evidence, file targets, implementation guidance,
 and self-verifiable acceptance criteria. As before, the authority is
-`vibescan-architecture.md`, **not** `STATE.md`. Two of these tasks cite
-*refined* section text — apply `vibescan-architecture-refinements.md` to the
-architecture doc first (that patch is the authority for §6.2, §7.1, §10.2, and
-the §12 rule‑1 note). If an implementation choice conflicts with a cited
+`vibescan-architecture.md`, **not** `STATE.md`. If an implementation choice conflicts with a cited
 section, the section wins; surface the conflict rather than diverge.
 
 Build order (respect it — C1 unblocks the correlation predicate C2/C3 rely on):
