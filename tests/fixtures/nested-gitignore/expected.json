@@ -1,7 +1,7 @@
 {
   "findings": [
     {
-      "stable_key": "secret-353d7cc11a8bd616287e4c49",
+      "stable_key": "secret-ba0966ed8572f28ca3d8a8b0",
       "rule_id": "generic-secret",
       "category": "secret_exposure",
       "severity": "high",

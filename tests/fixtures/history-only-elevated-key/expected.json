@@ -1,7 +1,7 @@
 {
   "findings": [
     {
-      "stable_key": "supabase-key-125e8aa97a0c031bd6076527",
+      "stable_key": "supabase-key-8d69e2e38e33be00378e2d0f",
       "rule_id": "supabase-key:secret_new",
       "category": "secret_exposure",
       "severity": "critical",

@@ -1,7 +1,7 @@
 {
   "findings": [
     {
-      "stable_key": "supabase-key-05c93e02f541139f49a6e529",
+      "stable_key": "supabase-key-38942064848800fd8268d46f",
       "rule_id": "supabase-key:publishable_new",
       "category": "key_classification",
       "severity": "info",
