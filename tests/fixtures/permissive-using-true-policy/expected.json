@@ -1,0 +1,4 @@
+{
+  "todo": "TODO(network): assert permissive USING (true) policy once policy introspection fixture support lands.",
+  "findings": []
+}

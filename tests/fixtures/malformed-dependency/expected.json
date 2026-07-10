@@ -1,0 +1,36 @@
+{
+  "findings": [
+    {
+      "stable_key": "dependency-a21f190b20a81c18859ec3bd",
+      "rule_id": "dependency:invalid_package_name",
+      "category": "dependency_integrity",
+      "severity": "high",
+      "locations": [
+        "package.json"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "dependency",
+        "package": "Bad Package",
+        "manifest_path": "package.json",
+        "reason": "invalid_package_name"
+      }
+    },
+    {
+      "stable_key": "dependency-dac915b7a5944885eb177ed9",
+      "rule_id": "dependency:empty_version_specifier",
+      "category": "dependency_integrity",
+      "severity": "high",
+      "locations": [
+        "package.json"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "dependency",
+        "package": "left-pad",
+        "manifest_path": "package.json",
+        "reason": "empty_version_specifier"
+      }
+    }
+  ]
+}

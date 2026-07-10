@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "stable_key": "supabase-key-125e8aa97a0c031bd6076527",
+      "rule_id": "supabase-key:secret_new",
+      "category": "secret_exposure",
+      "severity": "critical",
+      "locations": [
+        "src/history.ts"
+      ],
+      "provenance_kind": "commit",
+      "provenance_shas": [
+        "2a678d9277aaaf482145d1b8ae0ba30104894d3f"
+      ],
+      "evidence": {
+        "kind": "supabase_key",
+        "class": "secret_new",
+        "project_ref": null,
+        "project_url": null,
+        "fingerprint": "17afcc2c725ab14552f500d40004120e"
+      }
+    }
+  ]
+}

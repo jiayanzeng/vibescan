@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@supabase/supabase-js": "2.0.0",
+    "next": "15.0.0"
+  },
+  "devDependencies": {
+    "typescript": "5.8.0"
+  }
+}

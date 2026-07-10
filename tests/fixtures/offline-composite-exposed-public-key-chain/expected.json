@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "stable_key": "correlation-bbe52f3871cc49267639496b",
+      "rule_id": "exposed-public-key-chain",
+      "category": "correlation",
+      "severity": "critical",
+      "locations": [
+        "src/app/page.tsx"
+      ],
+      "provenance_kind": "working_tree",
+      "correlation_related": [
+        "golden-key",
+        "golden-rls"
+      ],
+      "evidence": {
+        "kind": "correlation",
+        "rule_id": "exposed-public-key-chain"
+      }
+    }
+  ]
+}

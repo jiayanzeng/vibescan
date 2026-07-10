@@ -1,14 +1,15 @@
 # vibescan State
 
 Reviewed: 2026-07-09
-Updated: 2026-07-09
+Updated: 2026-07-10
 
 ## Overall Status
 
-Task A1 is implemented: the LocalStatic/Network boundary is now asserted by a
-fixture-free, feature-aware CI check instead of the old local hardening helper.
-The release gates listed below pass in both default and `network` feature
-builds.
+Task B3 is implemented: the project now has an architecture-level golden
+fixture corpus with canonical manifests, deterministic normalization, and
+gated placeholders for Network-only §14 fixtures. Task A1 remains complete: the
+LocalStatic/Network boundary is asserted by a fixture-free, feature-aware CI
+check.
 
 Implemented and verified:
 
@@ -18,6 +19,15 @@ Implemented and verified:
   default/network tests, and the boundary gate.
 - Made `scripts/verify-hardening-checks.sh` skip the optional real-repo scan
   when no fixture is provided and removed personal path assumptions.
+- Added `tests/fixtures/` golden corpus coverage for clean-control,
+  history-only elevated key, publishable client key, vendor-chunks noise,
+  nested `.gitignore`, malformed dependency, and offline composite correlation.
+- Added `crates/vibescan-core/tests/golden_corpus.rs`, which normalizes each
+  finding to stable fields and supports `UPDATE_GOLDEN=1` manifest refresh.
+- Added deterministic report-format snapshots for JSON, SARIF, HTML, and TTY in
+  `crates/vibescan-report/tests/report_snapshots.rs`.
+- Added ignored Network fixture placeholders for exposed-public-key chain,
+  RLS-off table, permissive `USING (true)` policy, and hallucinated dependency.
 - Removed the stale `vibescan-hardening-instructions.md` reference from
   `README.md`.
 - Fixed strict clippy failures in `vibescan-report` and the same pattern in
@@ -55,15 +65,15 @@ Still intentionally not implemented:
 
 The worktree was already dirty before the original audit. Existing user-owned
 modified/deleted files were left in place and worked with rather than reverted.
-The current A1 changes are limited to docs, scripts, and CI workflow plumbing.
+The current B3 changes add the corpus and integration harness. A1's docs,
+scripts, and CI workflow plumbing remain in place from the previous step.
 
-Files currently changed for A1:
+Files currently changed for B3:
 
-- `.github/workflows/ci.yml`
-- `README.md`
 - `STATE.md`
-- `scripts/check-network-boundary.sh`
-- `scripts/verify-hardening-checks.sh`
+- `crates/vibescan-core/tests/golden_corpus.rs`
+- `crates/vibescan-report/tests/report_snapshots.rs`
+- `tests/fixtures/**`
 
 Temporary negative-control edits to `crates/vibescan-git/Cargo.toml`,
 `crates/vibescan-report/Cargo.toml`, and `Cargo.lock` were reverted.
@@ -79,11 +89,18 @@ Passed:
 - `cargo test --workspace --features network --locked`
 - `bash scripts/check-network-boundary.sh`
 - `bash scripts/verify-hardening-checks.sh`
+- `UPDATE_GOLDEN=1 cargo test -p vibescan-core --test golden_corpus`
+- `cargo test -p vibescan-core --test golden_corpus`
+- `UPDATE_GOLDEN=1 cargo test -p vibescan-report --test report_snapshots`
+- `cargo test -p vibescan-report --test report_snapshots`
+- `cargo test --workspace`
 
 The hardening script now exits successfully with a skipped notice when no
 real-repo fixture is supplied. The optional sanitized real-repo scan remains
 available when a fixture path or `VIBESCAN_REAL_REPO` is provided.
 `grep -rn '/Users/' scripts/` returned no matches.
+The expected-manifest stability grep for absolute paths, timestamps,
+`tool_version`, `duration`, and `started_at` returned no matches.
 
 Negative controls were also run and reverted:
 
@@ -92,6 +109,15 @@ Negative controls were also run and reverted:
 - Adding non-optional `reqwest` to `vibescan-report` made the network
   reachability check fail because transport became nearest-parented by
   `vibescan-report` as well as `vibescan-supabase`.
+- Temporarily mutating the publishable-key fixture changed the normalized
+  fingerprint/stable key and made the golden harness fail against
+  `expected.json`; the mutation was reverted and the harness passed again.
+
+History fixture mechanism: `history-only-elevated-key` ships a
+`history.bundle` generated from pinned author/committer identity, dates,
+messages, and file contents. The harness clones that bundle at test time, which
+keeps SHAs stable while keeping runtime scanning on the LocalStatic gitoxide
+path.
 
 ## Architecture Completion Matrix
 
@@ -199,11 +225,11 @@ These pending checks must be explicitly opt-in Network actions.
 
 Status: complete for v1.
 
-JSON, SARIF, TTY, and HTML renderers are present. Portable outputs use redacted
-evidence. TTY/HTML now show all locations for each finding and include
-first-seen/last-seen commit context when deduplicated historical provenance is
-available. Correlated public-key chains absorb their constituents in the final
-summary.
+JSON, SARIF, TTY, and HTML renderers are present and now covered by deterministic
+snapshot tests. Portable outputs use redacted evidence. TTY/HTML show all
+locations for each finding and include first-seen/last-seen commit context when
+deduplicated historical provenance is available. Correlated public-key chains
+absorb their constituents in the final summary.
 
 ### 11. CLI
 
@@ -212,12 +238,23 @@ Status: complete for v1.
 The CLI remains thin. Config loading now resolves the repository root before
 loading `vibescan.toml`, so subdirectory targets inherit root config.
 
+### 12. Golden Fixture Corpus
+
+Status: complete for B3.
+
+Committed fixtures now cover precision, history-only elevated-key
+classification, publishable-key Info severity, vendor-chunk false-positive
+suppression, nested `.gitignore` segment matching, malformed dependency
+structure, and the exposed-public-key/RLS composite via an offline engine-level
+golden. Network-dependent §14 fixture directories exist with TODO manifests and
+ignored harness cases, so default `cargo test --workspace` remains LocalStatic.
+
 ## Suggested Next Steps
 
 1. Add explicit Network-gated dependency-integrity lookups for registry
    existence and OSV/advisory data.
-2. Add a small fixture corpus directory for architecture-level golden tests
-   instead of relying only on in-test temporary repositories.
+2. Promote the ignored Network fixture placeholders to live tests when Tier 0
+   fixture/mocking support and registry lookup work land.
 3. Add a release/distribution track for npm wrapper packages and cross-compiled
    binaries.
 4. Consider documenting the historical-ignore approximation in user-facing

@@ -1,0 +1,4 @@
+{
+  "todo": "TODO(network): assert nonexistent dependency once registry-backed dependency checks exist.",
+  "findings": []
+}

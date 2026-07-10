@@ -1,0 +1,21 @@
+{
+  "findings": [
+    {
+      "stable_key": "supabase-key-05c93e02f541139f49a6e529",
+      "rule_id": "supabase-key:publishable_new",
+      "category": "key_classification",
+      "severity": "info",
+      "locations": [
+        "src/app/page.tsx"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "supabase_key",
+        "class": "publishable_new",
+        "project_ref": "abcdefghijklmnopqrst",
+        "project_url": "https://abcdefghijklmnopqrst.supabase.co",
+        "fingerprint": "c08ed0a02490113239074dc180fbf7ca"
+      }
+    }
+  ]
+}

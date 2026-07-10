@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "stable_key": "secret-1699e145a253fcab74c35cbf",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "high",
+      "locations": [
+        "src/server/secret.ts"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "b0be45891893215c5a18ee9d1150fa7e"
+      }
+    }
+  ]
+}

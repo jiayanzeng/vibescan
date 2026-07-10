@@ -1,0 +1,10 @@
+vibescan snapshot - 1 finding(s) in 42 ms
+target: fixtures/report-format-snapshots | scope: working tree only | network: disabled
+
+[high] Secret candidate matched stripe-secret-key [secret_exposure]
+  id: snapshot-secret
+  confidence: likely
+  location: src/server/billing.ts:3:17-57 (working tree, serveronly)
+  evidence: secret sk_liv...1234 fingerprint snapshot-fingerprint
+  remediation: Remove the secret from source and rotate it.
+

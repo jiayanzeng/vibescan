@@ -1,0 +1,57 @@
+{
+  "findings": [
+    {
+      "id": "snapshot-secret",
+      "category": "secret_exposure",
+      "severity": "high",
+      "title": "Secret candidate matched stripe-secret-key",
+      "detail": "The generic detector found a credential-shaped value.",
+      "locations": [
+        {
+          "path": "src/server/billing.ts",
+          "span": {
+            "line": 3,
+            "col_start": 17,
+            "col_end": 57
+          },
+          "provenance": {
+            "kind": "working_tree"
+          },
+          "additional_provenance": [],
+          "location_class": "server_only"
+        }
+      ],
+      "evidence": {
+        "kind": "secret",
+        "redacted": "sk_liv...1234",
+        "fingerprint": "snapshot-fingerprint"
+      },
+      "remediation": "Remove the secret from source and rotate it.",
+      "related": [],
+      "confidence": "likely"
+    }
+  ],
+  "scope": {
+    "target": "fixtures/report-format-snapshots",
+    "working_tree": true,
+    "history": {
+      "mode": "working_tree_only"
+    },
+    "network": {
+      "enabled": false,
+      "tier0_read_probe": false,
+      "tier1_introspection": false
+    },
+    "warnings": []
+  },
+  "tool_version": "snapshot",
+  "started_at": "2026-01-01T00:00:00Z",
+  "duration_ms": 42,
+  "stats": {
+    "by_severity": {},
+    "by_category": {},
+    "skipped_large_files": 0,
+    "skipped_binary_files": 0,
+    "scan_budget_hit": false
+  }
+}

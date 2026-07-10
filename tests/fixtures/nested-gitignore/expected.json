@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "stable_key": "secret-353d7cc11a8bd616287e4c49",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "high",
+      "locations": [
+        "packages/nested/ignored-but-scanned/secret.ts"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "d242499e7d98ddca031df8fc89907b8d"
+      }
+    }
+  ]
+}
