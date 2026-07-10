@@ -1,4 +1,4 @@
 {
-  "todo": "TODO(network): assert RLS disabled table once Tier 0 or introspection fixture support lands.",
+  "todo": "TODO(network): RLS-off requires policy/introspection fixture support beyond Tier 0 read probing.",
   "findings": []
 }

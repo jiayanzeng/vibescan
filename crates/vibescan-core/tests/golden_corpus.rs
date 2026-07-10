@@ -1,3 +1,5 @@
+#[cfg(feature = "network")]
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -8,6 +10,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, correlate_findings, scan};
+#[cfg(feature = "network")]
+use vibescan_supabase::{
+    RlsHttpClient, RlsHttpResponse, Tier0RlsProbeInput, Tier0RlsProbeWarning,
+    probe_tier0_read_with_client,
+};
 use vibescan_types::{
     Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, Location, LocationClass,
     Provenance, RepoPath, RlsExposure, ScanResult, SecretFingerprint, Severity, Span,
@@ -181,19 +188,75 @@ fn offline_composite_exposed_public_key_chain_golden() {
 }
 
 #[test]
-#[ignore = "TODO(network): enable when Tier 0 probe fixtures run without live services"]
+#[cfg(feature = "network")]
+fn network_exposed_public_key_chain_fixture_is_gated() {
+    let key = synthetic_public_key_finding();
+    let client = MockPostgrest::new([
+        (
+            "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+            RlsHttpResponse {
+                status: 403,
+                body: r#"{"message":"root forbidden"}"#.to_owned(),
+            },
+        ),
+        (
+            "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+            RlsHttpResponse {
+                status: 200,
+                body: r#"[{"id":1,"email":"not stored"}]"#.to_owned(),
+            },
+        ),
+    ]);
+    let output = probe_tier0_read_with_client(
+        &client,
+        &Tier0RlsProbeInput {
+            project: synthetic_project(),
+            public_key: "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789".to_owned(),
+            key_location: key.locations[0].clone(),
+            candidate_tables: BTreeSet::from(["profiles".to_owned()]),
+        },
+    )
+    .expect("mocked probe succeeds");
+    assert!(matches!(
+        output.warnings.as_slice(),
+        [Tier0RlsProbeWarning::RootEnumerationForbidden { .. }]
+    ));
+    assert_eq!(output.findings.len(), 1);
+
+    let rls = output.findings[0].clone();
+    let correlation = correlate_findings(&[key.clone(), rls.clone()])
+        .into_iter()
+        .next()
+        .expect("correlation emitted");
+    assert_eq!(correlation.severity, Severity::Critical);
+
+    let mut findings = vec![key, rls, correlation];
+    absorb_exposed_public_key_constituents_for_test(&mut findings);
+    let manifest = GoldenManifest {
+        todo: None,
+        findings: canonicalize_findings(&findings, false),
+    };
+    assert_or_update_manifest(
+        fixture_dir("exposed-public-key-chain").join("expected.json"),
+        &manifest,
+    );
+}
+
+#[test]
+#[cfg(not(feature = "network"))]
+#[ignore = "TODO(network): run with --features network to exercise the mocked Tier 0 exposed-chain fixture"]
 fn network_exposed_public_key_chain_fixture_is_gated() {
     ignored_network_fixture("exposed-public-key-chain");
 }
 
 #[test]
-#[ignore = "TODO(network): enable when Tier 0 probe fixtures run without live services"]
+#[ignore = "TODO(network): RLS-off requires policy/introspection fixture support beyond Tier 0 read probing"]
 fn network_rls_off_table_fixture() {
     ignored_network_fixture("rls-off-table");
 }
 
 #[test]
-#[ignore = "TODO(network): enable when Tier 0 policy introspection fixtures land"]
+#[ignore = "TODO(network): permissive policy assertions require policy introspection fixture support"]
 fn network_permissive_using_true_policy_fixture() {
     ignored_network_fixture("permissive-using-true-policy");
 }
@@ -633,4 +696,44 @@ fn absorb_exposed_public_key_constituents_for_test(findings: &mut Vec<Finding>) 
     findings.retain(|finding| {
         finding.category == Category::Correlation || !absorbed.contains(&finding.id)
     });
+}
+
+#[cfg(feature = "network")]
+struct MockPostgrest {
+    responses: BTreeMap<String, RlsHttpResponse>,
+}
+
+#[cfg(feature = "network")]
+impl MockPostgrest {
+    fn new<const N: usize>(responses: [(&str, RlsHttpResponse); N]) -> Self {
+        Self {
+            responses: responses
+                .into_iter()
+                .map(|(url, response)| (url.to_owned(), response))
+                .collect(),
+        }
+    }
+}
+
+#[cfg(feature = "network")]
+impl RlsHttpClient for MockPostgrest {
+    fn get(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<RlsHttpResponse, vibescan_supabase::RlsProbeError> {
+        assert!(
+            headers.iter().any(|(name, value)| {
+                name == "apikey" && value == "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+            }),
+            "mock request to {url} must include the public key in apikey"
+        );
+        self.responses
+            .get(url)
+            .cloned()
+            .ok_or_else(|| vibescan_supabase::RlsProbeError::Http {
+                url: url.to_owned(),
+                source: "missing mock response".to_owned(),
+            })
+    }
 }

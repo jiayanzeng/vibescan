@@ -1,4 +1,22 @@
 {
-  "todo": "TODO(network): replace with live fixture assertions when Tier 0 probe fixtures run without live services.",
-  "findings": []
+  "findings": [
+    {
+      "stable_key": "correlation-b3eb1b6610293da77238e74e",
+      "rule_id": "exposed-public-key-chain",
+      "category": "correlation",
+      "severity": "critical",
+      "locations": [
+        "src/app/page.tsx"
+      ],
+      "provenance_kind": "working_tree",
+      "correlation_related": [
+        "golden-key",
+        "rls-56c4dbdc68913b114d8e3735"
+      ],
+      "evidence": {
+        "kind": "correlation",
+        "rule_id": "exposed-public-key-chain"
+      }
+    }
+  ]
 }

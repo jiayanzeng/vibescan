@@ -4,6 +4,7 @@
 //! candidates and emits linkable findings. The Tier 0 read probe is compiled
 //! only with the `network` feature and must be explicitly enabled by callers.
 
+use std::collections::BTreeSet;
 use std::fmt;
 #[cfg(feature = "network")]
 use std::time::Duration;
@@ -76,6 +77,44 @@ pub struct Tier0RlsProbeInput {
     pub project: SupabaseProject,
     pub public_key: String,
     pub key_location: Location,
+    pub candidate_tables: BTreeSet<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Tier0RlsProbeOutput {
+    pub findings: Vec<Finding>,
+    pub warnings: Vec<Tier0RlsProbeWarning>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Tier0RlsProbeWarning {
+    KeyRejected { url: String },
+    RootEnumerationForbidden { url: String },
+    NoCandidateTables { project_url: String },
+    Transport { url: String, message: String },
+}
+
+impl Tier0RlsProbeWarning {
+    pub fn message(&self) -> String {
+        match self {
+            Self::KeyRejected { url } => {
+                format!("Tier 0 RLS read probe key rejected with HTTP 401 at {url}")
+            }
+            Self::RootEnumerationForbidden { url } => {
+                format!(
+                    "Tier 0 RLS read probe root enumeration unavailable with public key at {url}; continuing with LocalStatic candidates"
+                )
+            }
+            Self::NoCandidateTables { project_url } => {
+                format!(
+                    "Tier 0 RLS read probe found no candidate tables for {project_url}; nothing to probe"
+                )
+            }
+            Self::Transport { url, message } => {
+                format!("Tier 0 RLS read probe transport/other error at {url}: {message}")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -127,41 +166,102 @@ impl std::error::Error for RlsProbeError {}
 
 /// Run the Tier 0 read probe using a supplied HTTP client.
 ///
-/// This function never writes to the target project. It enumerates PostgREST
-/// OpenAPI paths, performs read-only `select=*&limit=1` requests, and emits
-/// findings only for tables that return rows to the public key.
+/// This function never writes to the target project. It treats PostgREST root
+/// enumeration as a best-effort supplement to LocalStatic candidates, performs
+/// read-only `select=*&limit=1` requests, and emits findings only for tables
+/// that return rows to the public key.
 pub fn probe_tier0_read_with_client(
     client: &impl RlsHttpClient,
     input: &Tier0RlsProbeInput,
-) -> Result<Vec<Finding>, RlsProbeError> {
+) -> Result<Tier0RlsProbeOutput, RlsProbeError> {
     let base_url = normalized_supabase_url(&input.project.url)?;
-    let headers = public_key_headers(&input.public_key, "application/openapi+json");
+    let mut output = Tier0RlsProbeOutput::default();
+    let mut tables = input.candidate_tables.clone();
     let openapi_url = format!("{base_url}/rest/v1/");
-    let openapi = client.get(&openapi_url, &headers)?;
-    if openapi.status != 200 {
-        return Err(RlsProbeError::OpenApi {
-            url: openapi_url,
-            status: openapi.status,
-        });
+
+    let headers = public_key_headers(&input.public_key, "application/openapi+json");
+    match client.get(&openapi_url, &headers) {
+        Ok(openapi) => match openapi.status {
+            200 => match tables_from_openapi(&openapi.body) {
+                Ok(openapi_tables) => tables.extend(openapi_tables),
+                Err(error) => output.warnings.push(Tier0RlsProbeWarning::Transport {
+                    url: openapi_url.clone(),
+                    message: error.to_string(),
+                }),
+            },
+            401 => output.warnings.push(Tier0RlsProbeWarning::KeyRejected {
+                url: openapi_url.clone(),
+            }),
+            403 => output
+                .warnings
+                .push(Tier0RlsProbeWarning::RootEnumerationForbidden {
+                    url: openapi_url.clone(),
+                }),
+            _ => output.warnings.push(Tier0RlsProbeWarning::Transport {
+                url: openapi_url.clone(),
+                message: format!("OpenAPI root returned HTTP {}", openapi.status),
+            }),
+        },
+        Err(error) => output.warnings.push(Tier0RlsProbeWarning::Transport {
+            url: openapi_url.clone(),
+            message: error.to_string(),
+        }),
     }
 
-    let tables = tables_from_openapi(&openapi.body)?;
-    let mut findings = Vec::new();
+    if tables.is_empty() {
+        output
+            .warnings
+            .push(Tier0RlsProbeWarning::NoCandidateTables {
+                project_url: base_url,
+            });
+        dedup_probe_warnings(&mut output.warnings);
+        return Ok(output);
+    }
+
     for table in tables {
         let endpoint = format!("{base_url}/rest/v1/{table}?select=*&limit=1");
         let headers = public_key_headers(&input.public_key, "application/json");
-        let response = client.get(&endpoint, &headers)?;
-        if response.status == 401 || response.status == 403 {
-            continue;
-        }
-        if response.status != 200 {
-            continue;
+        let response = match client.get(&endpoint, &headers) {
+            Ok(response) => response,
+            Err(error) => {
+                output.warnings.push(Tier0RlsProbeWarning::Transport {
+                    url: endpoint,
+                    message: error.to_string(),
+                });
+                continue;
+            }
+        };
+        match response.status {
+            200 => {}
+            401 => {
+                output
+                    .warnings
+                    .push(Tier0RlsProbeWarning::KeyRejected { url: endpoint });
+                continue;
+            }
+            403 | 404 => continue,
+            _ => {
+                output.warnings.push(Tier0RlsProbeWarning::Transport {
+                    url: endpoint,
+                    message: format!("table probe returned HTTP {}", response.status),
+                });
+                continue;
+            }
         }
 
-        let body = serde_json::from_str::<Value>(&response.body).map_err(RlsProbeError::Json)?;
+        let body = match serde_json::from_str::<Value>(&response.body) {
+            Ok(body) => body,
+            Err(error) => {
+                output.warnings.push(Tier0RlsProbeWarning::Transport {
+                    url: endpoint,
+                    message: format!("table probe JSON parse failed: {error}"),
+                });
+                continue;
+            }
+        };
         let observed_row_count = body.as_array().map_or(0, Vec::len) as u64;
         if observed_row_count > 0 {
-            findings.push(rls_exposed_finding(
+            output.findings.push(rls_exposed_finding(
                 &input.project,
                 &input.key_location,
                 &table,
@@ -171,7 +271,8 @@ pub fn probe_tier0_read_with_client(
         }
     }
 
-    Ok(findings)
+    dedup_probe_warnings(&mut output.warnings);
+    Ok(output)
 }
 
 #[cfg(feature = "network")]
@@ -220,7 +321,7 @@ impl RlsHttpClient for ReqwestRlsHttpClient {
 }
 
 #[cfg(feature = "network")]
-pub fn probe_tier0_read(input: &Tier0RlsProbeInput) -> Result<Vec<Finding>, RlsProbeError> {
+pub fn probe_tier0_read(input: &Tier0RlsProbeInput) -> Result<Tier0RlsProbeOutput, RlsProbeError> {
     let client = ReqwestRlsHttpClient::new()?;
     probe_tier0_read_with_client(&client, input)
 }
@@ -520,6 +621,24 @@ fn tables_from_openapi(body: &str) -> Result<Vec<String>, RlsProbeError> {
     Ok(tables)
 }
 
+fn dedup_probe_warnings(warnings: &mut Vec<Tier0RlsProbeWarning>) {
+    let mut seen = BTreeSet::new();
+    warnings.retain(|warning| seen.insert(probe_warning_cause_key(warning)));
+}
+
+fn probe_warning_cause_key(warning: &Tier0RlsProbeWarning) -> String {
+    match warning {
+        Tier0RlsProbeWarning::KeyRejected { .. } => "key-rejected".to_owned(),
+        Tier0RlsProbeWarning::RootEnumerationForbidden { .. } => {
+            "root-enumeration-forbidden".to_owned()
+        }
+        Tier0RlsProbeWarning::NoCandidateTables { project_url } => {
+            format!("no-candidate-tables:{project_url}")
+        }
+        Tier0RlsProbeWarning::Transport { message, .. } => format!("transport:{message}"),
+    }
+}
+
 fn rls_exposed_finding(
     project: &SupabaseProject,
     key_location: &Location,
@@ -556,6 +675,7 @@ fn rls_exposed_finding(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::BTreeMap;
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -777,10 +897,12 @@ mod tests {
         ]);
         let input = tier0_input();
 
-        let findings = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
 
-        assert_eq!(findings.len(), 1);
-        let finding = &findings[0];
+        client.assert_all_requests_include_apikey(&input.public_key);
+        assert_eq!(output.warnings, Vec::new());
+        assert_eq!(output.findings.len(), 1);
+        let finding = &output.findings[0];
         assert_eq!(finding.category, Category::Rls);
         assert_eq!(finding.severity, Severity::Critical);
         let Evidence::RlsProbe {
@@ -807,34 +929,134 @@ mod tests {
     #[test]
     fn tier0_read_probe_omits_protected_or_empty_tables() {
         let client = FakeRlsClient::new([
-            (
-                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
-                RlsHttpResponse {
-                    status: 200,
-                    body: r#"{"paths":{"/private_table":{"get":{}},"/empty_table":{"get":{}}}}"#
-                        .to_owned(),
-                },
-            ),
+	            (
+	                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+	                RlsHttpResponse {
+	                    status: 200,
+	                    body: r#"{"paths":{"/private_table":{"get":{}},"/empty_table":{"get":{}},"/missing_table":{"get":{}}}}"#
+	                        .to_owned(),
+	                },
+	            ),
             (
                 "https://abcdefghijklmnopqrst.supabase.co/rest/v1/empty_table?select=*&limit=1",
                 RlsHttpResponse {
                     status: 200,
                     body: "[]".to_owned(),
-                },
-            ),
-            (
-                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_table?select=*&limit=1",
-                RlsHttpResponse {
+	                },
+	            ),
+	            (
+	                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/missing_table?select=*&limit=1",
+	                RlsHttpResponse {
+	                    status: 404,
+	                    body: r#"{"message":"not found"}"#.to_owned(),
+	                },
+	            ),
+	            (
+	                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_table?select=*&limit=1",
+	                RlsHttpResponse {
                     status: 403,
                     body: r#"{"message":"forbidden"}"#.to_owned(),
                 },
             ),
         ]);
 
-        let findings =
-            probe_tier0_read_with_client(&client, &tier0_input()).expect("probe succeeds");
+        let output = probe_tier0_read_with_client(&client, &tier0_input()).expect("probe succeeds");
 
-        assert!(findings.is_empty());
+        client.assert_all_requests_include_apikey(&tier0_input().public_key);
+        assert!(output.findings.is_empty());
+        assert_eq!(output.warnings, Vec::new());
+    }
+
+    #[test]
+    fn tier0_read_probe_continues_after_root_forbidden_with_harvested_tables() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 403,
+                    body: r#"{"message":"forbidden"}"#.to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 200,
+                    body: r#"[{"id":1}]"#.to_owned(),
+                },
+            ),
+        ]);
+        let input = tier0_input_with_tables(["profiles"]);
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        client.assert_all_requests_include_apikey(&input.public_key);
+        assert_eq!(output.findings.len(), 1);
+        assert!(matches!(
+            output.warnings.as_slice(),
+            [Tier0RlsProbeWarning::RootEnumerationForbidden { .. }]
+        ));
+        assert!(
+            output.warnings[0]
+                .message()
+                .contains("root enumeration unavailable with public key")
+        );
+    }
+
+    #[test]
+    fn tier0_read_probe_warns_once_when_public_key_is_rejected() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 401,
+                    body: r#"{"message":"invalid api key"}"#.to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 401,
+                    body: r#"{"message":"invalid api key"}"#.to_owned(),
+                },
+            ),
+        ]);
+        let input = tier0_input_with_tables(["profiles"]);
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        client.assert_all_requests_include_apikey(&input.public_key);
+        assert!(output.findings.is_empty());
+        assert!(matches!(
+            output.warnings.as_slice(),
+            [Tier0RlsProbeWarning::KeyRejected { .. }]
+        ));
+    }
+
+    #[test]
+    fn tier0_read_probe_warns_when_there_are_no_candidate_tables() {
+        let client = FakeRlsClient::new([(
+            "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+            RlsHttpResponse {
+                status: 403,
+                body: r#"{"message":"forbidden"}"#.to_owned(),
+            },
+        )]);
+        let input = tier0_input();
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        assert!(output.findings.is_empty());
+        assert_eq!(output.warnings.len(), 2);
+        assert!(output.warnings.iter().any(|warning| matches!(
+            warning,
+            Tier0RlsProbeWarning::RootEnumerationForbidden { .. }
+        )));
+        assert!(
+            output
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, Tier0RlsProbeWarning::NoCandidateTables { .. }))
+        );
     }
 
     #[test]
@@ -857,6 +1079,10 @@ mod tests {
     }
 
     fn tier0_input() -> Tier0RlsProbeInput {
+        tier0_input_with_tables([])
+    }
+
+    fn tier0_input_with_tables<const N: usize>(tables: [&str; N]) -> Tier0RlsProbeInput {
         Tier0RlsProbeInput {
             project: SupabaseProject {
                 ref_id: Some("abcdefghijklmnopqrst".to_owned()),
@@ -870,12 +1096,20 @@ mod tests {
                 additional_provenance: Vec::new(),
                 location_class: LocationClass::ClientReachable,
             },
+            candidate_tables: tables.into_iter().map(str::to_owned).collect(),
         }
     }
 
     #[derive(Default)]
     struct FakeRlsClient {
         responses: BTreeMap<String, RlsHttpResponse>,
+        requests: RefCell<Vec<FakeRlsRequest>>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct FakeRlsRequest {
+        url: String,
+        headers: Vec<(String, String)>,
     }
 
     impl FakeRlsClient {
@@ -885,6 +1119,23 @@ mod tests {
                     .into_iter()
                     .map(|(url, response)| (url.to_owned(), response))
                     .collect(),
+                requests: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn assert_all_requests_include_apikey(&self, public_key: &str) {
+            let requests = self.requests.borrow();
+            assert!(!requests.is_empty(), "probe should issue requests");
+            for request in requests.iter() {
+                assert!(
+                    request
+                        .headers
+                        .iter()
+                        .any(|(name, value)| name == "apikey" && value == public_key),
+                    "{} did not include matching apikey header: {:?}",
+                    request.url,
+                    request.headers
+                );
             }
         }
     }
@@ -893,8 +1144,12 @@ mod tests {
         fn get(
             &self,
             url: &str,
-            _headers: &[(String, String)],
+            headers: &[(String, String)],
         ) -> Result<RlsHttpResponse, RlsProbeError> {
+            self.requests.borrow_mut().push(FakeRlsRequest {
+                url: url.to_owned(),
+                headers: headers.to_vec(),
+            });
             self.responses
                 .get(url)
                 .cloned()

@@ -24,8 +24,8 @@ use vibescan_supabase::Tier0RlsProbeInput;
 use vibescan_supabase::probe_tier0_read;
 use vibescan_types::{
     Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope, Location,
-    LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats, ScopeWarning,
-    SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass,
+    LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats, ScannableUnit,
+    ScopeWarning, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass,
 };
 
 /// Current crate version used in scan results.
@@ -222,12 +222,20 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     if config.tier0_read_probe {
         #[cfg(feature = "network")]
         {
-            for input in tier0_probe_inputs(&supabase_classifications) {
+            let table_candidates = harvest_table_names(&units);
+            for input in tier0_probe_inputs(&supabase_classifications, &table_candidates) {
                 match probe_tier0_read(&input) {
-                    Ok(mut rls_findings) => findings.append(&mut rls_findings),
+                    Ok(mut output) => {
+                        findings.append(&mut output.findings);
+                        warnings.extend(output.warnings.into_iter().map(|warning| {
+                            ScopeWarning::Other {
+                                message: warning.message(),
+                            }
+                        }));
+                    }
                     Err(error) => warnings.push(ScopeWarning::Other {
                         message: format!(
-                            "Tier 0 RLS read probe failed for {}: {error}",
+                            "Tier 0 RLS read probe transport/other error for {}: {error}",
                             input.project.url
                         ),
                     }),
@@ -485,7 +493,10 @@ fn resolve_generic_candidates(candidates: &[SecretCandidate]) -> Vec<Finding> {
 }
 
 #[cfg(feature = "network")]
-fn tier0_probe_inputs(classifications: &[(&SecretCandidate, Finding)]) -> Vec<Tier0RlsProbeInput> {
+fn tier0_probe_inputs(
+    classifications: &[(&SecretCandidate, Finding)],
+    candidate_tables: &BTreeSet<String>,
+) -> Vec<Tier0RlsProbeInput> {
     let mut by_project = BTreeMap::<String, Tier0RlsProbeInput>::new();
     for (candidate, finding) in classifications {
         let Some(input) = (|| {
@@ -503,6 +514,7 @@ fn tier0_probe_inputs(classifications: &[(&SecretCandidate, Finding)]) -> Vec<Ti
                 project: project.clone(),
                 public_key,
                 key_location,
+                candidate_tables: candidate_tables.clone(),
             })
         })() else {
             continue;
@@ -520,6 +532,78 @@ fn tier0_probe_inputs(classifications: &[(&SecretCandidate, Finding)]) -> Vec<Ti
         }
     }
     by_project.into_values().collect()
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn harvest_table_names(units: &[ScannableUnit]) -> BTreeSet<String> {
+    let mut tables = BTreeSet::new();
+    for unit in units {
+        let Ok(content) = std::str::from_utf8(&unit.content) else {
+            continue;
+        };
+        harvest_quoted_method_names(content, ".from", &mut tables);
+        harvest_quoted_method_names(content, ".rpc", &mut tables);
+        harvest_rest_paths(content, &mut tables);
+    }
+    tables
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn harvest_quoted_method_names(content: &str, method: &str, tables: &mut BTreeSet<String>) {
+    let mut rest = content;
+    while let Some(index) = rest.find(method) {
+        rest = &rest[index + method.len()..];
+        let trimmed = rest.trim_start();
+        let Some(after_paren) = trimmed.strip_prefix('(') else {
+            continue;
+        };
+        let after_space = after_paren.trim_start();
+        let Some(quote) = after_space
+            .chars()
+            .next()
+            .filter(|quote| *quote == '\'' || *quote == '"')
+        else {
+            continue;
+        };
+        let after_quote = &after_space[quote.len_utf8()..];
+        let Some(end) = after_quote.find(quote) else {
+            continue;
+        };
+        insert_table_name(&after_quote[..end], tables);
+        rest = &after_quote[end + quote.len_utf8()..];
+    }
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn harvest_rest_paths(content: &str, tables: &mut BTreeSet<String>) {
+    let mut rest = content;
+    const MARKER: &str = "/rest/v1/";
+    while let Some(index) = rest.find(MARKER) {
+        let after_marker = &rest[index + MARKER.len()..];
+        let end = after_marker
+            .find(|ch: char| {
+                ch.is_whitespace()
+                    || matches!(
+                        ch,
+                        '/' | '?' | '#' | '"' | '\'' | '`' | ')' | ']' | '}' | '&'
+                    )
+            })
+            .unwrap_or(after_marker.len());
+        insert_table_name(&after_marker[..end], tables);
+        rest = &after_marker[end..];
+    }
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn insert_table_name(name: &str, tables: &mut BTreeSet<String>) {
+    let name = name.trim();
+    if !name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        tables.insert(name.to_owned());
+    }
 }
 
 #[cfg(feature = "network")]
@@ -1620,8 +1704,9 @@ mod tests {
             (&server_candidate, server_finding),
             (&client_candidate, client_finding),
         ];
+        let candidate_tables = BTreeSet::from(["profiles".to_owned()]);
 
-        let inputs = tier0_probe_inputs(&classifications);
+        let inputs = tier0_probe_inputs(&classifications, &candidate_tables);
 
         assert_eq!(inputs.len(), 1);
         assert_eq!(
@@ -1631,6 +1716,34 @@ mod tests {
         assert_eq!(
             inputs[0].key_location.location_class,
             LocationClass::ClientReachable
+        );
+        assert_eq!(inputs[0].candidate_tables, candidate_tables);
+    }
+
+    #[test]
+    fn harvest_table_names_extracts_localstatic_candidates() {
+        let units = vec![ScannableUnit {
+            content: br#"
+                const profiles = supabase.from('profiles').select('*');
+                await client.from("orders").select("id");
+                await supabase.rpc('do_x');
+                fetch("/rest/v1/widgets?select=*");
+            "#
+            .to_vec(),
+            path: RepoPath("apps/web/.next/static/chunks/x.js".to_owned()),
+            provenance: Provenance::WorkingTree,
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::ClientReachable,
+        }];
+
+        assert_eq!(
+            harvest_table_names(&units),
+            BTreeSet::from([
+                "do_x".to_owned(),
+                "orders".to_owned(),
+                "profiles".to_owned(),
+                "widgets".to_owned(),
+            ])
         );
     }
 
