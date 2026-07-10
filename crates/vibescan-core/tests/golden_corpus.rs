@@ -34,6 +34,10 @@ const LIVE_FIXTURES: &[GoldenFixture] = &[
         history: false,
     },
     GoldenFixture {
+        name: "monorepo-layout",
+        history: false,
+    },
+    GoldenFixture {
         name: "nested-gitignore",
         history: false,
     },
@@ -47,6 +51,12 @@ const LIVE_FIXTURES: &[GoldenFixture] = &[
 struct GoldenFixture {
     name: &'static str,
     history: bool,
+}
+
+impl GoldenFixture {
+    fn include_location_classes(self) -> bool {
+        self.name == "monorepo-layout"
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -63,6 +73,8 @@ struct CanonicalFinding {
     category: String,
     severity: String,
     locations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    location_classes: Vec<String>,
     provenance_kind: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     provenance_shas: Vec<String>,
@@ -114,7 +126,7 @@ fn golden_corpus_matches_expected_manifests() {
             },
         )
         .unwrap_or_else(|error| panic!("{} scan failed: {error}", fixture.name));
-        let actual = manifest_from_result(&result);
+        let actual = manifest_from_result(&result, fixture.include_location_classes());
         assert_or_update_manifest(fixture_dir(fixture.name).join("expected.json"), &actual);
     }
 }
@@ -135,8 +147,8 @@ fn golden_corpus_is_deterministic_across_runs() {
             .unwrap_or_else(|error| panic!("{} second scan failed: {error}", fixture.name));
 
         assert_eq!(
-            manifest_from_result(&first),
-            manifest_from_result(&second),
+            manifest_from_result(&first, fixture.include_location_classes()),
+            manifest_from_result(&second, fixture.include_location_classes()),
             "{} canonical findings changed between runs",
             fixture.name
         );
@@ -160,7 +172,7 @@ fn offline_composite_exposed_public_key_chain_golden() {
 
     let manifest = GoldenManifest {
         todo: None,
-        findings: canonicalize_findings(&findings),
+        findings: canonicalize_findings(&findings, false),
     };
     assert_or_update_manifest(
         fixture_dir("offline-composite-exposed-public-key-chain").join("expected.json"),
@@ -192,6 +204,50 @@ fn network_hallucinated_dependency_fixture() {
     ignored_network_fixture("hallucinated-dependency");
 }
 
+#[test]
+fn monorepo_bundle_key_can_drive_exposed_public_key_chain() {
+    let fixture = GoldenFixture {
+        name: "monorepo-layout",
+        history: false,
+    };
+    let repo = materialize_fixture(&fixture);
+    let result = scan(
+        &repo,
+        ScanConfig {
+            include_history: false,
+            severity_gate: Severity::Info,
+            ..ScanConfig::default()
+        },
+    )
+    .expect("monorepo fixture scans");
+    let key = result
+        .findings
+        .iter()
+        .find(|finding| matches!(finding.evidence, Evidence::SupabaseKey { .. }))
+        .cloned()
+        .expect("fixture emits Supabase key finding");
+
+    assert!(key.locations.iter().any(|location| {
+        location.path.0 == "apps/web/.next/static/chunks/x.js"
+            && location.location_class == LocationClass::ClientReachable
+    }));
+
+    let rls = synthetic_rls_finding();
+    let correlations = correlate_findings(&[key, rls]);
+    let correlation = correlations
+        .iter()
+        .find(|finding| {
+            finding.category == Category::Correlation && finding.severity == Severity::Critical
+        })
+        .expect("exposed public key chain fires");
+
+    assert!(matches!(
+        correlation.evidence,
+        Evidence::Correlation { ref rule_id, .. }
+            if rule_id == &CorrelationRuleId("exposed-public-key-chain".to_owned())
+    ));
+}
+
 fn ignored_network_fixture(name: &str) {
     let manifest = fixture_dir(name).join("expected.json");
     assert!(
@@ -200,17 +256,20 @@ fn ignored_network_fixture(name: &str) {
     );
 }
 
-fn manifest_from_result(result: &ScanResult) -> GoldenManifest {
+fn manifest_from_result(result: &ScanResult, include_location_classes: bool) -> GoldenManifest {
     GoldenManifest {
         todo: None,
-        findings: canonicalize_findings(&result.findings),
+        findings: canonicalize_findings(&result.findings, include_location_classes),
     }
 }
 
-fn canonicalize_findings(findings: &[Finding]) -> Vec<CanonicalFinding> {
+fn canonicalize_findings(
+    findings: &[Finding],
+    include_location_classes: bool,
+) -> Vec<CanonicalFinding> {
     let mut canonical = findings
         .iter()
-        .map(canonicalize_finding)
+        .map(|finding| canonicalize_finding(finding, include_location_classes))
         .collect::<Vec<_>>();
     canonical.sort_by(|left, right| {
         severity_rank(&left.severity)
@@ -221,7 +280,7 @@ fn canonicalize_findings(findings: &[Finding]) -> Vec<CanonicalFinding> {
     canonical
 }
 
-fn canonicalize_finding(finding: &Finding) -> CanonicalFinding {
+fn canonicalize_finding(finding: &Finding, include_location_classes: bool) -> CanonicalFinding {
     let mut locations = finding
         .locations
         .iter()
@@ -229,6 +288,23 @@ fn canonicalize_finding(finding: &Finding) -> CanonicalFinding {
         .collect::<Vec<_>>();
     locations.sort();
     locations.dedup();
+    let mut location_classes = if include_location_classes {
+        finding
+            .locations
+            .iter()
+            .map(|location| {
+                format!(
+                    "{}={}",
+                    location.path.0,
+                    enum_string(&location.location_class)
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    location_classes.sort();
+    location_classes.dedup();
 
     let mut provenance_kinds = BTreeSet::new();
     let mut provenance_shas = BTreeSet::new();
@@ -256,6 +332,7 @@ fn canonicalize_finding(finding: &Finding) -> CanonicalFinding {
         category: enum_string(&finding.category),
         severity: enum_string(&finding.severity),
         locations,
+        location_classes,
         provenance_kind: if provenance_kinds.contains("commit") {
             "commit".to_owned()
         } else {

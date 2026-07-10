@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "stable_key": "supabase-key-14f538d41d4bd268c73f6efe",
+      "rule_id": "supabase-key:publishable_new",
+      "category": "key_classification",
+      "severity": "info",
+      "locations": [
+        "apps/web/.next/static/chunks/x.js"
+      ],
+      "location_classes": [
+        "apps/web/.next/static/chunks/x.js=client_reachable"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "supabase_key",
+        "class": "publishable_new",
+        "project_ref": "abcdefghijklmnopqrst",
+        "project_url": "https://abcdefghijklmnopqrst.supabase.co",
+        "fingerprint": "c08ed0a02490113239074dc180fbf7ca"
+      }
+    }
+  ]
+}

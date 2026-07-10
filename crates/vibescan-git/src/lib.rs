@@ -619,30 +619,69 @@ fn push_content(
 
 fn classify_location(path: &str) -> LocationClass {
     let lower = path.to_ascii_lowercase();
-    if lower.starts_with("public/")
-        || lower.starts_with("app/")
-        || lower.starts_with("pages/")
-        || lower.starts_with("src/app/")
-        || lower.starts_with("src/pages/")
-        || lower.starts_with("src/components/")
-        || lower.contains("/client/")
-        || lower.contains(".client.")
-        || lower.starts_with("dist/")
-        || lower.starts_with("build/")
-        || lower.starts_with(".next/static/")
+    let segments = lower
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let basename = segments.last().copied().unwrap_or_default();
+
+    if basename_is_env(basename)
+        || path_has_segments(&segments, &["app", "api"])
+        || path_has_segments(&segments, &["pages", "api"])
+        || path_has_segments(&segments, &["src", "app", "api"])
+        || path_has_segments(&segments, &["src", "pages", "api"])
+        || segments.contains(&"server")
+        || path_has_segments(&segments, &[".next", "server"])
+        || path_has_segments(&segments, &["supabase", "functions"])
+        || path_has_package_server_root(&segments)
     {
-        LocationClass::ClientReachable
-    } else if lower.starts_with(".env")
-        || lower.contains("/server/")
-        || lower.starts_with("server/")
-        || lower.starts_with("supabase/functions/")
-        || lower.starts_with("api/")
-        || lower.starts_with("src/api/")
-    {
-        LocationClass::ServerOnly
-    } else {
-        LocationClass::Unknown
+        return LocationClass::ServerOnly;
     }
+
+    if segments.contains(&"public")
+        || segments.contains(&"app")
+        || segments.contains(&"pages")
+        || path_has_segments(&segments, &["src", "app"])
+        || path_has_segments(&segments, &["src", "pages"])
+        || path_has_segments(&segments, &["src", "components"])
+        || segments.contains(&"dist")
+        || segments.contains(&"build")
+        || segments.contains(&"out")
+        || path_has_segments(&segments, &[".next", "static"])
+        || segments.contains(&".svelte-kit")
+        || segments.contains(&"client")
+        || basename.contains(".client.")
+    {
+        return LocationClass::ClientReachable;
+    }
+
+    LocationClass::Unknown
+}
+
+fn basename_is_env(basename: &str) -> bool {
+    basename == ".env" || basename.starts_with(".env.")
+}
+
+fn path_has_segments(path: &[&str], needle: &[&str]) -> bool {
+    !needle.is_empty()
+        && needle.len() <= path.len()
+        && path.windows(needle.len()).any(|window| window == needle)
+}
+
+fn path_has_package_server_root(path: &[&str]) -> bool {
+    path.starts_with(&["api"])
+        || path.starts_with(&["src", "api"])
+        || path.windows(2).any(|window| {
+            matches!(window[0], "apps" | "packages" | "services") && window[1] == "api"
+        })
+        || path.windows(3).any(|window| {
+            matches!(window[0], "apps" | "packages" | "services") && window[2] == "api"
+        })
+        || path.windows(4).any(|window| {
+            matches!(window[0], "apps" | "packages" | "services")
+                && window[2] == "src"
+                && window[3] == "api"
+        })
 }
 
 fn is_file_entry(entry: &DirEntry) -> bool {
@@ -1280,6 +1319,82 @@ mod tests {
         .expect("repo collected");
 
         assert!(output.warnings.contains(&ScopeWarning::ShallowClone));
+    }
+
+    #[test]
+    fn classify_location_matches_monorepo_segment_rules() {
+        let cases = [
+            (
+                "apps/web/.next/static/chunks/x.js",
+                LocationClass::ClientReachable,
+            ),
+            ("apps/api/.env", LocationClass::ServerOnly),
+            ("apps/web/.env.local", LocationClass::ServerOnly),
+            (
+                "packages/ui/src/components/Btn.tsx",
+                LocationClass::ClientReachable,
+            ),
+            ("services/api/index.ts", LocationClass::ServerOnly),
+            ("services/api/src/api/handler.ts", LocationClass::ServerOnly),
+            ("apps/web/app/api/route.ts", LocationClass::ServerOnly),
+            ("apps/web/app/page.tsx", LocationClass::ClientReachable),
+            (
+                "apps/web/.next/server/vendor-chunks/x.js",
+                LocationClass::ServerOnly,
+            ),
+        ];
+
+        for (path, expected) in cases {
+            assert_eq!(classify_location(path), expected, "{path}");
+        }
+    }
+
+    #[test]
+    fn classify_location_uses_segments_not_substrings() {
+        let cases = [
+            ("staticassets/x.js", LocationClass::Unknown),
+            ("apps/web/src/myenv.ts", LocationClass::Unknown),
+            ("apps/foo/api-docs/readme.md", LocationClass::Unknown),
+            (
+                "apps/web/app/foo/api/route.ts",
+                LocationClass::ClientReachable,
+            ),
+        ];
+
+        for (path, expected) in cases {
+            assert_eq!(classify_location(path), expected, "{path}");
+        }
+    }
+
+    #[test]
+    fn classify_location_preserves_flat_repo_behavior() {
+        let cases = [
+            ("public/config.js", LocationClass::ClientReachable),
+            ("app/page.tsx", LocationClass::ClientReachable),
+            ("pages/index.tsx", LocationClass::ClientReachable),
+            ("src/app/page.tsx", LocationClass::ClientReachable),
+            ("src/pages/index.tsx", LocationClass::ClientReachable),
+            ("src/components/Button.tsx", LocationClass::ClientReachable),
+            ("src/client/widget.ts", LocationClass::ClientReachable),
+            ("src/Button.client.tsx", LocationClass::ClientReachable),
+            ("dist/bundle.js", LocationClass::ClientReachable),
+            ("build/assets/app.js", LocationClass::ClientReachable),
+            (".next/static/chunks/x.js", LocationClass::ClientReachable),
+            (".env", LocationClass::ServerOnly),
+            (".env.local", LocationClass::ServerOnly),
+            ("server/index.ts", LocationClass::ServerOnly),
+            (
+                "supabase/functions/ping/index.ts",
+                LocationClass::ServerOnly,
+            ),
+            ("api/handler.ts", LocationClass::ServerOnly),
+            ("src/api/handler.ts", LocationClass::ServerOnly),
+            ("src/lib/util.ts", LocationClass::Unknown),
+        ];
+
+        for (path, expected) in cases {
+            assert_eq!(classify_location(path), expected, "{path}");
+        }
     }
 
     struct TestRepo {
