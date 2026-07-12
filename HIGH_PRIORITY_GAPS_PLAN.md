@@ -567,6 +567,26 @@ action was used.
 Exit criterion: the authoritative seven-crate DAG holds across every dependency
 kind and both feature graphs.
 
+Implemented on 2026-07-12:
+
+- The git-to-detector and detector-to-Supabase integration assertions now live
+  in `vibescan-core`; lower crates retain only their owned behavioral tests.
+- The `vibescan-git -> vibescan-secrets` and
+  `vibescan-supabase -> vibescan-secrets` dev-dependencies were removed.
+- `vibescan-cli` no longer depends on `vibescan-types`; core publicly exposes
+  `Severity` for the thin CLI boundary.
+- The checker validates exactly seven workspace members and the complete
+  authoritative edge set from Cargo's declared dependencies, covering normal,
+  build, dev, target, and optional edges independent of feature activation.
+- Default and `network` resolved graphs retain separate transport assertions.
+  In-process synthetic controls prove acceptance of the intended graph and
+  rejection of a sibling dev-edge, an unauthorized direct/optional edge, and
+  LocalStatic transport leakage.
+
+All Phase 4-focused tests, clippy gates, goldens, snapshots, and both workspace
+matrices pass when the three pre-existing Phase 5 CLI/baseline regressions are
+excluded. Unfiltered matrices fail only those same tests.
+
 ### Phase 5 — make CLI, configuration, and baseline behavior truthful
 
 1. Represent CLI overrides as optional/tri-state values. A clap default must

@@ -25,9 +25,11 @@ use vibescan_supabase::probe_tier0_read;
 use vibescan_types::{
     Category, Confidence, ContentId, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope,
     Location, LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats,
-    ScannableUnit, ScopeWarning, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass,
+    ScannableUnit, ScopeWarning, SecretCandidate, SecretFingerprint, SupabaseKeyClass,
     SupabaseProject, UnitRef,
 };
+
+pub use vibescan_types::Severity;
 
 /// Current crate version used in scan results.
 pub const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -1804,6 +1806,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use vibescan_secrets::working_tree_unit;
     use vibescan_types::{
         ContentId, LocationClass, RepoPath, RlsExposure, Span, SupabaseProject, UnitLocation,
         UnitRef,
@@ -1840,6 +1843,51 @@ mod tests {
                 .any(|finding| finding.category == Category::SecretExposure)
         );
         assert!(!result.scope.network.enabled);
+    }
+
+    #[test]
+    fn collected_working_tree_units_feed_the_detector() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "src/app.tsx",
+            "const key = 'sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';\n",
+        );
+
+        let output = collect_repository(
+            repo.path(),
+            WalkOptions {
+                include_history: false,
+                ..WalkOptions::default()
+            },
+        )
+        .expect("repo collected");
+        let detector = Detector::default_rules().expect("detector compiles");
+        let candidates = detector.detect_units(&output.units);
+
+        assert_eq!(output.units.len(), 1);
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.rule_id.0 == "supabase-publishable-key")
+        );
+    }
+
+    #[test]
+    fn detector_candidates_feed_supabase_classification() {
+        let detector = Detector::default_rules().expect("rules compile");
+        let unit = working_tree_unit(
+            "src/app.tsx",
+            "const key = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';",
+        );
+        let candidates = detector.detect_unit(&unit);
+        let findings = SupabaseClassifier::new().classify_candidates(&candidates);
+
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.category == Category::SecretExposure)
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-12
 
-Current implementation baseline: `bf0dbe7` (`main`) plus the Phase 3C worktree
+Current implementation baseline: `98f943a` (`main`) plus the Phase 4 worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -21,19 +21,20 @@ coalescing, Tier 0 input preparation, and provenance-aware correlation. Phase
 rejection, and Phase 3B now scopes typed LocalStatic API references to exact or
 unambiguous projects before Tier 0 probing. Phase 3C now records every attempted
 Tier 0 root/table GET as redacted scan-scope evidence and renders it in JSON,
-SARIF, TTY, and HTML.
+SARIF, TTY, and HTML. Phase 4 now enforces the authoritative seven-crate DAG
+across normal, build, dev, target, optional, and feature-activated dependencies.
 
 The strict completion verdict is nevertheless **partial**, not complete.
-The literal crate DAG, configuration contract, extendable ruleset surface,
-dependency intelligence, performance/precision evidence, and distribution
-requirements still have remaining work.
+The configuration contract, extendable ruleset surface, dependency
+intelligence, performance/precision evidence, and distribution requirements
+still have remaining work.
 
 Use these three lenses when discussing completion:
 
 - **Runnable v1 coverage:** all eight section-15 steps exist and the Phase
-  1–3C regression matrix is green.
-- **Strict buildable-v1 conformance:** partial because the literal crate DAG
-  and CLI/config behavior still have gaps.
+  1–4 regression matrix is green.
+- **Strict buildable-v1 conformance:** partial because CLI/config behavior still
+  has gaps.
 - **Entire architecture document:** partial. Online dependency intelligence,
   full section-14 assurance, performance proof, Tier 1, and distribution are
   missing or explicitly deferred.
@@ -44,14 +45,48 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 3C starts from `bf0dbe7`, which contains Phases 0–3B. The current worktree
-adds shared redacted Network action vocabulary, Tier 0 per-request audit
-emission, core scan-scope aggregation, renderer coverage, deterministic report
-snapshots, regression tests, and this status update. No request authority,
-endpoint set, target-project data, CLI behavior, or live endpoint changed.
+Phase 4 starts from `98f943a`, which contains Phases 0–3C. The current worktree
+moves cross-crate integration coverage into core, removes both sibling
+dev-dependencies and the CLI-to-types edge, exports the gate severity through
+core, and strengthens the boundary checker with exact-DAG validation and
+synthetic negative controls. No scan behavior, request authority, target data,
+or report artifact changed.
 
-All Phase 1–3C regressions are green. The suite remains intentionally red only
+All Phase 1–4 regressions are green. The suite remains intentionally red only
 for the three Phase 5 CLI/baseline cases.
+
+## Phase 4 verification observed on 2026-07-12
+
+The following pass on the current Phase 4 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-git --locked
+cargo test -p vibescan-supabase --locked
+cargo test -p vibescan-core --locked
+cargo test --workspace --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+cargo test --workspace --features network --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-report --test report_snapshots --locked
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+The boundary checker confirms the exact seven-crate DAG in both metadata
+graphs and runs synthetic positive/negative controls for a sibling
+dev-dependency, an unauthorized direct/optional edge, and LocalStatic transport
+leakage. The two unfiltered workspace commands were also run; both stop only at
+the same three pre-existing Phase 5 CLI/baseline tests. The local hardening
+aggregate was run and stops at those same tests before its boundary leg. No live
+Network action was run.
 
 ## Phase 3C verification observed on 2026-07-12
 
@@ -224,7 +259,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Architecture area | Status | Evidence and limitation |
 |---|---|---|
 | Design invariants | Partial / safety core verified | LocalStatic default, own-Supabase URL guard, read-only Tier 0, redacted per-action scope evidence, and no persisted writes are implemented. |
-| Seven-crate workspace | Partial under the literal rule | The production DAG is layered and acyclic, but `vibescan-git` and `vibescan-supabase` each dev-depend on sibling `vibescan-secrets`. The boundary script checks normal edges only. |
+| Seven-crate workspace | Phase 4 complete | The exact authoritative DAG holds across normal, build, dev, target, optional, and feature-activated dependencies. Cross-crate integration coverage lives in core, CLI depends only on core, and synthetic checker controls reject horizontal/direct drift and transport leakage. |
 | Shared data model | Phase 1 identity complete | `ContentId`, `UnitLocation`, `ScannableUnit.locations`, and `UnitRef.locations` form one canonical occurrence model; singular competing fields were removed. |
 | Content handling | Substantially implemented | Binary/size skips, ignore layers, forced real-env/client-bundle scanning, inline allow, and commit allowlists exist. Historical paths intentionally use current ignore state. |
 | Scan pipeline | Partial | All five phases exist and exact `ContentId` lookup now binds enrichment to the candidate revision. Units/candidates/findings remain materialized rather than streamed. |
@@ -255,8 +290,8 @@ Tier C is implemented and covered for its named acceptance paths:
 Phases 1–2 now cover the identity/linkage cases that Tier C did not: identical
 content at different paths, commit membership stored in additional provenance,
 two historical contents at one path, and a project URL split from a client key.
-The next correctness priority is Phase 3's warning semantics and project-scoped
-table harvesting.
+The next correctness priority is Phase 5's CLI/config precedence and baseline
+path/error behavior.
 
 ## Strict gaps and known risks
 
@@ -286,14 +321,10 @@ table harvesting.
 
 ### P1 — contract and configuration gaps
 
-1. The literal no-horizontal-dependency rule is violated by these test-only
-   edges:
-
-   - `vibescan-git -> vibescan-secrets`;
-   - `vibescan-supabase -> vibescan-secrets`.
-
-   The current boundary check intentionally considers only normal dependencies,
-   so it cannot detect this class of drift.
+1. **Literal crate DAG — resolved in Phase 4.** Cross-crate integration tests
+   now live in core, sibling dev-dependencies and the CLI-to-types edge are
+   removed, and the checker validates every declared dependency kind plus both
+   resolved feature graphs.
 
 2. CLI defaults overwrite repository config even when the user did not supply
    an option. The affected fields include working-tree/history selection,
@@ -308,9 +339,9 @@ table harvesting.
    when it resolves to one project. Missing/ambiguous tables are skipped with a
    coverage warning, and RPC references never become table reads.
 
-5. A successful protected/empty/404 Tier 0 attempt emits neither a finding nor
-   a durable action record. This falls short of the invariant that every
-   Network action is logged/auditable.
+5. **Tier 0 protected-action auditability — resolved in Phase 3C.** Every
+   attempted root/table GET now produces redacted scope evidence even when no
+   finding is emitted.
 
 ### P2 — assurance and product-depth gaps
 
@@ -390,20 +421,15 @@ Acceptance: targeted crate tests, both golden feature modes, full default and
 network clippy/tests, boundary script, reviewed golden diffs, and no decrease in
 clean-control precision.
 
-### Phase 2 — enforce the complete crate DAG
+### Completed in Phase 4 — enforce the complete crate DAG
 
-1. Move cross-crate classifier/walker integration coverage to
-   `vibescan-core` or another existing top-level integration harness.
-2. Remove sibling dev-dependencies from `vibescan-git` and
-   `vibescan-supabase`.
-3. Extend the dependency guard to inspect normal/build/dev/target/optional
-   workspace edges and reject all horizontal sibling edges, while still
-   separately proving the feature-gated transport rule.
-4. Add negative controls showing the guard fails for a sibling dev-dependency
-   and for transport leakage.
-
-Acceptance: the exact architecture DAG holds in every dependency kind and both
-feature graphs.
+Cross-crate classifier/walker integration coverage now lives in core. The
+sibling dev-dependencies and CLI-to-types edge are gone. The boundary checker
+validates the exact workspace membership and edge set across every declared
+dependency kind and both feature graphs while preserving separate transport
+reachability assertions. Synthetic controls prove rejection of a sibling
+dev-dependency, an unauthorized direct/optional edge, and LocalStatic transport
+leakage.
 
 ### Phase 3 — make configuration truthful end to end
 

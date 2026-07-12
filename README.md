@@ -72,9 +72,11 @@ The CI boundary gate is:
 bash scripts/check-network-boundary.sh
 ```
 
-It asserts exact resolved package names from Cargo metadata: default builds must
-contain no transport crates, and `--features network` may reach transport only
-through `vibescan-supabase`.
+It validates the exact seven-crate workspace DAG across normal, build, dev,
+target, optional, and feature-activated dependencies. Separate assertions keep
+default builds transport-free and allow `--features network` transport only
+through `vibescan-supabase`; synthetic negative controls exercise forbidden
+workspace edges and LocalStatic transport leakage on every run.
 
 ## Usage
 

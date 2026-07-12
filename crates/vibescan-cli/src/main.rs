@@ -2,8 +2,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
-use vibescan_core::{OutputFormat as CoreOutputFormat, OutputStyle, ScanConfig, scan_and_render};
-use vibescan_types::Severity;
+use vibescan_core::{
+    OutputFormat as CoreOutputFormat, OutputStyle, ScanConfig, Severity, scan_and_render,
+};
 
 #[derive(Debug, Parser)]
 #[command(

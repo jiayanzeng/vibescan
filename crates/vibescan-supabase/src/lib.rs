@@ -847,7 +847,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use vibescan_secrets::{Detector, working_tree_unit};
     use vibescan_types::{
         ContentId, LocationClass, Provenance, RepoPath, RuleId, Span, UnitLocation, UnitRef,
     };
@@ -1079,23 +1078,6 @@ mod tests {
             SupabaseClassifier::new()
                 .classify_candidate(&candidate)
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn integrates_with_secret_detector_output() {
-        let detector = Detector::default_rules().expect("rules compile");
-        let unit = working_tree_unit(
-            "src/app.tsx",
-            "const key = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';",
-        );
-        let candidates = detector.detect_unit(&unit);
-        let findings = SupabaseClassifier::new().classify_candidates(&candidates);
-
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.category == Category::SecretExposure)
         );
     }
 

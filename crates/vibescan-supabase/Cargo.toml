@@ -18,8 +18,3 @@ reqwest = { version = "0.12.24", default-features = false, features = ["blocking
 serde_json.workspace = true
 sha2.workspace = true
 vibescan-types.workspace = true
-
-[dev-dependencies]
-# Test-only exception to the production layering rule: classifier fixtures use
-# detector helpers to assert integration with Supabase-shaped candidates.
-vibescan-secrets = { path = "../vibescan-secrets" }

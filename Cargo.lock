@@ -1958,7 +1958,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "vibescan-core",
- "vibescan-types",
 ]
 
 [[package]]
@@ -1989,7 +1988,6 @@ dependencies = [
  "globset",
  "ignore",
  "sha2",
- "vibescan-secrets",
  "vibescan-types",
 ]
 
@@ -2023,7 +2021,6 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sha2",
- "vibescan-secrets",
  "vibescan-types",
 ]
 

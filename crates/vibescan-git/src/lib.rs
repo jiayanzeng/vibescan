@@ -1071,8 +1071,6 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use vibescan_secrets::Detector;
-
     use super::*;
 
     static GIT_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -1181,34 +1179,6 @@ mod tests {
     }
 
     #[test]
-    fn working_tree_units_feed_the_detector() {
-        let repo = TestRepo::new();
-        repo.git(["init"]);
-        repo.write(
-            "src/app.tsx",
-            "const key = 'sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';\n",
-        );
-
-        let output = collect_repository(
-            repo.path(),
-            WalkOptions {
-                include_history: false,
-                ..WalkOptions::default()
-            },
-        )
-        .expect("repo collected");
-        let detector = Detector::default_rules().expect("detector compiles");
-        let candidates = detector.detect_units(&output.units);
-
-        assert_eq!(output.units.len(), 1);
-        assert!(
-            candidates
-                .iter()
-                .any(|candidate| candidate.rule_id.0 == "supabase-publishable-key")
-        );
-    }
-
-    #[test]
     fn history_scan_collects_changed_blobs_from_all_refs() {
         let repo = TestRepo::new();
         repo.git(["init"]);
@@ -1235,14 +1205,16 @@ mod tests {
             },
         )
         .expect("history collected");
-        let detector = Detector::default_rules().expect("detector compiles");
-        let candidates = detector.detect_units(&output.units);
 
         assert_eq!(output.history.scanned_commits, 2);
         assert!(
-            candidates
+            output
+                .units
                 .iter()
-                .any(|candidate| candidate.rule_id.0 == "anthropic-api-key")
+                .any(|unit| unit.locations.iter().any(|location| {
+                    location.path.0 == "src/feature.ts"
+                        && matches!(location.provenance, Provenance::Commit { .. })
+                }))
         );
     }
 
@@ -1299,14 +1271,16 @@ mod tests {
             },
         )
         .expect("history collected without git on PATH");
-        let detector = Detector::default_rules().expect("detector compiles");
-        let candidates = detector.detect_units(&output.units);
 
         assert_eq!(output.history.scanned_commits, 1);
         assert!(
-            candidates
+            output
+                .units
                 .iter()
-                .any(|candidate| candidate.rule_id.0 == "anthropic-api-key")
+                .any(|unit| unit.locations.iter().any(|location| {
+                    location.path.0 == "src/history.ts"
+                        && matches!(location.provenance, Provenance::Commit { .. })
+                }))
         );
     }
 

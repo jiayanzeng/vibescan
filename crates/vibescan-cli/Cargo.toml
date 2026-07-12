@@ -18,4 +18,3 @@ network = ["vibescan-core/network"]
 [dependencies]
 clap.workspace = true
 vibescan-core.workspace = true
-vibescan-types.workspace = true
