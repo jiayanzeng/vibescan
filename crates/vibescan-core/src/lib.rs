@@ -23,10 +23,10 @@ use vibescan_supabase::Tier0RlsProbeInput;
 #[cfg(feature = "network")]
 use vibescan_supabase::probe_tier0_read;
 use vibescan_types::{
-    Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope, Location,
-    LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats, ScannableUnit,
-    ScopeWarning, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
-    UnitRef,
+    Category, Confidence, ContentId, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope,
+    Location, LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats,
+    ScannableUnit, ScopeWarning, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass,
+    SupabaseProject, UnitRef,
 };
 
 /// Current crate version used in scan results.
@@ -208,10 +208,16 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
                     candidate,
                     unit_content.get(&candidate.unit_ref.content_id).copied(),
                 )
-                .map(|finding| ClassifiedKeyFact {
-                    finding,
-                    raw_key: candidate.raw_match.clone(),
-                    unit_refs: vec![candidate.unit_ref.clone()],
+                .map(|finding| {
+                    let project = project_from_key_finding(&finding).cloned();
+                    ClassifiedKeyFact {
+                        finding,
+                        raw_key: candidate.raw_match.clone(),
+                        sources: vec![ClassifiedKeySource {
+                            unit_ref: candidate.unit_ref.clone(),
+                            project,
+                        }],
+                    }
                 })
         })
         .collect::<Vec<_>>();
@@ -226,8 +232,10 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     if config.tier0_read_probe {
         #[cfg(feature = "network")]
         {
-            let table_candidates = harvest_table_names(&units);
-            for input in tier0_probe_inputs(&classified_keys, &table_candidates) {
+            let api_references = harvest_api_references(&units);
+            let associations = associate_api_references(&api_references, &classified_keys);
+            warnings.extend(associations.warnings);
+            for input in tier0_probe_inputs(&classified_keys, &associations.tables_by_project) {
                 match probe_tier0_read(&input) {
                     Ok(mut output) => {
                         findings.append(&mut output.findings);
@@ -505,7 +513,13 @@ struct ClassifiedKeyFact {
     finding: Finding,
     #[cfg_attr(not(feature = "network"), allow(dead_code))]
     raw_key: Vec<u8>,
-    unit_refs: Vec<UnitRef>,
+    sources: Vec<ClassifiedKeySource>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ClassifiedKeySource {
+    unit_ref: UnitRef,
+    project: Option<SupabaseProject>,
 }
 
 fn coalesce_classified_key_facts(facts: Vec<ClassifiedKeyFact>) -> Vec<ClassifiedKeyFact> {
@@ -567,14 +581,19 @@ fn merge_classified_key_group(
     sort_locations(&mut merged.finding.locations);
     for fact in facts {
         merge_findings(&mut merged.finding, fact.finding);
-        merged.unit_refs.extend(fact.unit_refs);
+        merged.sources.extend(fact.sources);
     }
-    merged.unit_refs.sort_by(|left, right| {
-        left.content_id
-            .cmp(&right.content_id)
-            .then_with(|| left.locations.cmp(&right.locations))
+    merged.sources.sort_by(|left, right| {
+        left.unit_ref
+            .content_id
+            .cmp(&right.unit_ref.content_id)
+            .then_with(|| left.unit_ref.locations.cmp(&right.unit_ref.locations))
+            .then_with(|| {
+                source_project_key(left.project.as_ref())
+                    .cmp(&source_project_key(right.project.as_ref()))
+            })
     });
-    merged.unit_refs.dedup();
+    merged.sources.dedup();
     set_key_project(&mut merged.finding, project.as_ref());
     merged.finding.id = coalesced_finding_id(&FindingCoalesceKey {
         base,
@@ -588,7 +607,7 @@ fn merge_classified_key_group(
 #[cfg(feature = "network")]
 fn tier0_probe_inputs(
     classifications: &[ClassifiedKeyFact],
-    candidate_tables: &BTreeSet<String>,
+    tables_by_project: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<Tier0RlsProbeInput> {
     let mut by_project = BTreeMap::<String, Tier0RlsProbeInput>::new();
     for fact in classifications {
@@ -603,11 +622,15 @@ fn tier0_probe_inputs(
             };
             let public_key = std::str::from_utf8(&fact.raw_key).ok()?.to_owned();
             let key_location = best_key_location(&fact.finding.locations)?.clone();
+            let normalized_project = normalized_project_url(&project.url);
             Some(Tier0RlsProbeInput {
                 project: project.clone(),
                 public_key,
                 key_location,
-                candidate_tables: candidate_tables.clone(),
+                candidate_tables: tables_by_project
+                    .get(&normalized_project)
+                    .cloned()
+                    .unwrap_or_default(),
             })
         })() else {
             continue;
@@ -638,17 +661,165 @@ fn best_key_location(locations: &[Location]) -> Option<&Location> {
 }
 
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
-fn harvest_table_names(units: &[ScannableUnit]) -> BTreeSet<String> {
-    let mut tables = BTreeSet::new();
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ApiReferenceKind {
+    Table,
+    Rpc,
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct SourceScope(String);
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ApiReference {
+    kind: ApiReferenceKind,
+    content_id: ContentId,
+    source_scope: SourceScope,
+    name: String,
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+struct ApiReferenceAssociations {
+    tables_by_project: BTreeMap<String, BTreeSet<String>>,
+    warnings: Vec<ScopeWarning>,
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn harvest_api_references(units: &[ScannableUnit]) -> Vec<ApiReference> {
+    let mut references = BTreeSet::new();
     for unit in units {
         let Ok(content) = std::str::from_utf8(&unit.content) else {
             continue;
         };
+        let mut tables = BTreeSet::new();
+        let mut rpcs = BTreeSet::new();
         harvest_quoted_method_names(content, ".from", &mut tables);
-        harvest_quoted_method_names(content, ".rpc", &mut tables);
+        harvest_quoted_method_names(content, ".rpc", &mut rpcs);
         harvest_rest_paths(content, &mut tables);
+        let scopes = unit
+            .locations
+            .iter()
+            .map(|location| source_scope(&location.path.0))
+            .collect::<BTreeSet<_>>();
+        for scope in scopes {
+            for name in &tables {
+                references.insert(ApiReference {
+                    kind: ApiReferenceKind::Table,
+                    content_id: unit.content_id.clone(),
+                    source_scope: scope.clone(),
+                    name: name.clone(),
+                });
+            }
+            for name in &rpcs {
+                references.insert(ApiReference {
+                    kind: ApiReferenceKind::Rpc,
+                    content_id: unit.content_id.clone(),
+                    source_scope: scope.clone(),
+                    name: name.clone(),
+                });
+            }
+        }
     }
-    tables
+    references.into_iter().collect()
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn source_scope(path: &str) -> SourceScope {
+    let segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    for (index, segment) in segments.iter().enumerate() {
+        if matches!(*segment, "apps" | "packages" | "services") && index + 1 < segments.len() {
+            return SourceScope(segments[..=index + 1].join("/"));
+        }
+    }
+    SourceScope(".".to_owned())
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn associate_api_references(
+    references: &[ApiReference],
+    facts: &[ClassifiedKeyFact],
+) -> ApiReferenceAssociations {
+    let mut projects_by_content = BTreeMap::<ContentId, BTreeSet<String>>::new();
+    let mut projects_by_scope = BTreeMap::<SourceScope, BTreeSet<String>>::new();
+    for source in facts.iter().flat_map(|fact| &fact.sources) {
+        let Some(project) = &source.project else {
+            continue;
+        };
+        let project_url = normalized_project_url(&project.url);
+        projects_by_content
+            .entry(source.unit_ref.content_id.clone())
+            .or_default()
+            .insert(project_url.clone());
+        for scope in source
+            .unit_ref
+            .locations
+            .iter()
+            .map(|location| source_scope(&location.path.0))
+        {
+            projects_by_scope
+                .entry(scope)
+                .or_default()
+                .insert(project_url.clone());
+        }
+    }
+
+    let mut tables_by_project = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut warning_messages = BTreeSet::new();
+    for reference in references {
+        if reference.kind == ApiReferenceKind::Rpc {
+            continue;
+        }
+        match associated_project(reference, &projects_by_content, &projects_by_scope) {
+            Ok(project_url) => {
+                tables_by_project
+                    .entry(project_url)
+                    .or_default()
+                    .insert(reference.name.clone());
+            }
+            Err(reason) => {
+                warning_messages.insert(format!(
+                    "Tier 0 skipped table reference {} from scope {}: {reason}",
+                    reference.name, reference.source_scope.0
+                ));
+            }
+        }
+    }
+
+    ApiReferenceAssociations {
+        tables_by_project,
+        warnings: warning_messages
+            .into_iter()
+            .map(|message| ScopeWarning::Other { message })
+            .collect(),
+    }
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn associated_project(
+    reference: &ApiReference,
+    projects_by_content: &BTreeMap<ContentId, BTreeSet<String>>,
+    projects_by_scope: &BTreeMap<SourceScope, BTreeSet<String>>,
+) -> Result<String, &'static str> {
+    if let Some(projects) = projects_by_content.get(&reference.content_id) {
+        return unique_project(projects);
+    }
+    projects_by_scope
+        .get(&reference.source_scope)
+        .map_or(Err("no associated Supabase project"), unique_project)
+}
+
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
+fn unique_project(projects: &BTreeSet<String>) -> Result<String, &'static str> {
+    if projects.len() == 1 {
+        Ok(projects.first().expect("one project").clone())
+    } else {
+        Err("ambiguous Supabase project association")
+    }
 }
 
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
@@ -1426,6 +1597,13 @@ fn normalized_project_url(url: &str) -> String {
     trimmed.to_ascii_lowercase()
 }
 
+fn source_project_key(project: Option<&SupabaseProject>) -> (String, Option<String>) {
+    project.map_or_else(
+        || (String::new(), None),
+        |project| (normalized_project_url(&project.url), project.ref_id.clone()),
+    )
+}
+
 fn max_location_class(locations: &[Location]) -> LocationClass {
     locations
         .iter()
@@ -2110,8 +2288,12 @@ mod tests {
             classified_key_fact(&client_candidate, client_finding),
         ]);
         let candidate_tables = BTreeSet::from(["profiles".to_owned()]);
+        let tables_by_project = BTreeMap::from([(
+            "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+            candidate_tables.clone(),
+        )]);
 
-        let inputs = tier0_probe_inputs(&classifications, &candidate_tables);
+        let inputs = tier0_probe_inputs(&classifications, &tables_by_project);
 
         assert_eq!(inputs.len(), 1);
         assert_eq!(
@@ -2152,11 +2334,15 @@ mod tests {
             classified_key_fact(&server_candidate, server_finding),
             classified_key_fact(&client_candidate, client_finding),
         ]);
-        let inputs = tier0_probe_inputs(&facts, &BTreeSet::from(["profiles".to_owned()]));
+        let tables_by_project = BTreeMap::from([(
+            "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+            BTreeSet::from(["profiles".to_owned()]),
+        )]);
+        let inputs = tier0_probe_inputs(&facts, &tables_by_project);
 
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].finding.locations.len(), 2);
-        assert_eq!(facts[0].unit_refs.len(), 2);
+        assert_eq!(facts[0].sources.len(), 2);
         assert_eq!(inputs.len(), 1);
         assert_eq!(
             inputs[0].project.url,
@@ -2171,14 +2357,16 @@ mod tests {
     #[cfg(feature = "network")]
     #[test]
     fn tier0_probe_inputs_keep_harvested_tables_project_local() {
-        let candidate_a = publishable_candidate(
+        let mut candidate_a = publishable_candidate(
             "apps/a/.next/static/chunks/a.js",
             LocationClass::ClientReachable,
         );
-        let candidate_b = publishable_candidate(
+        candidate_a.unit_ref.content_id = ContentId([10; 32]);
+        let mut candidate_b = publishable_candidate(
             "apps/b/.next/static/chunks/b.js",
             LocationClass::ClientReachable,
         );
+        candidate_b.unit_ref.content_id = ContentId([11; 32]);
         let finding_a = public_key_finding_at(
             "key-a",
             "apps/a/.next/static/chunks/a.js",
@@ -2201,9 +2389,22 @@ mod tests {
             classified_key_fact(&candidate_a, finding_a),
             classified_key_fact(&candidate_b, finding_b),
         ]);
-        let harvested = BTreeSet::from(["accounts_a".to_owned(), "accounts_b".to_owned()]);
+        let units = vec![
+            api_unit(
+                ContentId([10; 32]),
+                "apps/a/src/data.ts",
+                "supabase.from('accounts_a').select('*');",
+            ),
+            api_unit(
+                ContentId([11; 32]),
+                "apps/b/src/data.ts",
+                "supabase.from('accounts_b').select('*');",
+            ),
+        ];
+        let references = harvest_api_references(&units);
+        let associations = associate_api_references(&references, &classifications);
 
-        let inputs = tier0_probe_inputs(&classifications, &harvested);
+        let inputs = tier0_probe_inputs(&classifications, &associations.tables_by_project);
         let tables_by_project = inputs
             .into_iter()
             .map(|input| (input.project.url, input.candidate_tables))
@@ -2217,29 +2418,20 @@ mod tests {
             tables_by_project["https://zyxwvutsrqponmlkjihg.supabase.co"],
             BTreeSet::from(["accounts_b".to_owned()])
         );
+        assert!(associations.warnings.is_empty());
     }
 
     #[cfg(feature = "network")]
     #[test]
     fn tier0_probe_inputs_do_not_cross_probe_ambiguous_harvested_table() {
-        let candidate_a = publishable_candidate(
-            "apps/a/.next/static/chunks/a.js",
-            LocationClass::ClientReachable,
-        );
-        let candidate_b = publishable_candidate(
-            "apps/b/.next/static/chunks/b.js",
-            LocationClass::ClientReachable,
-        );
-        let finding_a = public_key_finding_at(
-            "key-a",
-            "apps/a/.next/static/chunks/a.js",
-            LocationClass::ClientReachable,
-        );
-        let mut finding_b = public_key_finding_at(
-            "key-b",
-            "apps/b/.next/static/chunks/b.js",
-            LocationClass::ClientReachable,
-        );
+        let mut candidate_a = publishable_candidate("src/a-key.ts", LocationClass::ClientReachable);
+        candidate_a.unit_ref.content_id = ContentId([20; 32]);
+        let mut candidate_b = publishable_candidate("src/b-key.ts", LocationClass::ClientReachable);
+        candidate_b.unit_ref.content_id = ContentId([21; 32]);
+        let finding_a =
+            public_key_finding_at("key-a", "src/a-key.ts", LocationClass::ClientReachable);
+        let mut finding_b =
+            public_key_finding_at("key-b", "src/b-key.ts", LocationClass::ClientReachable);
         if let Evidence::SupabaseKey {
             project: Some(project),
             ..
@@ -2252,18 +2444,29 @@ mod tests {
             classified_key_fact(&candidate_a, finding_a),
             classified_key_fact(&candidate_b, finding_b),
         ]);
-        let ambiguously_scoped_tables = BTreeSet::from(["shared_profiles".to_owned()]);
+        let references = harvest_api_references(&[api_unit(
+            ContentId([22; 32]),
+            "src/shared.ts",
+            "supabase.from('shared_profiles').select('*');",
+        )]);
+        let associations = associate_api_references(&references, &classifications);
 
-        let inputs = tier0_probe_inputs(&classifications, &ambiguously_scoped_tables);
+        let inputs = tier0_probe_inputs(&classifications, &associations.tables_by_project);
 
         assert!(
             inputs.iter().all(|input| input.candidate_tables.is_empty()),
             "an ambiguously associated table must not be sent to either project"
         );
+        assert!(associations.warnings.iter().any(|warning| matches!(
+            warning,
+            ScopeWarning::Other { message }
+                if message.contains("shared_profiles")
+                    && message.contains("ambiguous Supabase project association")
+        )));
     }
 
     #[test]
-    fn harvest_table_names_extracts_localstatic_candidates() {
+    fn harvest_api_references_retains_table_and_rpc_kinds() {
         let units = vec![ScannableUnit {
             content_id: ContentId([2; 32]),
             content: br#"
@@ -2281,15 +2484,121 @@ mod tests {
             }],
         }];
 
+        let references = harvest_api_references(&units)
+            .into_iter()
+            .map(|reference| (reference.kind, reference.name, reference.source_scope.0))
+            .collect::<Vec<_>>();
+
         assert_eq!(
-            harvest_table_names(&units),
-            BTreeSet::from([
-                "do_x".to_owned(),
-                "orders".to_owned(),
-                "profiles".to_owned(),
-                "widgets".to_owned(),
-            ])
+            references,
+            vec![
+                (
+                    ApiReferenceKind::Table,
+                    "orders".to_owned(),
+                    "apps/web".to_owned()
+                ),
+                (
+                    ApiReferenceKind::Table,
+                    "profiles".to_owned(),
+                    "apps/web".to_owned()
+                ),
+                (
+                    ApiReferenceKind::Table,
+                    "widgets".to_owned(),
+                    "apps/web".to_owned()
+                ),
+                (
+                    ApiReferenceKind::Rpc,
+                    "do_x".to_owned(),
+                    "apps/web".to_owned()
+                ),
+            ]
         );
+    }
+
+    #[test]
+    fn rpc_references_remain_typed_and_never_become_table_candidates() {
+        let content_id = ContentId([30; 32]);
+        let facts = vec![classified_fact_for_source(
+            content_id.clone(),
+            "apps/web/src/config.ts",
+            project(),
+        )];
+        let references = harvest_api_references(&[api_unit(
+            content_id,
+            "apps/web/src/data.ts",
+            "supabase.from('profiles').select('*'); supabase.rpc('do_x');",
+        )]);
+
+        let associations = associate_api_references(&references, &facts);
+
+        assert_eq!(
+            associations.tables_by_project,
+            BTreeMap::from([(
+                "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+                BTreeSet::from(["profiles".to_owned()]),
+            )])
+        );
+        assert!(associations.warnings.is_empty());
+        assert!(references.iter().any(|reference| {
+            reference.kind == ApiReferenceKind::Rpc && reference.name == "do_x"
+        }));
+    }
+
+    #[test]
+    fn historical_api_references_use_exact_content_project_context() {
+        let project_a = project();
+        let project_b = SupabaseProject {
+            ref_id: Some("zyxwvutsrqponmlkjihg".to_owned()),
+            url: "https://zyxwvutsrqponmlkjihg.supabase.co".to_owned(),
+        };
+        let facts = vec![
+            classified_fact_for_source(ContentId([31; 32]), "src/config.ts", project_a.clone()),
+            classified_fact_for_source(ContentId([32; 32]), "src/config.ts", project_b.clone()),
+        ];
+        let references = harvest_api_references(&[
+            api_unit(
+                ContentId([31; 32]),
+                "src/config.ts",
+                "supabase.from('accounts_a').select('*');",
+            ),
+            api_unit(
+                ContentId([32; 32]),
+                "src/config.ts",
+                "supabase.from('accounts_b').select('*');",
+            ),
+        ]);
+
+        let associations = associate_api_references(&references, &facts);
+
+        assert_eq!(
+            associations.tables_by_project[&normalized_project_url(&project_a.url)],
+            BTreeSet::from(["accounts_a".to_owned()])
+        );
+        assert_eq!(
+            associations.tables_by_project[&normalized_project_url(&project_b.url)],
+            BTreeSet::from(["accounts_b".to_owned()])
+        );
+        assert!(associations.warnings.is_empty());
+    }
+
+    #[test]
+    fn unassociated_table_reference_emits_coverage_warning() {
+        let references = harvest_api_references(&[api_unit(
+            ContentId([33; 32]),
+            "shared/data.ts",
+            "supabase.from('orphaned_table').select('*');",
+        )]);
+
+        let associations = associate_api_references(&references, &[]);
+
+        assert!(associations.tables_by_project.is_empty());
+        assert!(matches!(
+            associations.warnings.as_slice(),
+            [ScopeWarning::Other { message }]
+                if message.contains("orphaned_table")
+                    && message.contains("no associated Supabase project")
+        ));
     }
 
     #[test]
@@ -3125,10 +3434,14 @@ mod tests {
 
     #[cfg(feature = "network")]
     fn classified_key_fact(candidate: &SecretCandidate, finding: Finding) -> ClassifiedKeyFact {
+        let project = project_from_key_finding(&finding).cloned();
         ClassifiedKeyFact {
             finding,
             raw_key: candidate.raw_match.clone(),
-            unit_refs: vec![candidate.unit_ref.clone()],
+            sources: vec![ClassifiedKeySource {
+                unit_ref: candidate.unit_ref.clone(),
+                project,
+            }],
         }
     }
 
@@ -3147,6 +3460,53 @@ mod tests {
                 provenance: Provenance::WorkingTree,
                 additional_provenance: Vec::new(),
                 location_class,
+            }],
+        }
+    }
+
+    fn api_unit(content_id: ContentId, path: &str, content: &str) -> ScannableUnit {
+        ScannableUnit {
+            content_id,
+            content: content.as_bytes().to_vec(),
+            locations: vec![UnitLocation {
+                path: RepoPath(path.to_owned()),
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ClientReachable,
+            }],
+        }
+    }
+
+    fn classified_fact_for_source(
+        content_id: ContentId,
+        path: &str,
+        project: SupabaseProject,
+    ) -> ClassifiedKeyFact {
+        let mut finding = public_key_finding();
+        finding.id = FindingId(format!("key-{path}"));
+        finding.locations[0].path = RepoPath(path.to_owned());
+        if let Evidence::SupabaseKey {
+            project: finding_project,
+            ..
+        } = &mut finding.evidence
+        {
+            *finding_project = Some(project.clone());
+        }
+        let unit_ref = UnitRef {
+            content_id,
+            locations: vec![UnitLocation {
+                path: RepoPath(path.to_owned()),
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ClientReachable,
+            }],
+        };
+        ClassifiedKeyFact {
+            finding,
+            raw_key: b"sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789".to_vec(),
+            sources: vec![ClassifiedKeySource {
+                unit_ref,
+                project: Some(project),
             }],
         }
     }

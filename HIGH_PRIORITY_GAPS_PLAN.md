@@ -483,6 +483,24 @@ Exit criteria:
 - Historical versions never exchange project or API-reference context.
 - The existing one-project harvested-table chain still passes.
 
+#### Phase 3B status — implemented (2026-07-12)
+
+- LocalStatic harvesting now emits typed `Table`/`Rpc` references carrying
+  exact `ContentId`, deterministic app/package scope, and normalized name.
+- Each classified source retains the project evidence established before fact
+  coalescing. Table association prefers an exact content project and otherwise
+  uses a scope only when that scope resolves to one project.
+- Missing or ambiguous associations produce deterministic coverage warnings
+  and no table candidate. Tier 0 receives a normalized per-project table map;
+  the repository-wide union has been removed.
+- RPC references remain typed but are excluded from table-read endpoints.
+- Regressions cover two-project isolation, ambiguous and missing associations,
+  exact historical revision context, RPC exclusion, and the existing
+  one-project chain.
+
+All Phase 3B default and network core tests pass. The only deliberate red tests
+remaining are the three Phase 4 CLI/baseline cases.
+
 #### 3C. Add redacted per-action audit records
 
 Add shared pure-data vocabulary for Network actions and aggregate it into the

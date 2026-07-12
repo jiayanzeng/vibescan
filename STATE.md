@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-12
 
-Current implementation baseline: `36b0a1b` (`main`) plus the Phase 3A worktree
+Current implementation baseline: `38c7877` (`main`) plus the Phase 3B worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -18,7 +18,8 @@ landed, Phase 1 preserves exact content/source occurrences, and Phase 2 now
 uses that identity for exact Supabase enrichment, conservative project-aware
 coalescing, Tier 0 input preparation, and provenance-aware correlation. Phase
 3A now distinguishes root-enumeration unavailability from table-level key
-rejection.
+rejection, and Phase 3B now scopes typed LocalStatic API references to exact or
+unambiguous projects before Tier 0 probing.
 
 The strict completion verdict is nevertheless **partial**, not complete.
 Several later cross-phase linkage defects can still suppress the headline
@@ -31,9 +32,8 @@ Use these three lenses when discussing completion:
 
 - **Runnable v1 coverage:** all eight section-15 steps exist and the current
   automated gates are green.
-- **Strict buildable-v1 conformance:** partial because some edge cases can lose
-  locations, commit status, or project linkage, and two sibling dev-dependency
-  edges violate the literal crate rule.
+- **Strict buildable-v1 conformance:** partial because the literal crate DAG,
+  CLI/config behavior, and Network action auditability still have gaps.
 - **Entire architecture document:** partial. Online dependency intelligence,
   full section-14 assurance, performance proof, Tier 1, and distribution are
   missing or explicitly deferred.
@@ -44,13 +44,39 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 3A starts from `36b0a1b`, which contains Phases 0–2. The current worktree
-changes the Supabase warning type/handling, the mocked network golden assertion,
-and Phase 3A planning/status documentation. No report snapshot, transport
-implementation, CLI behavior, live endpoint, or target-project data changed.
+Phase 3B starts from `38c7877`, which contains Phases 0–3A. The current worktree
+changes `vibescan-core` LocalStatic reference harvesting/association and the
+Phase 3B planning/status documentation. No shared serialized shape, report
+snapshot, transport implementation, CLI behavior, live endpoint, or
+target-project data changed.
 
-All Phase 1–3A regressions are green. The suite remains intentionally red only
-for Phase 3B project-table scoping and Phase 4 CLI/baseline behavior.
+All Phase 1–3B regressions are green. The suite remains intentionally red only
+for the three Phase 4 CLI/baseline cases.
+
+## Phase 3B verification observed on 2026-07-12
+
+The following pass on the current Phase 3B worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-core --locked
+cargo test -p vibescan-core --features network --locked
+cargo test --workspace --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+cargo test --workspace --features network --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+No live Network action was run. The remaining deliberate reds are exactly the
+three Phase 4 CLI/baseline cases.
 
 ## Phase 3A verification observed on 2026-07-12
 
@@ -178,7 +204,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Generic secret substrate | Partial application contract | Keyword prefilter, regex, entropy, allowlists, attribution, and the required provider families exist. `Detector::from_toml` is not wired through core/CLI, so the architecture's extendable ruleset is library-only. |
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
-| Tier 0 RLS probe | Partial, Phase 3A verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, root 401/403 fallback, and table-only key rejection are mock-tested. Candidate tables remain global across projects pending 3B, and protected attempts lack durable action records pending 3C. |
+| Tier 0 RLS probe | Partial, Phase 3B verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, and exact/unambiguous project-scoped table sets are tested. Protected attempts still lack durable action records pending 3C. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML exist with redacted evidence, locations, history context, exit gates, and deterministic snapshots. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
@@ -249,10 +275,10 @@ table harvesting.
    contract. The detector can parse custom TOML, but the scan pipeline always
    constructs the embedded default detector.
 
-4. New-format key/project association is limited to one unit, and table
-   candidates are harvested once for the whole repo rather than associated with
-   the relevant project/bundle. Multi-project monorepos can receive noisy or
-   incorrect probe associations.
+4. Project-scoped table harvesting — resolved in Phase 3B. Exact `ContentId`
+   association wins; otherwise deterministic app/package scope is used only
+   when it resolves to one project. Missing/ambiguous tables are skipped with a
+   coverage warning, and RPC references never become table reads.
 
 5. A successful protected/empty/404 Tier 0 attempt emits neither a finding nor
    a durable action record. This falls short of the invariant that every
