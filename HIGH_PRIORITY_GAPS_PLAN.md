@@ -344,6 +344,25 @@ Exit criteria:
 - Existing finding IDs remain unchanged unless project evidence legitimately
   becomes more specific.
 
+#### Phase 1 status — implemented (2026-07-12)
+
+- `vibescan-types` now exposes opaque full-SHA-256 `ContentId` plus the single
+  canonical `UnitLocation` list used by `ScannableUnit` and `UnitRef`; the old
+  singular path/provenance/class fields were removed.
+- `vibescan-git` groups by `ContentId`, keeps different paths distinct, merges
+  same-path provenances, and normalizes both locations and provenances before
+  returning units.
+- `vibescan-secrets` scans each content body once and evaluates path/commit
+  allowlists per occurrence, retaining unaffected locations on the candidate.
+- Generic and Supabase finding builders copy every retained location with the
+  same content-relative span. A regression proves `ContentId` is not part of a
+  public Supabase finding ID.
+
+The Phase 0 identical-content server/browser regression is green. The
+historical same-path project-context regression deliberately remains red:
+Phase 1 carries the exact `ContentId`, while Phase 2 is responsible for using
+it instead of the legacy path-keyed enrichment map.
+
 ### Phase 2 — repair exact enrichment, coalescing, and correlation
 
 1. Replace the current path-keyed unit-content map with

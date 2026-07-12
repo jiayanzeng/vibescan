@@ -952,9 +952,7 @@ fn merge_unit_location(locations: &mut Vec<UnitLocation>, incoming: UnitLocation
         .iter_mut()
         .find(|location| location.path == incoming.path)
     {
-        existing
-            .additional_provenance
-            .push(incoming.provenance);
+        existing.additional_provenance.push(incoming.provenance);
         existing
             .additional_provenance
             .extend(incoming.additional_provenance);
@@ -1078,6 +1076,109 @@ mod tests {
     use super::*;
 
     static GIT_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn content_dedup_retains_distinct_source_paths_and_classes() {
+        let content = b"same bytes".to_vec();
+        let id = content_id(&content);
+        let mut collector = UnitCollector::new();
+        collector.push(test_unit(
+            id.clone(),
+            content.clone(),
+            "apps/api/.env.local",
+            LocationClass::ServerOnly,
+            Provenance::WorkingTree,
+        ));
+        collector.push(test_unit(
+            id,
+            content,
+            "apps/web/.next/static/chunks/config.js",
+            LocationClass::ClientReachable,
+            Provenance::WorkingTree,
+        ));
+
+        let units = collector.into_units();
+
+        assert_eq!(units.len(), 1);
+        assert_eq!(
+            units[0]
+                .locations
+                .iter()
+                .map(|location| (location.path.0.clone(), location.location_class))
+                .collect::<Vec<_>>(),
+            vec![
+                ("apps/api/.env.local".to_owned(), LocationClass::ServerOnly),
+                (
+                    "apps/web/.next/static/chunks/config.js".to_owned(),
+                    LocationClass::ClientReachable
+                )
+            ]
+        );
+    }
+
+    #[test]
+    fn same_path_repeated_commits_share_one_location_with_complete_provenance() {
+        let content = b"same bytes".to_vec();
+        let id = content_id(&content);
+        let mut collector = UnitCollector::new();
+        collector.push(test_unit(
+            id.clone(),
+            content.clone(),
+            "src/config.ts",
+            LocationClass::Unknown,
+            commit("bbbb"),
+        ));
+        collector.push(test_unit(
+            id.clone(),
+            content.clone(),
+            "src/config.ts",
+            LocationClass::Unknown,
+            Provenance::WorkingTree,
+        ));
+        collector.push(test_unit(
+            id,
+            content,
+            "src/config.ts",
+            LocationClass::Unknown,
+            commit("aaaa"),
+        ));
+
+        let units = collector.into_units();
+        let location = &units[0].locations[0];
+
+        assert_eq!(units.len(), 1);
+        assert_eq!(units[0].locations.len(), 1);
+        assert_eq!(location.provenance, Provenance::WorkingTree);
+        assert_eq!(
+            location.additional_provenance,
+            vec![commit("aaaa"), commit("bbbb")]
+        );
+    }
+
+    #[test]
+    fn different_historical_contents_at_one_path_remain_distinct_units() {
+        let mut collector = UnitCollector::new();
+        collector.push(test_unit(
+            content_id(b"version a"),
+            b"version a".to_vec(),
+            "src/config.ts",
+            LocationClass::Unknown,
+            commit("aaaa"),
+        ));
+        collector.push(test_unit(
+            content_id(b"version b"),
+            b"version b".to_vec(),
+            "src/config.ts",
+            LocationClass::Unknown,
+            commit("bbbb"),
+        ));
+
+        let units = collector.into_units();
+
+        assert_eq!(units.len(), 2);
+        assert_ne!(units[0].content_id, units[1].content_id);
+        assert_eq!(units[0].locations[0].path, units[1].locations[0].path);
+    }
 
     #[test]
     fn working_tree_units_feed_the_detector() {
@@ -1455,6 +1556,33 @@ mod tests {
 
         for (path, expected) in cases {
             assert_eq!(classify_location(path), expected, "{path}");
+        }
+    }
+
+    fn test_unit(
+        content_id: ContentId,
+        content: Vec<u8>,
+        path: &str,
+        location_class: LocationClass,
+        provenance: Provenance,
+    ) -> ScannableUnit {
+        ScannableUnit {
+            content_id,
+            content,
+            locations: vec![UnitLocation {
+                path: RepoPath(path.to_owned()),
+                provenance,
+                additional_provenance: Vec::new(),
+                location_class,
+            }],
+        }
+    }
+
+    fn commit(sha: &str) -> Provenance {
+        Provenance::Commit {
+            sha: sha.to_owned(),
+            author: None,
+            date: None,
         }
     }
 

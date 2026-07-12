@@ -197,7 +197,11 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     let classifier = SupabaseClassifier::new();
     let unit_content = units
         .iter()
-        .map(|unit| (unit.path.0.as_str(), unit.content.as_slice()))
+        .flat_map(|unit| {
+            unit.locations
+                .iter()
+                .map(|location| (location.path.0.as_str(), unit.content.as_slice()))
+        })
         .collect::<BTreeMap<_, _>>();
     let supabase_classifications = candidates
         .iter()
@@ -206,7 +210,16 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
                 .classify_candidate_with_unit_content(
                     candidate,
                     unit_content
-                        .get(candidate.unit_ref.path.0.as_str())
+                        .get(
+                            candidate
+                                .unit_ref
+                                .locations
+                                .first()
+                                .expect("candidates retain a source location")
+                                .path
+                                .0
+                                .as_str(),
+                        )
                         .copied(),
                 )
                 .map(|finding| (candidate, finding))
@@ -618,13 +631,21 @@ fn generic_candidate_finding(candidate: &SecretCandidate) -> Finding {
     let raw = String::from_utf8_lossy(&candidate.raw_match);
     let fingerprint = fingerprint(&raw);
     let (severity, confidence) = generic_candidate_severity(candidate);
-    let location = Location {
-        path: candidate.unit_ref.path.clone(),
-        span: Some(candidate.span),
-        provenance: candidate.unit_ref.provenance.clone(),
-        additional_provenance: candidate.unit_ref.additional_provenance.clone(),
-        location_class: candidate.unit_ref.location_class,
-    };
+    let locations = candidate
+        .unit_ref
+        .locations
+        .iter()
+        .map(|location| Location {
+            path: location.path.clone(),
+            span: Some(candidate.span),
+            provenance: location.provenance.clone(),
+            additional_provenance: location.additional_provenance.clone(),
+            location_class: location.location_class,
+        })
+        .collect::<Vec<_>>();
+    let location = locations
+        .first()
+        .expect("candidates retain a source location");
     let mut hasher = Sha256::new();
     hasher.update(candidate.rule_id.0.as_bytes());
     hasher.update(b"\0");
@@ -638,7 +659,7 @@ fn generic_candidate_finding(candidate: &SecretCandidate) -> Finding {
         severity,
         title: format!("Secret candidate matched {}", candidate.rule_id.0),
         detail: "The generic detector found a credential-shaped value. Review and rotate the value if it is real.".to_owned(),
-        locations: vec![location],
+        locations,
         evidence: Evidence::Secret {
             redacted: redact_secret(&raw),
             fingerprint,
@@ -1424,7 +1445,10 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use vibescan_types::{LocationClass, RepoPath, RlsExposure, Span, SupabaseProject, UnitRef};
+    use vibescan_types::{
+        ContentId, LocationClass, RepoPath, RlsExposure, Span, SupabaseProject, UnitLocation,
+        UnitRef,
+    };
 
     use super::*;
 
@@ -1975,6 +1999,7 @@ mod tests {
     #[test]
     fn harvest_table_names_extracts_localstatic_candidates() {
         let units = vec![ScannableUnit {
+            content_id: ContentId([2; 32]),
             content: br#"
                 const profiles = supabase.from('profiles').select('*');
                 await client.from("orders").select("id");
@@ -1982,10 +2007,12 @@ mod tests {
                 fetch("/rest/v1/widgets?select=*");
             "#
             .to_vec(),
-            path: RepoPath("apps/web/.next/static/chunks/x.js".to_owned()),
-            provenance: Provenance::WorkingTree,
-            additional_provenance: Vec::new(),
-            location_class: LocationClass::ClientReachable,
+            locations: vec![UnitLocation {
+                path: RepoPath("apps/web/.next/static/chunks/x.js".to_owned()),
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ClientReachable,
+            }],
         }];
 
         assert_eq!(
@@ -2541,12 +2568,7 @@ mod tests {
                 kind: vibescan_types::CandidateKind::ProviderSecret,
                 raw_match: b"abcdefghijklmnopqrstuvwxyz123456".to_vec(),
                 entropy: 4.0,
-                unit_ref: UnitRef {
-                    path: RepoPath("src/app.ts".to_owned()),
-                    provenance: Provenance::WorkingTree,
-                    additional_provenance: Vec::new(),
-                    location_class: LocationClass::Unknown,
-                },
+                unit_ref: test_unit_ref("src/app.ts", LocationClass::Unknown),
                 span: Span {
                     line: 1,
                     col_start: 1,
@@ -2565,12 +2587,7 @@ mod tests {
             kind: vibescan_types::CandidateKind::GenericHighEntropy,
             raw_match: b"abcdefghijklmnopqrstuvwxyz1234567890".to_vec(),
             entropy: 4.0,
-            unit_ref: UnitRef {
-                path: RepoPath("src/app.ts".to_owned()),
-                provenance: Provenance::WorkingTree,
-                additional_provenance: Vec::new(),
-                location_class: LocationClass::Unknown,
-            },
+            unit_ref: test_unit_ref("src/app.ts", LocationClass::Unknown),
             span: Span {
                 line: 1,
                 col_start: 1,
@@ -2580,6 +2597,39 @@ mod tests {
 
         assert_eq!(finding.severity, Severity::Medium);
         assert_eq!(finding.confidence, Confidence::Review);
+    }
+
+    #[test]
+    fn generic_finding_retains_all_candidate_source_locations() {
+        let mut unit_ref = test_unit_ref("apps/api/.env.local", LocationClass::ServerOnly);
+        unit_ref.locations.push(UnitLocation {
+            path: RepoPath("apps/web/.next/static/chunks/config.js".to_owned()),
+            provenance: Provenance::WorkingTree,
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::ClientReachable,
+        });
+        let candidate = SecretCandidate {
+            rule_id: vibescan_types::RuleId("toy".to_owned()),
+            kind: vibescan_types::CandidateKind::ProviderSecret,
+            raw_match: b"abcdefghijklmnopqrstuvwxyz123456".to_vec(),
+            entropy: 4.0,
+            unit_ref,
+            span: Span {
+                line: 4,
+                col_start: 3,
+                col_end: 35,
+            },
+        };
+
+        let finding = generic_candidate_finding(&candidate);
+
+        assert_eq!(finding.locations.len(), 2);
+        assert!(
+            finding
+                .locations
+                .iter()
+                .all(|location| location.span == Some(candidate.span))
+        );
     }
 
     #[test]
@@ -2798,12 +2848,7 @@ mod tests {
             kind: vibescan_types::CandidateKind::PossibleSupabaseKey,
             raw_match: b"sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789".to_vec(),
             entropy: 4.0,
-            unit_ref: UnitRef {
-                path: RepoPath(path.to_owned()),
-                provenance: Provenance::WorkingTree,
-                additional_provenance: Vec::new(),
-                location_class,
-            },
+            unit_ref: test_unit_ref(path, location_class),
             span: Span {
                 line: 1,
                 col_start: 1,
@@ -2816,6 +2861,18 @@ mod tests {
         SupabaseProject {
             ref_id: Some("abcdefghijklmnopqrst".to_owned()),
             url: "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+        }
+    }
+
+    fn test_unit_ref(path: &str, location_class: LocationClass) -> UnitRef {
+        UnitRef {
+            content_id: ContentId([3; 32]),
+            locations: vec![UnitLocation {
+                path: RepoPath(path.to_owned()),
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class,
+            }],
         }
     }
 

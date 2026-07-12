@@ -14,8 +14,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use vibescan_types::{
-    CandidateKind, Category, Confidence, Evidence, Finding, FindingId, Location, LocationClass,
-    Provenance, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
+    CandidateKind, Category, Confidence, Evidence, Finding, FindingId, Location, SecretCandidate,
+    SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
 };
 
 const SUPABASE_URL_SUFFIX: &str = ".supabase.co";
@@ -50,12 +50,7 @@ impl SupabaseClassifier {
         let project_hint = unit_content
             .and_then(|content| std::str::from_utf8(content).ok())
             .and_then(project_from_text);
-        let classification = classify_raw_key(
-            raw,
-            candidate.unit_ref.location_class,
-            &candidate.unit_ref.provenance,
-            project_hint,
-        );
+        let classification = classify_raw_key(raw, project_hint);
         Some(classification.into_finding(candidate, raw))
     }
 
@@ -340,14 +335,25 @@ struct KeyClassification {
 impl KeyClassification {
     fn into_finding(self, candidate: &SecretCandidate, raw: &str) -> Finding {
         let fingerprint = fingerprint(raw);
-        let location = Location {
-            path: candidate.unit_ref.path.clone(),
-            span: Some(candidate.span),
-            provenance: candidate.unit_ref.provenance.clone(),
-            additional_provenance: candidate.unit_ref.additional_provenance.clone(),
-            location_class: candidate.unit_ref.location_class,
-        };
-        let id = finding_id(&self.class, &fingerprint, &location);
+        let locations = candidate
+            .unit_ref
+            .locations
+            .iter()
+            .map(|location| Location {
+                path: location.path.clone(),
+                span: Some(candidate.span),
+                provenance: location.provenance.clone(),
+                additional_provenance: location.additional_provenance.clone(),
+                location_class: location.location_class,
+            })
+            .collect::<Vec<_>>();
+        let id = finding_id(
+            &self.class,
+            &fingerprint,
+            locations
+                .first()
+                .expect("candidates retain a source location"),
+        );
 
         Finding {
             id,
@@ -359,7 +365,7 @@ impl KeyClassification {
             severity: self.severity,
             title: self.title,
             detail: self.detail,
-            locations: vec![location],
+            locations,
             evidence: Evidence::SupabaseKey {
                 class: self.class,
                 redacted: redact_secret(raw),
@@ -373,12 +379,7 @@ impl KeyClassification {
     }
 }
 
-fn classify_raw_key(
-    raw: &str,
-    location_class: LocationClass,
-    provenance: &Provenance,
-    project_hint: Option<SupabaseProject>,
-) -> KeyClassification {
+fn classify_raw_key(raw: &str, project_hint: Option<SupabaseProject>) -> KeyClassification {
     if raw.starts_with("sb_publishable_") {
         return low_privilege(
             SupabaseKeyClass::PublishableNew,
@@ -392,8 +393,6 @@ fn classify_raw_key(
         return elevated(
             SupabaseKeyClass::SecretNew,
             project_hint,
-            location_class,
-            provenance,
             "Supabase secret key exposed",
             "A new-format Supabase secret key was found. Secret keys are elevated credentials and bypass RLS.",
         );
@@ -415,8 +414,6 @@ fn classify_raw_key(
                 Some("service_role") => elevated(
                     SupabaseKeyClass::ServiceRoleLegacy,
                     project,
-                    location_class,
-                    provenance,
                     "Supabase legacy service_role key exposed",
                     "A legacy Supabase service_role JWT was found. Service role keys are elevated credentials and bypass RLS.",
                 ),
@@ -450,8 +447,6 @@ fn low_privilege(
 fn elevated(
     class: SupabaseKeyClass,
     project: Option<SupabaseProject>,
-    _location_class: LocationClass,
-    _provenance: &Provenance,
     title: &str,
     detail: &str,
 ) -> KeyClassification {
@@ -680,7 +675,9 @@ mod tests {
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use vibescan_secrets::{Detector, working_tree_unit};
-    use vibescan_types::{RepoPath, RuleId, Span, UnitRef};
+    use vibescan_types::{
+        ContentId, LocationClass, Provenance, RepoPath, RuleId, Span, UnitLocation, UnitRef,
+    };
 
     use super::*;
 
@@ -691,10 +688,13 @@ mod tests {
             raw_match: raw.as_bytes().to_vec(),
             entropy: 4.0,
             unit_ref: UnitRef {
-                path: RepoPath("src/app.tsx".to_owned()),
-                provenance: Provenance::WorkingTree,
-                additional_provenance: Vec::new(),
-                location_class,
+                content_id: ContentId([1; 32]),
+                locations: vec![UnitLocation {
+                    path: RepoPath("src/app.tsx".to_owned()),
+                    provenance: Provenance::WorkingTree,
+                    additional_provenance: Vec::new(),
+                    location_class,
+                }],
             },
             span: Span {
                 line: 1,
@@ -722,6 +722,56 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn finding_retains_every_candidate_source_location_with_the_same_span() {
+        let raw = "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        let mut candidate = candidate(raw, LocationClass::ServerOnly);
+        candidate.unit_ref.locations.push(UnitLocation {
+            path: RepoPath("apps/web/.next/static/chunks/config.js".to_owned()),
+            provenance: Provenance::WorkingTree,
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::ClientReachable,
+        });
+
+        let finding = SupabaseClassifier::new()
+            .classify_candidate(&candidate)
+            .expect("finding emitted");
+
+        assert_eq!(finding.locations.len(), 2);
+        assert!(
+            finding
+                .locations
+                .iter()
+                .all(|location| location.span == Some(candidate.span))
+        );
+        assert_eq!(
+            finding
+                .locations
+                .iter()
+                .map(|location| location.path.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/app.tsx", "apps/web/.next/static/chunks/config.js"]
+        );
+    }
+
+    #[test]
+    fn content_id_does_not_change_public_finding_identity() {
+        let raw = "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        let first = candidate(raw, LocationClass::ClientReachable);
+        let mut second = first.clone();
+        second.unit_ref.content_id = ContentId([9; 32]);
+        let classifier = SupabaseClassifier::new();
+
+        let first = classifier
+            .classify_candidate(&first)
+            .expect("first finding emitted");
+        let second = classifier
+            .classify_candidate(&second)
+            .expect("second finding emitted");
+
+        assert_eq!(first.id, second.id);
     }
 
     #[test]
@@ -831,7 +881,7 @@ mod tests {
             "sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF",
             LocationClass::ServerOnly,
         );
-        candidate.unit_ref.provenance = Provenance::Commit {
+        candidate.unit_ref.locations[0].provenance = Provenance::Commit {
             sha: "abc123".to_owned(),
             author: None,
             date: None,

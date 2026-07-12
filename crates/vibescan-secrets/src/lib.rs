@@ -616,6 +616,70 @@ mod tests {
     }
 
     #[test]
+    fn path_allowlist_removes_only_the_matching_source_occurrence() {
+        let detector = Detector::from_toml(
+            r#"
+            [[rules]]
+            id = "toy"
+            kind = "provider_secret"
+            regex = '''token = "([A-Za-z0-9_]{8,})"'''
+            keywords = ["token"]
+            path_allowlist = ["^docs/"]
+            "#,
+        )
+        .expect("ruleset compiles");
+        let mut unit =
+            working_tree_unit("docs/example.ts", br#"token = "REAL_TOKEN_VALUE""#.to_vec());
+        unit.locations.push(UnitLocation {
+            path: RepoPath("src/config.ts".to_owned()),
+            provenance: Provenance::WorkingTree,
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::ServerOnly,
+        });
+
+        let candidates = detector.detect_unit(&unit);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].unit_ref.locations.len(), 1);
+        assert_eq!(candidates[0].unit_ref.locations[0].path.0, "src/config.ts");
+    }
+
+    #[test]
+    fn commit_allowlist_removes_only_the_matching_source_occurrence() {
+        let detector = Detector::from_toml(
+            r#"
+            [[rules]]
+            id = "toy"
+            kind = "provider_secret"
+            regex = '''token = "([A-Za-z0-9_]{8,})"'''
+            keywords = ["token"]
+
+            [[rules.allowlists]]
+            commits = ["abc123"]
+            "#,
+        )
+        .expect("ruleset compiles");
+        let mut unit =
+            working_tree_unit("src/current.ts", br#"token = "REAL_TOKEN_VALUE""#.to_vec());
+        unit.locations.push(UnitLocation {
+            path: RepoPath("src/history.ts".to_owned()),
+            provenance: Provenance::Commit {
+                sha: "abc123".to_owned(),
+                author: None,
+                date: None,
+            },
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::Unknown,
+        });
+
+        let candidates = detector.detect_unit(&unit);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].unit_ref.locations.len(), 1);
+        assert_eq!(candidates[0].unit_ref.locations[0].path.0, "src/current.ts");
+    }
+
+    #[test]
     fn parallel_unit_detection_matches_serial_results() {
         let detector = Detector::default_rules().expect("default rules compile");
         let units = (0..128)

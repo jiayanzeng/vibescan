@@ -384,10 +384,13 @@ mod tests {
             raw_match: b"sb_publishable_example".to_vec(),
             entropy: 3.7,
             unit_ref: UnitRef {
-                path: RepoPath("src/app.tsx".to_owned()),
-                provenance: Provenance::WorkingTree,
-                additional_provenance: Vec::new(),
-                location_class: LocationClass::ClientReachable,
+                content_id: ContentId([7; 32]),
+                locations: vec![UnitLocation {
+                    path: RepoPath("src/app.tsx".to_owned()),
+                    provenance: Provenance::WorkingTree,
+                    additional_provenance: Vec::new(),
+                    location_class: LocationClass::ClientReachable,
+                }],
             },
             span: Span {
                 line: 12,

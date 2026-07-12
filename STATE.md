@@ -2,7 +2,10 @@
 
 Reviewed: 2026-07-12
 
-Audit baseline: `e7e9263` (`main`, aligned with `origin/main`)
+Current implementation baseline: `e3f3b60` (`main`) plus the Phase 1 worktree
+described below.
+
+Prior architecture-audit baseline: `e7e9263`.
 
 Authority: `vibescan-architecture.md`. This file records observed status; it
 does not override the architecture or prove completion by itself.
@@ -10,12 +13,13 @@ does not override the architecture or prove completion by itself.
 ## Executive verdict
 
 vibescan is a substantial, runnable local-first Rust CLI. Every build-order
-step in architecture section 15 (steps 1–8) has an implementation, Tier C
-(monorepo classification, same-secret coalescing/probe dedup, and corrected
-Tier 0 probing) has landed, and the current default/network test matrices pass.
+step in architecture section 15 (steps 1–8) has an implementation, Tier C has
+landed, and Phase 1 of `HIGH_PRIORITY_GAPS_PLAN.md` now preserves exact content
+identity and every source occurrence through collection, detection, and
+finding construction.
 
 The strict completion verdict is nevertheless **partial**, not complete.
-Several cross-phase identity/linkage defects can suppress the headline
+Several later cross-phase linkage defects can still suppress the headline
 public-key-plus-RLS correlation in realistic layouts. The literal crate DAG,
 configuration contract, extendable ruleset surface, Network auditability,
 dependency intelligence, performance/precision evidence, and distribution
@@ -38,22 +42,40 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-The audit began from a clean checkout at `e7e9263`. The previous version of
-this file incorrectly described a dirty pre-commit B3 worktree and did not
-include C1–C3.
+Phase 1 starts from `e3f3b60`, which contains the Phase 0 regression lock. The
+current worktree changes shared types plus the git, secrets, Supabase, and core
+consumers, together with the Phase 1 planning/status documentation. No fixture
+manifest, report snapshot, network transport, CLI behavior, or target-project
+data was changed.
 
-This audit intentionally changes documentation only:
+The Phase 0 suite remains intentionally red for unfinished Phases 2–5. Phase 1
+turns the identical-content/alternate-path regression green; the historical
+same-path project-context regression remains red because exact enrichment is
+explicitly Phase 2.
 
-- root `AGENTS.md`;
-- scoped `AGENTS.md` files for all seven crates;
-- `scripts/AGENTS.md`;
-- `tests/fixtures/AGENTS.md`; and
-- this `STATE.md` refresh.
+## Phase 1 verification observed on 2026-07-12
 
-No Rust source, manifest, workflow, script, fixture, expected manifest, or
-snapshot was changed by this audit.
+The following pass on the current Phase 1 worktree:
 
-## Verification observed on 2026-07-12
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-types --locked
+cargo test -p vibescan-git --locked
+cargo test -p vibescan-secrets --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-report --test report_snapshots --locked
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+The default and `network` workspace matrices also pass when only the remaining
+known-red Phase 2–5 regression names are excluded. The Phase 1 regression
+`identical_content_at_server_and_browser_paths_retains_both_locations` passes.
+No live network action was run.
+
+## Prior audit verification observed on 2026-07-12
 
 The following passed against the clean `e7e9263` code baseline:
 
@@ -99,12 +121,12 @@ After the documentation changes, the closeout pass also reran and passed:
 |---|---|---|
 | Design invariants | Partial / safety core verified | LocalStatic default, own-Supabase URL guard, read-only Tier 0, redaction, and no persisted writes are implemented. Per-Network-action audit records are incomplete. |
 | Seven-crate workspace | Partial under the literal rule | The production DAG is layered and acyclic, but `vibescan-git` and `vibescan-supabase` each dev-depend on sibling `vibescan-secrets`. The boundary script checks normal edges only. |
-| Shared data model | Substantially implemented | Findings, evidence, scope, warnings, locations, and additional provenance exist. The collector cannot currently represent an alternate path for a content-deduplicated unit. |
+| Shared data model | Phase 1 identity complete | `ContentId`, `UnitLocation`, `ScannableUnit.locations`, and `UnitRef.locations` form one canonical occurrence model; singular competing fields were removed. |
 | Content handling | Substantially implemented | Binary/size skips, ignore layers, forced real-env/client-bundle scanning, inline allow, and commit allowlists exist. Historical paths intentionally use current ignore state. |
-| Scan pipeline | Partial | All five phases exist, but units/candidates/findings are materialized rather than streamed, and exact unit-to-content identity is lost in one enrichment lookup. |
-| Location classification | Verified for covered Tier C cases | Whole-segment monorepo matching, server-first precedence, and negative substring controls are tested. Global blob dedup can still erase an alternate client-reachable path before classification reaches a finding. |
+| Scan pipeline | Partial | All five phases exist and exact content identity now survives into candidates, but units/candidates/findings are materialized rather than streamed and core still uses the legacy path-keyed enrichment lookup pending Phase 2. |
+| Location classification | Verified for covered Tier C and Phase 1 cases | Whole-segment monorepo matching, server-first precedence, substring controls, and identical-content server/browser occurrence retention are tested. |
 | Generic secret substrate | Partial application contract | Keyword prefilter, regex, entropy, allowlists, attribution, and the required provider families exist. `Detector::from_toml` is not wired through core/CLI, so the architecture's extendable ruleset is library-only. |
-| Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and content hashing exist. Cross-path content dedup retains only extra provenance, not extra paths/classes; output is a `Vec`, not a stream. |
+| Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes and project extraction exist. New-format project association is same-unit only; historical versions at one path can receive the wrong unit content; no user-supplied project/key pair exists. |
 | Tier 0 RLS probe | Partial, happy path strong | Feature/runtime gating, `apikey`, LocalStatic candidate harvest, URL restriction, GET-only probing, warning taxonomy, mock tests, and no row retention exist. Candidate tables are global across projects, and protected attempts are not retained as auditable action outcomes. |
 | Correlation | Partial | The two v1 rules are registered declaratively and covered in standard cases. Committed predicates ignore `additional_provenance`, and projectless/project-bearing copies of one key can remain split, causing false negatives. |
@@ -135,13 +157,12 @@ split from the client key. Those cases are now the first correctness priority.
 
 ### P0 — headline false-negative risks
 
-1. **Alternate paths are lost during content dedup.**
+1. **Alternate paths during content dedup — resolved in Phase 1.**
 
-   `vibescan-git::UnitCollector` keys globally by content hash. On a duplicate,
-   it appends only provenance to the first unit. If identical content exists in
-   both a server file and a browser bundle, the second path and its
-   `ClientReachable` class disappear. This conflicts with reproducible
-   multi-location evidence and can suppress correlation.
+   The collector now groups by full SHA-256 `ContentId` and retains a canonical,
+   deterministic list of `UnitLocation`s. Identical server/browser content is
+   scanned once while both paths, classes, and provenances reach candidates and
+   findings.
 
 2. **Committed predicates ignore additional provenance.**
 
