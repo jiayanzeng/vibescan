@@ -84,7 +84,7 @@ pub struct Tier0RlsProbeOutput {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Tier0RlsProbeWarning {
     KeyRejected { url: String },
-    RootEnumerationForbidden { url: String },
+    RootEnumerationUnavailable { url: String, status: u16 },
     NoCandidateTables { project_url: String },
     Transport { url: String, message: String },
 }
@@ -95,9 +95,9 @@ impl Tier0RlsProbeWarning {
             Self::KeyRejected { url } => {
                 format!("Tier 0 RLS read probe key rejected with HTTP 401 at {url}")
             }
-            Self::RootEnumerationForbidden { url } => {
+            Self::RootEnumerationUnavailable { url, status } => {
                 format!(
-                    "Tier 0 RLS read probe root enumeration unavailable with public key at {url}; continuing with LocalStatic candidates"
+                    "Tier 0 RLS read probe root enumeration unavailable with public key at {url} (HTTP {status}); continuing with LocalStatic candidates"
                 )
             }
             Self::NoCandidateTables { project_url } => {
@@ -184,14 +184,14 @@ pub fn probe_tier0_read_with_client(
                     message: error.to_string(),
                 }),
             },
-            401 => output.warnings.push(Tier0RlsProbeWarning::KeyRejected {
-                url: openapi_url.clone(),
-            }),
-            403 => output
-                .warnings
-                .push(Tier0RlsProbeWarning::RootEnumerationForbidden {
-                    url: openapi_url.clone(),
-                }),
+            status @ (401 | 403) => {
+                output
+                    .warnings
+                    .push(Tier0RlsProbeWarning::RootEnumerationUnavailable {
+                        url: openapi_url.clone(),
+                        status,
+                    })
+            }
             _ => output.warnings.push(Tier0RlsProbeWarning::Transport {
                 url: openapi_url.clone(),
                 message: format!("OpenAPI root returned HTTP {}", openapi.status),
@@ -624,8 +624,8 @@ fn dedup_probe_warnings(warnings: &mut Vec<Tier0RlsProbeWarning>) {
 fn probe_warning_cause_key(warning: &Tier0RlsProbeWarning) -> String {
     match warning {
         Tier0RlsProbeWarning::KeyRejected { .. } => "key-rejected".to_owned(),
-        Tier0RlsProbeWarning::RootEnumerationForbidden { .. } => {
-            "root-enumeration-forbidden".to_owned()
+        Tier0RlsProbeWarning::RootEnumerationUnavailable { status, .. } => {
+            format!("root-enumeration-unavailable:{status}")
         }
         Tier0RlsProbeWarning::NoCandidateTables { project_url } => {
             format!("no-candidate-tables:{project_url}")
@@ -1018,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn tier0_read_probe_continues_after_root_forbidden_with_harvested_tables() {
+    fn tier0_read_probe_continues_after_root_unavailable_with_harvested_tables() {
         let client = FakeRlsClient::new([
             (
                 "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
@@ -1043,7 +1043,7 @@ mod tests {
         assert_eq!(output.findings.len(), 1);
         assert!(matches!(
             output.warnings.as_slice(),
-            [Tier0RlsProbeWarning::RootEnumerationForbidden { .. }]
+            [Tier0RlsProbeWarning::RootEnumerationUnavailable { status: 403, .. }]
         ));
         assert!(
             output.warnings[0]
@@ -1053,13 +1053,13 @@ mod tests {
     }
 
     #[test]
-    fn tier0_read_probe_warns_once_when_public_key_is_rejected() {
+    fn tier0_read_probe_reserves_key_rejected_for_table_request() {
         let client = FakeRlsClient::new([
             (
                 "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
                 RlsHttpResponse {
-                    status: 401,
-                    body: r#"{"message":"invalid api key"}"#.to_owned(),
+                    status: 200,
+                    body: r#"{"paths":{"/profiles":{"get":{}}}}"#.to_owned(),
                 },
             ),
             (
@@ -1108,7 +1108,7 @@ mod tests {
         assert_eq!(output.findings.len(), 1);
         assert!(output.warnings.iter().any(|warning| matches!(
             warning,
-            Tier0RlsProbeWarning::RootEnumerationForbidden { .. }
+            Tier0RlsProbeWarning::RootEnumerationUnavailable { status: 401, .. }
         )));
         assert!(
             !output
@@ -1144,7 +1144,7 @@ mod tests {
         assert!(output.findings.is_empty());
         assert!(output.warnings.iter().any(|warning| matches!(
             warning,
-            Tier0RlsProbeWarning::RootEnumerationForbidden { .. }
+            Tier0RlsProbeWarning::RootEnumerationUnavailable { status: 401, .. }
         )));
         assert!(
             output
@@ -1171,7 +1171,7 @@ mod tests {
         assert_eq!(output.warnings.len(), 2);
         assert!(output.warnings.iter().any(|warning| matches!(
             warning,
-            Tier0RlsProbeWarning::RootEnumerationForbidden { .. }
+            Tier0RlsProbeWarning::RootEnumerationUnavailable { status: 403, .. }
         )));
         assert!(
             output

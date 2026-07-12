@@ -436,6 +436,20 @@ scope work and Phase 4 CLI/baseline behavior.
    separately rejects the key.
 5. Keep LocalStatic findings even when all Network requests degrade.
 
+#### Phase 3A status — implemented (2026-07-12)
+
+- Root HTTP 401 and 403 now emit
+  `RootEnumerationUnavailable { url, status }` and continue with harvested
+  LocalStatic candidates.
+- `KeyRejected` is emitted only for a table request returning HTTP 401.
+- Mocked cases prove root-401/table-200 produces an exposed finding plus only
+  the root warning, while root-401/table-401 preserves both distinct outcomes.
+- The root-403 fallback, no-candidate warning, exact `apikey` assertions, and
+  read-only request behavior remain green. No live Network action is used.
+
+The two Phase 3A regressions are green. Remaining deliberate reds are the two
+Phase 3B project-table-scope cases and the three Phase 4 CLI/baseline cases.
+
 #### 3B. Harvest typed, project-scoped API references
 
 Replace the global string set with typed internal references:

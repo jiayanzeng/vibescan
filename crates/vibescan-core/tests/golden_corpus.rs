@@ -219,7 +219,7 @@ fn network_exposed_public_key_chain_fixture_is_gated() {
     .expect("mocked probe succeeds");
     assert!(matches!(
         output.warnings.as_slice(),
-        [Tier0RlsProbeWarning::RootEnumerationForbidden { .. }]
+        [Tier0RlsProbeWarning::RootEnumerationUnavailable { status: 403, .. }]
     ));
     assert_eq!(output.findings.len(), 1);
 

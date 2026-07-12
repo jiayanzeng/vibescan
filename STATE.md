@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-12
 
-Current implementation baseline: `245445d` (`main`) plus the Phase 2 worktree
+Current implementation baseline: `36b0a1b` (`main`) plus the Phase 3A worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -16,7 +16,9 @@ vibescan is a substantial, runnable local-first Rust CLI. Every build-order
 step in architecture section 15 (steps 1–8) has an implementation, Tier C has
 landed, Phase 1 preserves exact content/source occurrences, and Phase 2 now
 uses that identity for exact Supabase enrichment, conservative project-aware
-coalescing, Tier 0 input preparation, and provenance-aware correlation.
+coalescing, Tier 0 input preparation, and provenance-aware correlation. Phase
+3A now distinguishes root-enumeration unavailability from table-level key
+rejection.
 
 The strict completion verdict is nevertheless **partial**, not complete.
 Several later cross-phase linkage defects can still suppress the headline
@@ -42,15 +44,39 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 2 starts from `245445d`, which contains the Phase 0 regression lock and
-Phase 1 identity model. The current worktree changes `vibescan-core` plus the
-Phase 2 planning/status documentation. No shared serialized shape, fixture
-manifest, report snapshot, network transport, CLI behavior, or target-project
-data was changed.
+Phase 3A starts from `36b0a1b`, which contains Phases 0–2. The current worktree
+changes the Supabase warning type/handling, the mocked network golden assertion,
+and Phase 3A planning/status documentation. No report snapshot, transport
+implementation, CLI behavior, live endpoint, or target-project data changed.
 
-All Phase 1–2 identity/linkage regressions are green. The suite remains
-intentionally red only for unfinished Phase 3 warning/table-scope behavior and
-Phase 4 CLI/baseline behavior.
+All Phase 1–3A regressions are green. The suite remains intentionally red only
+for Phase 3B project-table scoping and Phase 4 CLI/baseline behavior.
+
+## Phase 3A verification observed on 2026-07-12
+
+The following pass on the current Phase 3A worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-supabase --locked
+cargo test --workspace --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+cargo test --workspace --features network --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error \
+  --skip tier0_probe_inputs_keep_harvested_tables_project_local \
+  --skip tier0_probe_inputs_do_not_cross_probe_ambiguous_harvested_table
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+No live Network action was run. The remaining deliberate reds are exactly two
+Phase 3B table-scope cases and three Phase 4 CLI/baseline cases.
 
 ## Phase 2 verification observed on 2026-07-12
 
@@ -152,7 +178,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Generic secret substrate | Partial application contract | Keyword prefilter, regex, entropy, allowlists, attribution, and the required provider families exist. `Detector::from_toml` is not wired through core/CLI, so the architecture's extendable ruleset is library-only. |
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
-| Tier 0 RLS probe | Partial, happy path strong | Feature/runtime gating, `apikey`, LocalStatic candidate harvest, URL restriction, GET-only probing, warning taxonomy, mock tests, and no row retention exist. Candidate tables are global across projects, and protected attempts are not retained as auditable action outcomes. |
+| Tier 0 RLS probe | Partial, Phase 3A verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, root 401/403 fallback, and table-only key rejection are mock-tested. Candidate tables remain global across projects pending 3B, and protected attempts lack durable action records pending 3C. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML exist with redacted evidence, locations, history context, exit gates, and deterministic snapshots. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
