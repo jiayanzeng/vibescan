@@ -19,7 +19,9 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::overrides::{Override, OverrideBuilder};
 use ignore::{DirEntry, Match, WalkBuilder};
 use sha2::{Digest, Sha256};
-use vibescan_types::{LocationClass, Provenance, RepoPath, ScannableUnit, ScopeWarning};
+use vibescan_types::{
+    ContentId, LocationClass, Provenance, RepoPath, ScannableUnit, ScopeWarning, UnitLocation,
+};
 
 pub const DEFAULT_MAX_BYTES: usize = 4 * 1024 * 1024;
 
@@ -608,12 +610,16 @@ fn push_content(
         return;
     }
 
+    let content_id = content_id(&content);
     collector.push(ScannableUnit {
-        location_class: classify_location(&path.0),
+        content_id,
         content,
-        path,
-        provenance,
-        additional_provenance: Vec::new(),
+        locations: vec![UnitLocation {
+            location_class: classify_location(&path.0),
+            path,
+            provenance,
+            additional_provenance: Vec::new(),
+        }],
     });
 }
 
@@ -897,38 +903,93 @@ const ALWAYS_SKIP_PATTERNS: &[&str] = &[
 
 #[derive(Debug)]
 struct UnitCollector {
-    by_content_hash: BTreeMap<[u8; 32], usize>,
+    by_content_id: BTreeMap<ContentId, usize>,
     units: Vec<ScannableUnit>,
 }
 
 impl UnitCollector {
     fn new() -> Self {
         Self {
-            by_content_hash: BTreeMap::new(),
+            by_content_id: BTreeMap::new(),
             units: Vec::new(),
         }
     }
 
     fn push(&mut self, unit: ScannableUnit) {
-        let content_hash = content_hash(&unit.content);
-        if let Some(existing) = self.by_content_hash.get(&content_hash).copied() {
-            self.units[existing]
-                .additional_provenance
-                .push(unit.provenance);
+        if let Some(existing) = self.by_content_id.get(&unit.content_id).copied() {
+            for location in unit.locations {
+                merge_unit_location(&mut self.units[existing].locations, location);
+            }
             return;
         }
         let index = self.units.len();
-        self.by_content_hash.insert(content_hash, index);
+        self.by_content_id.insert(unit.content_id.clone(), index);
         self.units.push(unit);
     }
 
-    fn into_units(self) -> Vec<ScannableUnit> {
+    fn into_units(mut self) -> Vec<ScannableUnit> {
+        for unit in &mut self.units {
+            for location in &mut unit.locations {
+                normalize_provenances(location);
+            }
+            unit.locations.sort_by(|left, right| {
+                left.path
+                    .cmp(&right.path)
+                    .then_with(|| left.location_class.cmp(&right.location_class))
+                    .then_with(|| {
+                        provenance_sort_key(&left.provenance)
+                            .cmp(&provenance_sort_key(&right.provenance))
+                    })
+            });
+            unit.locations.dedup();
+        }
         self.units
     }
 }
 
-fn content_hash(content: &[u8]) -> [u8; 32] {
-    Sha256::digest(content).into()
+fn merge_unit_location(locations: &mut Vec<UnitLocation>, incoming: UnitLocation) {
+    if let Some(existing) = locations
+        .iter_mut()
+        .find(|location| location.path == incoming.path)
+    {
+        existing
+            .additional_provenance
+            .push(incoming.provenance);
+        existing
+            .additional_provenance
+            .extend(incoming.additional_provenance);
+        normalize_provenances(existing);
+    } else {
+        locations.push(incoming);
+    }
+}
+
+fn normalize_provenances(location: &mut UnitLocation) {
+    let mut provenances = std::iter::once(location.provenance.clone())
+        .chain(location.additional_provenance.drain(..))
+        .collect::<Vec<_>>();
+    provenances.sort_by_key(provenance_sort_key);
+    provenances.dedup();
+    if let Some(primary) = provenances.first().cloned() {
+        location.provenance = primary;
+        location.additional_provenance = provenances.into_iter().skip(1).collect();
+    }
+}
+
+fn provenance_sort_key(provenance: &Provenance) -> (u8, String, String, String) {
+    match provenance {
+        Provenance::WorkingTree => (0, String::new(), String::new(), String::new()),
+        Provenance::Commit { sha, author, date } => (
+            1,
+            sha.clone(),
+            author.clone().unwrap_or_default(),
+            date.clone().unwrap_or_default(),
+        ),
+    }
+}
+
+fn content_id(content: &[u8]) -> ContentId {
+    ContentId(Sha256::digest(content).into())
 }
 
 #[derive(Debug)]
@@ -1473,7 +1534,11 @@ mod tests {
         let mut paths = output
             .units
             .iter()
-            .map(|unit| unit.path.0.clone())
+            .flat_map(|unit| {
+                unit.locations
+                    .iter()
+                    .map(|location| location.path.0.clone())
+            })
             .collect::<Vec<_>>();
         paths.sort();
         paths

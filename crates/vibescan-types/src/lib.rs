@@ -12,17 +12,25 @@ use serde::{Deserialize, Serialize};
 /// One item of repository content made available to detector phases.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ScannableUnit {
+    /// Full-content SHA-256 identity computed by the content-owning collector.
+    pub content_id: ContentId,
     /// Raw file/blob bytes. Readers apply binary and size skip rules before
     /// constructing scan units.
     pub content: Vec<u8>,
-    /// Repository-relative path.
+    /// Canonical source occurrences for this exact content.
+    pub locations: Vec<UnitLocation>,
+}
+
+/// Opaque full-content SHA-256 identity linking collection and enrichment.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct ContentId(pub [u8; 32]);
+
+/// One repository source occurrence of a content unit.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct UnitLocation {
     pub path: RepoPath,
-    /// Where this content came from.
     pub provenance: Provenance,
-    /// Additional places where identical content appeared after content-hash
-    /// deduplication.
     pub additional_provenance: Vec<Provenance>,
-    /// Heuristic location class used by later severity decisions.
     pub location_class: LocationClass,
 }
 
@@ -31,7 +39,7 @@ pub struct ScannableUnit {
 pub struct RepoPath(pub String);
 
 /// Origin of a scannable unit or finding location.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Provenance {
     WorkingTree,
@@ -82,10 +90,8 @@ pub enum CandidateKind {
 /// Back-reference to the source unit without retaining full content.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UnitRef {
-    pub path: RepoPath,
-    pub provenance: Provenance,
-    pub additional_provenance: Vec<Provenance>,
-    pub location_class: LocationClass,
+    pub content_id: ContentId,
+    pub locations: Vec<UnitLocation>,
 }
 
 /// 1-based source span.

@@ -11,9 +11,10 @@ use std::fmt;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use vibescan_types::{
-    CandidateKind, LocationClass, Provenance, RepoPath, RuleId, ScannableUnit, SecretCandidate,
-    Span, UnitRef,
+    CandidateKind, ContentId, LocationClass, Provenance, RepoPath, RuleId, ScannableUnit,
+    SecretCandidate, Span, UnitLocation, UnitRef,
 };
 
 const INLINE_ALLOW_MARKER: &str = "vibescan:allow";
@@ -95,7 +96,6 @@ impl Detector {
 
         self.rules
             .iter()
-            .filter(|rule| rule.applies_to_path(&unit.path.0))
             .filter(|rule| rule.keyword_prefilter(line))
             .flat_map(|rule| rule.detect(line, line_number, unit, &self.global_allowlists))
             .collect()
@@ -158,21 +158,29 @@ impl CompiledRule {
                     return None;
                 }
 
-                let context = AllowlistContext {
-                    path: &unit.path.0,
-                    secret: secret.as_str(),
-                    line,
-                    provenance: &unit.provenance,
-                    additional_provenance: &unit.additional_provenance,
-                };
-                if self
-                    .allowlists
+                let locations = unit
+                    .locations
                     .iter()
-                    .any(|allowlist| allowlist.matches(context))
-                    || global_allowlists
-                        .iter()
-                        .any(|allowlist| allowlist.matches(context))
-                {
+                    .filter(|location| self.applies_to_path(&location.path.0))
+                    .filter(|location| {
+                        let context = AllowlistContext {
+                            path: &location.path.0,
+                            secret: secret.as_str(),
+                            line,
+                            provenance: &location.provenance,
+                            additional_provenance: &location.additional_provenance,
+                        };
+                        !self
+                            .allowlists
+                            .iter()
+                            .any(|allowlist| allowlist.matches(context))
+                            && !global_allowlists
+                                .iter()
+                                .any(|allowlist| allowlist.matches(context))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if locations.is_empty() {
                     return None;
                 }
 
@@ -182,10 +190,8 @@ impl CompiledRule {
                     raw_match: secret.as_str().as_bytes().to_vec(),
                     entropy,
                     unit_ref: UnitRef {
-                        path: unit.path.clone(),
-                        provenance: unit.provenance.clone(),
-                        additional_provenance: unit.additional_provenance.clone(),
-                        location_class: unit.location_class,
+                        content_id: unit.content_id.clone(),
+                        locations,
                     },
                     span: Span {
                         line: line_number,
@@ -436,12 +442,16 @@ fn compile_regexes(patterns: Vec<String>) -> Result<Vec<Regex>, DetectorError> {
 
 /// Helper for tests and early callers before `vibescan-git` exists.
 pub fn working_tree_unit(path: impl Into<String>, content: impl Into<Vec<u8>>) -> ScannableUnit {
+    let content = content.into();
     ScannableUnit {
-        content: content.into(),
-        path: RepoPath(path.into()),
-        provenance: Provenance::WorkingTree,
-        additional_provenance: Vec::new(),
-        location_class: LocationClass::Unknown,
+        content_id: ContentId(Sha256::digest(&content).into()),
+        content,
+        locations: vec![UnitLocation {
+            path: RepoPath(path.into()),
+            provenance: Provenance::WorkingTree,
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::Unknown,
+        }],
     }
 }
 
@@ -596,7 +606,7 @@ mod tests {
         )
         .expect("ruleset compiles");
         let mut unit = working_tree_unit("src/app.ts", br#"token = "REAL_TOKEN_VALUE""#.to_vec());
-        unit.provenance = Provenance::Commit {
+        unit.locations[0].provenance = Provenance::Commit {
             sha: "abc123".to_owned(),
             author: None,
             date: None,
@@ -645,8 +655,8 @@ mod tests {
     fn candidate_snapshot(mut candidates: Vec<SecretCandidate>) -> Vec<String> {
         candidates.sort_by(|left, right| {
             left.unit_ref
-                .path
-                .cmp(&right.unit_ref.path)
+                .locations
+                .cmp(&right.unit_ref.locations)
                 .then_with(|| left.span.line.cmp(&right.span.line))
                 .then_with(|| left.span.col_start.cmp(&right.span.col_start))
                 .then_with(|| left.rule_id.cmp(&right.rule_id))
@@ -657,7 +667,7 @@ mod tests {
             .map(|candidate| {
                 format!(
                     "{}:{}:{}:{}:{}",
-                    candidate.unit_ref.path.0,
+                    candidate.unit_ref.locations[0].path.0,
                     candidate.span.line,
                     candidate.span.col_start,
                     candidate.rule_id.0,

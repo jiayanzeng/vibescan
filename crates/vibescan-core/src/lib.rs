@@ -1596,6 +1596,43 @@ mod tests {
     }
 
     #[test]
+    fn identical_content_at_server_and_browser_paths_retains_both_locations() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        let content = "NEXT_PUBLIC_SUPABASE_URL=https://abcdefghijklmnopqrst.supabase.co\nNEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789\n";
+        repo.write("apps/api/.env.local", content);
+        repo.write("apps/web/.next/static/chunks/config.js", content);
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+        let findings = publishable_key_findings(&result);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0]
+                .locations
+                .iter()
+                .map(|location| location.path.0.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "apps/api/.env.local",
+                "apps/web/.next/static/chunks/config.js"
+            ]
+        );
+        assert_eq!(
+            max_location_class(&findings[0].locations),
+            LocationClass::ClientReachable
+        );
+    }
+
+    #[test]
     fn coalescing_keeps_different_secrets_at_same_path_separate() {
         let repo = TestRepo::new();
         repo.git(["init"]);
@@ -1667,6 +1704,133 @@ mod tests {
         );
     }
 
+    #[test]
+    fn projectless_copy_joins_single_known_project_for_same_fingerprint() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        let key = "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        repo.write(
+            "apps/web/src/config.ts",
+            &format!(
+                "const url = 'https://abcdefghijklmnopqrst.supabase.co';\nconst key = '{key}';\n"
+            ),
+        );
+        repo.write(
+            "apps/web/.next/static/chunks/config.js",
+            &format!("window.supabaseKey = '{key}';\n"),
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+        let findings = publishable_key_findings(&result);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].locations.len(), 2);
+        assert!(matches!(
+            findings[0].evidence,
+            Evidence::SupabaseKey {
+                project: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn ambiguous_projectless_copy_does_not_join_known_different_projects() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        let key = "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        repo.write(
+            "apps/a/src/config.ts",
+            &format!(
+                "const url = 'https://abcdefghijklmnopqrst.supabase.co';\nconst key = '{key}';\n"
+            ),
+        );
+        repo.write(
+            "apps/b/src/config.ts",
+            &format!(
+                "const url = 'https://zyxwvutsrqponmlkjihg.supabase.co';\nconst key = '{key}';\n"
+            ),
+        );
+        repo.write("shared/config.ts", &format!("const key = '{key}';\n"));
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+        let findings = publishable_key_findings(&result);
+
+        assert_eq!(findings.len(), 3);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|finding| matches!(
+                    finding.evidence,
+                    Evidence::SupabaseKey { project: None, .. }
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn historical_versions_at_same_path_keep_their_own_project_context() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.git(["config", "user.email", "phase0@example.invalid"]);
+        repo.git(["config", "user.name", "Phase Zero"]);
+        let key = "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        repo.write(
+            "src/config.ts",
+            &format!(
+                "const url = 'https://abcdefghijklmnopqrst.supabase.co';\nconst key = '{key}';\n"
+            ),
+        );
+        repo.git(["add", "src/config.ts"]);
+        repo.git(["commit", "-m", "project a"]);
+        repo.write(
+            "src/config.ts",
+            &format!(
+                "const url = 'https://zyxwvutsrqponmlkjihg.supabase.co';\nconst key = '{key}';\n"
+            ),
+        );
+        repo.git(["add", "src/config.ts"]);
+        repo.git(["commit", "-m", "project b"]);
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+        let projects = publishable_key_findings(&result)
+            .into_iter()
+            .filter_map(project_url_from_key)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(
+            projects,
+            BTreeSet::from([
+                "https://abcdefghijklmnopqrst.supabase.co",
+                "https://zyxwvutsrqponmlkjihg.supabase.co"
+            ])
+        );
+    }
+
     #[cfg(feature = "network")]
     #[test]
     fn tier0_probe_inputs_dedup_same_project_and_prefer_client_location() {
@@ -1718,6 +1882,94 @@ mod tests {
             LocationClass::ClientReachable
         );
         assert_eq!(inputs[0].candidate_tables, candidate_tables);
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
+    fn tier0_probe_inputs_keep_harvested_tables_project_local() {
+        let candidate_a = publishable_candidate(
+            "apps/a/.next/static/chunks/a.js",
+            LocationClass::ClientReachable,
+        );
+        let candidate_b = publishable_candidate(
+            "apps/b/.next/static/chunks/b.js",
+            LocationClass::ClientReachable,
+        );
+        let finding_a = public_key_finding_at(
+            "key-a",
+            "apps/a/.next/static/chunks/a.js",
+            LocationClass::ClientReachable,
+        );
+        let mut finding_b = public_key_finding_at(
+            "key-b",
+            "apps/b/.next/static/chunks/b.js",
+            LocationClass::ClientReachable,
+        );
+        if let Evidence::SupabaseKey {
+            project: Some(project),
+            ..
+        } = &mut finding_b.evidence
+        {
+            project.ref_id = Some("zyxwvutsrqponmlkjihg".to_owned());
+            project.url = "https://zyxwvutsrqponmlkjihg.supabase.co".to_owned();
+        }
+        let classifications = vec![(&candidate_a, finding_a), (&candidate_b, finding_b)];
+        let harvested = BTreeSet::from(["accounts_a".to_owned(), "accounts_b".to_owned()]);
+
+        let inputs = tier0_probe_inputs(&classifications, &harvested);
+        let tables_by_project = inputs
+            .into_iter()
+            .map(|input| (input.project.url, input.candidate_tables))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(
+            tables_by_project["https://abcdefghijklmnopqrst.supabase.co"],
+            BTreeSet::from(["accounts_a".to_owned()])
+        );
+        assert_eq!(
+            tables_by_project["https://zyxwvutsrqponmlkjihg.supabase.co"],
+            BTreeSet::from(["accounts_b".to_owned()])
+        );
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
+    fn tier0_probe_inputs_do_not_cross_probe_ambiguous_harvested_table() {
+        let candidate_a = publishable_candidate(
+            "apps/a/.next/static/chunks/a.js",
+            LocationClass::ClientReachable,
+        );
+        let candidate_b = publishable_candidate(
+            "apps/b/.next/static/chunks/b.js",
+            LocationClass::ClientReachable,
+        );
+        let finding_a = public_key_finding_at(
+            "key-a",
+            "apps/a/.next/static/chunks/a.js",
+            LocationClass::ClientReachable,
+        );
+        let mut finding_b = public_key_finding_at(
+            "key-b",
+            "apps/b/.next/static/chunks/b.js",
+            LocationClass::ClientReachable,
+        );
+        if let Evidence::SupabaseKey {
+            project: Some(project),
+            ..
+        } = &mut finding_b.evidence
+        {
+            project.ref_id = Some("zyxwvutsrqponmlkjihg".to_owned());
+            project.url = "https://zyxwvutsrqponmlkjihg.supabase.co".to_owned();
+        }
+        let classifications = vec![(&candidate_a, finding_a), (&candidate_b, finding_b)];
+        let ambiguously_scoped_tables = BTreeSet::from(["shared_profiles".to_owned()]);
+
+        let inputs = tier0_probe_inputs(&classifications, &ambiguously_scoped_tables);
+
+        assert!(
+            inputs.iter().all(|input| input.candidate_tables.is_empty()),
+            "an ambiguously associated table must not be sent to either project"
+        );
     }
 
     #[test]
@@ -2172,6 +2424,96 @@ mod tests {
         assert_eq!(correlations.len(), 1);
         assert_eq!(correlations[0].severity, Severity::Critical);
         assert_eq!(correlations[0].related, vec![key.id, rls.id]);
+    }
+
+    #[test]
+    fn additional_commit_provenance_qualifies_server_public_key_for_correlation() {
+        let mut key = public_key_finding();
+        key.locations[0].location_class = LocationClass::ServerOnly;
+        key.locations[0].additional_provenance = vec![Provenance::Commit {
+            sha: "0123456789abcdef".to_owned(),
+            author: None,
+            date: None,
+        }];
+
+        let correlations = correlate_findings(&[key, rls_finding()]);
+
+        assert!(correlations.iter().any(|finding| matches!(
+            &finding.evidence,
+            Evidence::Correlation { rule_id, .. } if rule_id.0 == "exposed-public-key-chain"
+        )));
+    }
+
+    #[test]
+    fn additional_commit_provenance_qualifies_elevated_key_for_correlation() {
+        let mut key = public_key_finding();
+        key.id = FindingId("elevated-key".to_owned());
+        key.locations[0].location_class = LocationClass::ServerOnly;
+        key.locations[0].additional_provenance = vec![Provenance::Commit {
+            sha: "fedcba9876543210".to_owned(),
+            author: None,
+            date: None,
+        }];
+        if let Evidence::SupabaseKey { class, .. } = &mut key.evidence {
+            *class = SupabaseKeyClass::SecretNew;
+        }
+
+        let correlations = correlate_findings(&[key, rls_finding()]);
+
+        assert!(correlations.iter().any(|finding| matches!(
+            &finding.evidence,
+            Evidence::Correlation { rule_id, .. } if rule_id.0 == "elevated-key-in-tree"
+        )));
+    }
+
+    #[test]
+    fn server_only_uncommitted_public_key_remains_outside_correlation() {
+        let mut key = public_key_finding();
+        key.locations[0].location_class = LocationClass::ServerOnly;
+
+        assert!(correlate_findings(&[key, rls_finding()]).is_empty());
+    }
+
+    #[test]
+    fn correlation_locations_are_a_deterministic_unique_union() {
+        let mut key = public_key_finding();
+        key.locations = vec![
+            Location {
+                path: RepoPath("apps/api/.env.local".to_owned()),
+                span: None,
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ServerOnly,
+            },
+            Location {
+                path: RepoPath("apps/web/src/config.ts".to_owned()),
+                span: None,
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ClientReachable,
+            },
+        ];
+        let mut rls = rls_finding();
+        rls.locations = vec![key.locations[1].clone()];
+
+        let correlation = correlate_findings(&[key, rls])
+            .into_iter()
+            .find(|finding| {
+                matches!(
+                    &finding.evidence,
+                    Evidence::Correlation { rule_id, .. } if rule_id.0 == "exposed-public-key-chain"
+                )
+            })
+            .expect("correlation emitted");
+
+        assert_eq!(
+            correlation
+                .locations
+                .iter()
+                .map(|location| location.path.0.as_str())
+                .collect::<Vec<_>>(),
+            vec!["apps/api/.env.local", "apps/web/src/config.ts"]
+        );
     }
 
     #[test]

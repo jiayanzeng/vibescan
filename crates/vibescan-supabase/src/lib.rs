@@ -1033,6 +1033,78 @@ mod tests {
     }
 
     #[test]
+    fn root_unauthorized_but_table_readable_is_not_reported_as_key_rejection() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 401,
+                    body: r#"{"message":"root enumeration unavailable"}"#.to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 200,
+                    body: r#"[{"id":1}]"#.to_owned(),
+                },
+            ),
+        ]);
+        let input = tier0_input_with_tables(["profiles"]);
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        client.assert_all_requests_include_apikey(&input.public_key);
+        assert_eq!(output.findings.len(), 1);
+        assert!(output.warnings.iter().any(|warning| matches!(
+            warning,
+            Tier0RlsProbeWarning::RootEnumerationForbidden { .. }
+        )));
+        assert!(
+            !output
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, Tier0RlsProbeWarning::KeyRejected { .. }))
+        );
+    }
+
+    #[test]
+    fn root_unauthorized_and_table_unauthorized_report_distinct_outcomes() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 401,
+                    body: r#"{"message":"root enumeration unavailable"}"#.to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 401,
+                    body: r#"{"message":"invalid api key"}"#.to_owned(),
+                },
+            ),
+        ]);
+        let input = tier0_input_with_tables(["profiles"]);
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        client.assert_all_requests_include_apikey(&input.public_key);
+        assert!(output.findings.is_empty());
+        assert!(output.warnings.iter().any(|warning| matches!(
+            warning,
+            Tier0RlsProbeWarning::RootEnumerationForbidden { .. }
+        )));
+        assert!(
+            output
+                .warnings
+                .iter()
+                .any(|warning| matches!(warning, Tier0RlsProbeWarning::KeyRejected { .. }))
+        );
+    }
+
+    #[test]
     fn tier0_read_probe_warns_when_there_are_no_candidate_tables() {
         let client = FakeRlsClient::new([(
             "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
