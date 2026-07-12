@@ -1,5 +1,10 @@
 vibescan snapshot - 1 finding(s) in 42 ms
-target: fixtures/report-format-snapshots | scope: working tree only | network: disabled
+target: fixtures/report-format-snapshots | scope: working tree only | network: enabled
+
+network actions:
+  - GET root enumeration at https://abcdefghijklmnopqrst.supabase.co/rest/v1/ -> root enumerated; HTTP 200
+  - GET table read for table private_profiles at https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1 -> protected; HTTP 403
+  - GET table read for table public_profiles at https://abcdefghijklmnopqrst.supabase.co/rest/v1/public_profiles?select=*&limit=1 -> exposed; HTTP 200; observed 1 row(s)
 
 [high] Secret candidate matched stripe-secret-key [secret_exposure]
   id: snapshot-secret

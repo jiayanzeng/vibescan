@@ -38,9 +38,38 @@
       "mode": "working_tree_only"
     },
     "network": {
-      "enabled": false,
-      "tier0_read_probe": false,
-      "tier1_introspection": false
+      "enabled": true,
+      "tier0_read_probe": true,
+      "tier1_introspection": false,
+      "actions": [
+        {
+          "kind": "root_enumeration",
+          "intent": "get",
+          "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+          "table": null,
+          "status": 200,
+          "outcome": "root_enumerated",
+          "observed_row_count": null
+        },
+        {
+          "kind": "table_read",
+          "intent": "get",
+          "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1",
+          "table": "private_profiles",
+          "status": 403,
+          "outcome": "protected",
+          "observed_row_count": null
+        },
+        {
+          "kind": "table_read",
+          "intent": "get",
+          "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/public_profiles?select=*&limit=1",
+          "table": "public_profiles",
+          "status": 200,
+          "outcome": "exposed",
+          "observed_row_count": 1
+        }
+      ]
     },
     "warnings": []
   },

@@ -19,6 +19,9 @@ feature and the user explicitly opts in.
   build output are skipped.
 - Tier 0 RLS probing is read-only, feature-gated, and opt-in. It only talks to
   Supabase project URLs discovered from keys in the scanned repository.
+- Every attempted Tier 0 GET is recorded as redacted scan-scope evidence in
+  JSON, SARIF, TTY, and HTML. Records omit keys, headers, response bodies, and
+  rows; protected outcomes do not become findings or affect the exit gate.
 - Generic secret rules use an attributed Gitleaks-compatible subset; Supabase
   key semantics and correlation remain vibescan-specific.
 

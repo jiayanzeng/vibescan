@@ -733,6 +733,7 @@ impl RlsHttpClient for MockPostgrest {
             .cloned()
             .ok_or_else(|| vibescan_supabase::RlsProbeError::Http {
                 url: url.to_owned(),
+                status: None,
                 source: "missing mock response".to_owned(),
             })
     }

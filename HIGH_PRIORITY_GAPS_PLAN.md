@@ -520,6 +520,29 @@ they must not change finding statistics or the severity gate.
 Update deterministic JSON/SARIF/TTY/HTML coverage and snapshots for the new
 scope evidence.
 
+Implemented on 2026-07-12:
+
+- `vibescan-types` now owns the serializable `NetworkActionAudit` vocabulary.
+  Older serialized scopes deserialize with an empty action list.
+- Every attempted Tier 0 root or table GET emits exactly one record with its
+  kind, GET intent, normalized endpoint, optional table, available status, and
+  classified outcome. Only exposed reads carry an observed row count.
+- Root enumeration/unavailability, exposed, empty, protected, not-found,
+  key-rejected, invalid-response, and transport-error paths are covered by
+  injected-client tests. Serialized-record negative controls reject public
+  keys, `apikey` header material, response bodies, and returned row values.
+- `vibescan-core` aggregates the records under `ScanScope.network.actions`.
+  Scope-only protected evidence remains outside findings, statistics, and the
+  severity exit gate.
+- JSON and SARIF serialize the structured records; TTY and HTML render safe
+  summaries. Fixed synthetic snapshots cover root, protected, and exposed
+  outcomes in all four formats.
+
+All Phase 3C-focused tests and both feature-mode workspace matrices pass when
+the three pre-existing Phase 5 CLI/baseline regressions are excluded. The
+unfiltered matrices fail only those same three known tests. No live Network
+action was used.
+
 ### Phase 4 — enforce the complete workspace DAG
 
 1. Move the git-to-detector integration test out of `vibescan-git` and into an

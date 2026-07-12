@@ -5,7 +5,8 @@
 
 use serde_json::{Value, json};
 use vibescan_types::{
-    Category, Confidence, Evidence, Finding, HistoryScope, Location, Provenance, ScanResult,
+    Category, Confidence, Evidence, Finding, HistoryScope, Location, NetworkActionAudit,
+    NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, Provenance, ScanResult,
     ScopeWarning, Severity,
 };
 
@@ -69,6 +70,17 @@ pub fn render_tty(result: &ScanResult, style: TtyStyle) -> String {
         push_line(&mut output, "warnings:");
         for warning in &result.scope.warnings {
             push_line(&mut output, &format!("  - {}", warning_summary(warning)));
+        }
+    }
+
+    if !result.scope.network.actions.is_empty() {
+        push_line(&mut output, "");
+        push_line(&mut output, "network actions:");
+        for action in &result.scope.network.actions {
+            push_line(
+                &mut output,
+                &format!("  - {}", network_action_summary(action)),
+            );
         }
     }
 
@@ -166,6 +178,17 @@ pub fn render_html(result: &ScanResult) -> String {
             html.push_str(&format!(
                 "<li>{}</li>",
                 escape_html(&warning_summary(warning))
+            ));
+        }
+        html.push_str("</ul></section>");
+    }
+
+    if !result.scope.network.actions.is_empty() {
+        html.push_str("<section><h2>Network actions</h2><ul>");
+        for action in &result.scope.network.actions {
+            html.push_str(&format!(
+                "<li class=\"mono\">{}</li>",
+                escape_html(&network_action_summary(action))
             ));
         }
         html.push_str("</ul></section>");
@@ -307,6 +330,7 @@ fn sarif_value(result: &ScanResult) -> Value {
                     "target": result.scope.target,
                     "history": history_summary(&result.scope.history),
                     "networkEnabled": result.scope.network.enabled,
+                    "networkActions": &result.scope.network.actions,
                     "warnings": result.scope.warnings.iter().map(warning_summary).collect::<Vec<_>>(),
                 }
             }],
@@ -476,6 +500,48 @@ fn warning_summary(warning: &ScopeWarning) -> String {
     }
 }
 
+fn network_action_summary(action: &NetworkActionAudit) -> String {
+    let intent = match action.intent {
+        NetworkActionIntent::Get => "GET",
+    };
+    let kind = match action.kind {
+        NetworkActionKind::RootEnumeration => "root enumeration",
+        NetworkActionKind::TableRead => "table read",
+    };
+    let table = action
+        .table
+        .as_deref()
+        .map(|table| format!(" for table {table}"))
+        .unwrap_or_default();
+    let status = action
+        .status
+        .map(|status| format!("; HTTP {status}"))
+        .unwrap_or_default();
+    let rows = action
+        .observed_row_count
+        .map(|count| format!("; observed {count} row(s)"))
+        .unwrap_or_default();
+    format!(
+        "{intent} {kind}{table} at {} -> {}{status}{rows}",
+        action.endpoint,
+        network_action_outcome_name(action.outcome)
+    )
+}
+
+fn network_action_outcome_name(outcome: NetworkActionOutcome) -> &'static str {
+    match outcome {
+        NetworkActionOutcome::RootEnumerated => "root enumerated",
+        NetworkActionOutcome::RootUnavailable => "root unavailable",
+        NetworkActionOutcome::Exposed => "exposed",
+        NetworkActionOutcome::NoRowsObserved => "no rows observed",
+        NetworkActionOutcome::Protected => "protected",
+        NetworkActionOutcome::NotFound => "not found",
+        NetworkActionOutcome::KeyRejected => "key rejected",
+        NetworkActionOutcome::InvalidResponse => "invalid response",
+        NetworkActionOutcome::TransportError => "transport error",
+    }
+}
+
 fn history_summary(history: &HistoryScope) -> String {
     match history {
         HistoryScope::Disabled => "history disabled".to_owned(),
@@ -563,15 +629,16 @@ mod tests {
     use std::collections::BTreeMap;
 
     use vibescan_types::{
-        FindingId, LocationClass, NetworkScope, RepoPath, RlsExposure, ScanScope, ScanStats, Span,
-        SupabaseProject,
+        FindingId, LocationClass, NetworkActionIntent, NetworkScope, RepoPath, RlsExposure,
+        ScanScope, ScanStats, Span, SupabaseProject,
     };
 
     use super::*;
 
     #[test]
     fn json_render_is_valid_and_redacted() {
-        let result = sample_result();
+        let mut result = sample_result();
+        result.scope.network.actions.push(sample_network_action());
         let rendered = render_json(&result).expect("json renders");
         let value: Value = serde_json::from_str(&rendered).expect("json parses");
 
@@ -580,11 +647,17 @@ mod tests {
             "sb_sec...CDEF"
         );
         assert!(!rendered.contains("full-secret"));
+        assert_eq!(
+            value["scope"]["network"]["actions"][0]["outcome"],
+            "protected"
+        );
+        assert!(!rendered.contains("public-key"));
     }
 
     #[test]
     fn sarif_render_contains_results_and_locations() {
-        let result = sample_result();
+        let mut result = sample_result();
+        result.scope.network.actions.push(sample_network_action());
         let rendered = render_sarif(&result).expect("sarif renders");
         let value: Value = serde_json::from_str(&rendered).expect("sarif parses");
 
@@ -595,14 +668,22 @@ mod tests {
                 ["uri"],
             "src/app.tsx"
         );
+        assert_eq!(
+            value["runs"][0]["invocations"][0]["properties"]["networkActions"][0]["outcome"],
+            "protected"
+        );
     }
 
     #[test]
     fn tty_render_is_human_readable() {
-        let output = render_tty(&sample_result(), TtyStyle::Plain);
+        let mut result = sample_result();
+        result.scope.network.actions.push(sample_network_action());
+        let output = render_tty(&result, TtyStyle::Plain);
 
         assert!(output.contains("[critical] Supabase secret key exposed"));
         assert!(output.contains("remediation: Rotate it."));
+        assert!(output.contains("GET table read for table profiles"));
+        assert!(output.contains("-> protected; HTTP 403"));
     }
 
     #[test]
@@ -635,10 +716,15 @@ mod tests {
     fn html_render_escapes_content() {
         let mut result = sample_result();
         result.findings[0].title = "<script>alert(1)</script>".to_owned();
+        let mut action = sample_network_action();
+        action.table = Some("<private>".to_owned());
+        result.scope.network.actions.push(action);
         let output = render_html(&result);
 
         assert!(output.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!output.contains("<script>alert(1)</script>"));
+        assert!(output.contains("Network actions"));
+        assert!(output.contains("&lt;private&gt;"));
     }
 
     #[test]
@@ -648,6 +734,28 @@ mod tests {
         assert_eq!(exit_code(&result, Severity::Critical), 1);
         assert_eq!(exit_code(&result, Severity::Info), 1);
         assert_eq!(exit_code(&empty_result(), Severity::Info), 0);
+
+        let mut only_scope_evidence = empty_result();
+        only_scope_evidence
+            .scope
+            .network
+            .actions
+            .push(sample_network_action());
+        assert_eq!(only_scope_evidence.stats, ScanStats::default());
+        assert_eq!(exit_code(&only_scope_evidence, Severity::Info), 0);
+    }
+
+    fn sample_network_action() -> NetworkActionAudit {
+        NetworkActionAudit {
+            kind: NetworkActionKind::TableRead,
+            intent: NetworkActionIntent::Get,
+            endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1"
+                .to_owned(),
+            table: Some("profiles".to_owned()),
+            status: Some(403),
+            outcome: NetworkActionOutcome::Protected,
+            observed_row_count: None,
+        }
     }
 
     fn sample_result() -> ScanResult {
@@ -697,6 +805,7 @@ mod tests {
                     enabled: false,
                     tier0_read_probe: false,
                     tier1_introspection: false,
+                    actions: Vec::new(),
                 },
                 warnings: vec![ScopeWarning::Other {
                     message: "fixture warning".to_owned(),
@@ -720,6 +829,7 @@ mod tests {
                     enabled: false,
                     tier0_read_probe: false,
                     tier1_introspection: false,
+                    actions: Vec::new(),
                 },
                 warnings: Vec::new(),
             },

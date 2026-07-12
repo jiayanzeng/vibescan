@@ -226,6 +226,10 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
         .iter()
         .map(|fact| fact.finding.clone())
         .collect::<Vec<_>>();
+    #[cfg(feature = "network")]
+    let mut network_actions = Vec::new();
+    #[cfg(not(feature = "network"))]
+    let network_actions = Vec::new();
     findings.extend(resolve_generic_candidates(&candidates));
     findings.extend(scan_dependency_integrity(&walk.repo_root)?);
 
@@ -239,6 +243,7 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
                 match probe_tier0_read(&input) {
                     Ok(mut output) => {
                         findings.append(&mut output.findings);
+                        network_actions.append(&mut output.actions);
                         warnings.extend(output.warnings.into_iter().map(|warning| {
                             ScopeWarning::Other {
                                 message: warning.message(),
@@ -285,6 +290,7 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
                 enabled: config.tier0_read_probe && cfg!(feature = "network"),
                 tier0_read_probe: config.tier0_read_probe && cfg!(feature = "network"),
                 tier1_introspection: false,
+                actions: network_actions,
             },
             warnings,
         },
@@ -3522,6 +3528,7 @@ mod tests {
                     enabled: false,
                     tier0_read_probe: false,
                     tier1_introspection: false,
+                    actions: Vec::new(),
                 },
                 warnings: Vec::new(),
             },

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use vibescan_report::{ReportFormat, TtyStyle, render, render_tty};
 use vibescan_types::{
     Category, Confidence, Evidence, Finding, FindingId, HistoryScope, Location, LocationClass,
-    NetworkScope, Provenance, RepoPath, ScanResult, ScanScope, ScanStats, SecretFingerprint,
-    Severity, Span,
+    NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, NetworkScope,
+    Provenance, RepoPath, ScanResult, ScanScope, ScanStats, SecretFingerprint, Severity, Span,
 };
 
 #[test]
@@ -95,9 +95,38 @@ fn sample_result() -> ScanResult {
             working_tree: true,
             history: HistoryScope::WorkingTreeOnly,
             network: NetworkScope {
-                enabled: false,
-                tier0_read_probe: false,
+                enabled: true,
+                tier0_read_probe: true,
                 tier1_introspection: false,
+                actions: vec![
+                    NetworkActionAudit {
+                        kind: NetworkActionKind::RootEnumeration,
+                        intent: NetworkActionIntent::Get,
+                        endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/".to_owned(),
+                        table: None,
+                        status: Some(200),
+                        outcome: NetworkActionOutcome::RootEnumerated,
+                        observed_row_count: None,
+                    },
+                    NetworkActionAudit {
+                        kind: NetworkActionKind::TableRead,
+                        intent: NetworkActionIntent::Get,
+                        endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1".to_owned(),
+                        table: Some("private_profiles".to_owned()),
+                        status: Some(403),
+                        outcome: NetworkActionOutcome::Protected,
+                        observed_row_count: None,
+                    },
+                    NetworkActionAudit {
+                        kind: NetworkActionKind::TableRead,
+                        intent: NetworkActionIntent::Get,
+                        endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/public_profiles?select=*&limit=1".to_owned(),
+                        table: Some("public_profiles".to_owned()),
+                        status: Some(200),
+                        outcome: NetworkActionOutcome::Exposed,
+                        observed_row_count: Some(1),
+                    },
+                ],
             },
             warnings: Vec::new(),
         },

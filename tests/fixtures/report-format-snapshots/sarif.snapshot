@@ -7,7 +7,36 @@
           "executionSuccessful": true,
           "properties": {
             "history": "working tree only",
-            "networkEnabled": false,
+            "networkActions": [
+              {
+                "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                "intent": "get",
+                "kind": "root_enumeration",
+                "observed_row_count": null,
+                "outcome": "root_enumerated",
+                "status": 200,
+                "table": null
+              },
+              {
+                "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1",
+                "intent": "get",
+                "kind": "table_read",
+                "observed_row_count": null,
+                "outcome": "protected",
+                "status": 403,
+                "table": "private_profiles"
+              },
+              {
+                "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/public_profiles?select=*&limit=1",
+                "intent": "get",
+                "kind": "table_read",
+                "observed_row_count": 1,
+                "outcome": "exposed",
+                "status": 200,
+                "table": "public_profiles"
+              }
+            ],
+            "networkEnabled": true,
             "target": "fixtures/report-format-snapshots",
             "warnings": []
           }

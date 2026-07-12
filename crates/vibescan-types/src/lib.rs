@@ -313,6 +313,50 @@ pub struct NetworkScope {
     pub enabled: bool,
     pub tier0_read_probe: bool,
     pub tier1_introspection: bool,
+    #[serde(default)]
+    pub actions: Vec<NetworkActionAudit>,
+}
+
+/// Redacted, shareable evidence for one attempted Network request.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NetworkActionAudit {
+    pub kind: NetworkActionKind,
+    pub intent: NetworkActionIntent,
+    pub endpoint: String,
+    pub table: Option<String>,
+    pub status: Option<u16>,
+    pub outcome: NetworkActionOutcome,
+    pub observed_row_count: Option<u64>,
+}
+
+/// Network request category recorded in scan scope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkActionKind {
+    RootEnumeration,
+    TableRead,
+}
+
+/// Read-only request intent recorded without headers or credentials.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkActionIntent {
+    Get,
+}
+
+/// Redacted result of an attempted Network request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkActionOutcome {
+    RootEnumerated,
+    RootUnavailable,
+    Exposed,
+    NoRowsObserved,
+    Protected,
+    NotFound,
+    KeyRejected,
+    InvalidResponse,
+    TransportError,
 }
 
 /// Reportable limitation in scan coverage.
@@ -404,5 +448,19 @@ mod tests {
             serde_json::from_str(&encoded).expect("candidate deserializes");
 
         assert_eq!(decoded, candidate);
+    }
+
+    #[test]
+    fn network_scope_defaults_actions_when_reading_older_results() {
+        let encoded = r#"{
+            "enabled": false,
+            "tier0_read_probe": false,
+            "tier1_introspection": false
+        }"#;
+
+        let decoded: NetworkScope =
+            serde_json::from_str(encoded).expect("older network scope deserializes");
+
+        assert!(decoded.actions.is_empty());
     }
 }

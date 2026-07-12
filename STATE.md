@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-12
 
-Current implementation baseline: `38c7877` (`main`) plus the Phase 3B worktree
+Current implementation baseline: `bf0dbe7` (`main`) plus the Phase 3C worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -19,21 +19,21 @@ uses that identity for exact Supabase enrichment, conservative project-aware
 coalescing, Tier 0 input preparation, and provenance-aware correlation. Phase
 3A now distinguishes root-enumeration unavailability from table-level key
 rejection, and Phase 3B now scopes typed LocalStatic API references to exact or
-unambiguous projects before Tier 0 probing.
+unambiguous projects before Tier 0 probing. Phase 3C now records every attempted
+Tier 0 root/table GET as redacted scan-scope evidence and renders it in JSON,
+SARIF, TTY, and HTML.
 
 The strict completion verdict is nevertheless **partial**, not complete.
-Several later cross-phase linkage defects can still suppress the headline
-public-key-plus-RLS correlation in realistic layouts. The literal crate DAG,
-configuration contract, extendable ruleset surface, Network auditability,
+The literal crate DAG, configuration contract, extendable ruleset surface,
 dependency intelligence, performance/precision evidence, and distribution
-requirements also have remaining work.
+requirements still have remaining work.
 
 Use these three lenses when discussing completion:
 
-- **Runnable v1 coverage:** all eight section-15 steps exist and the current
-  automated gates are green.
-- **Strict buildable-v1 conformance:** partial because the literal crate DAG,
-  CLI/config behavior, and Network action auditability still have gaps.
+- **Runnable v1 coverage:** all eight section-15 steps exist and the Phase
+  1–3C regression matrix is green.
+- **Strict buildable-v1 conformance:** partial because the literal crate DAG
+  and CLI/config behavior still have gaps.
 - **Entire architecture document:** partial. Online dependency intelligence,
   full section-14 assurance, performance proof, Tier 1, and distribution are
   missing or explicitly deferred.
@@ -44,14 +44,42 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 3B starts from `38c7877`, which contains Phases 0–3A. The current worktree
-changes `vibescan-core` LocalStatic reference harvesting/association and the
-Phase 3B planning/status documentation. No shared serialized shape, report
-snapshot, transport implementation, CLI behavior, live endpoint, or
-target-project data changed.
+Phase 3C starts from `bf0dbe7`, which contains Phases 0–3B. The current worktree
+adds shared redacted Network action vocabulary, Tier 0 per-request audit
+emission, core scan-scope aggregation, renderer coverage, deterministic report
+snapshots, regression tests, and this status update. No request authority,
+endpoint set, target-project data, CLI behavior, or live endpoint changed.
 
-All Phase 1–3B regressions are green. The suite remains intentionally red only
-for the three Phase 4 CLI/baseline cases.
+All Phase 1–3C regressions are green. The suite remains intentionally red only
+for the three Phase 5 CLI/baseline cases.
+
+## Phase 3C verification observed on 2026-07-12
+
+The following pass on the current Phase 3C worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-types --locked
+cargo test -p vibescan-supabase --features network --locked
+cargo test -p vibescan-report --locked
+cargo test --workspace --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+cargo test --workspace --features network --locked -- \
+  --skip absent_cli_scope_flags_preserve_toml_values \
+  --skip missing_explicit_baseline_is_an_operational_error \
+  --skip missing_configured_baseline_is_an_operational_error
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+The two unfiltered workspace commands were also run. In both default and
+`network` modes, they stop only at the same three pre-existing Phase 5
+CLI/baseline regressions named above; no Phase 3C test failed. No live Network
+action was run.
 
 ## Phase 3B verification observed on 2026-07-12
 
@@ -76,7 +104,7 @@ git diff --check
 ```
 
 No live Network action was run. The remaining deliberate reds are exactly the
-three Phase 4 CLI/baseline cases.
+three Phase 5 CLI/baseline cases.
 
 ## Phase 3A verification observed on 2026-07-12
 
@@ -102,7 +130,7 @@ git diff --check
 ```
 
 No live Network action was run. The remaining deliberate reds are exactly two
-Phase 3B table-scope cases and three Phase 4 CLI/baseline cases.
+Phase 3B table-scope cases and three Phase 5 CLI/baseline cases.
 
 ## Phase 2 verification observed on 2026-07-12
 
@@ -125,7 +153,7 @@ git diff --check
 Default and network workspace matrices pass when only the later-phase known-red
 tests are excluded. No golden or report snapshot changed, and no live Network
 action was run. An unfiltered default `--no-fail-fast` audit confirms that the
-remaining failures are exactly the three Phase 4 CLI/baseline cases and two
+remaining failures are exactly the three Phase 5 CLI/baseline cases and two
 Phase 3 root-warning cases; the network matrix additionally retains the two
 Phase 3 project-table-scope cases.
 
@@ -195,7 +223,7 @@ After the documentation changes, the closeout pass also reran and passed:
 
 | Architecture area | Status | Evidence and limitation |
 |---|---|---|
-| Design invariants | Partial / safety core verified | LocalStatic default, own-Supabase URL guard, read-only Tier 0, redaction, and no persisted writes are implemented. Per-Network-action audit records are incomplete. |
+| Design invariants | Partial / safety core verified | LocalStatic default, own-Supabase URL guard, read-only Tier 0, redacted per-action scope evidence, and no persisted writes are implemented. |
 | Seven-crate workspace | Partial under the literal rule | The production DAG is layered and acyclic, but `vibescan-git` and `vibescan-supabase` each dev-depend on sibling `vibescan-secrets`. The boundary script checks normal edges only. |
 | Shared data model | Phase 1 identity complete | `ContentId`, `UnitLocation`, `ScannableUnit.locations`, and `UnitRef.locations` form one canonical occurrence model; singular competing fields were removed. |
 | Content handling | Substantially implemented | Binary/size skips, ignore layers, forced real-env/client-bundle scanning, inline allow, and commit allowlists exist. Historical paths intentionally use current ignore state. |
@@ -204,10 +232,10 @@ After the documentation changes, the closeout pass also reran and passed:
 | Generic secret substrate | Partial application contract | Keyword prefilter, regex, entropy, allowlists, attribution, and the required provider families exist. `Detector::from_toml` is not wired through core/CLI, so the architecture's extendable ruleset is library-only. |
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
-| Tier 0 RLS probe | Partial, Phase 3B verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, and exact/unambiguous project-scoped table sets are tested. Protected attempts still lack durable action records pending 3C. |
+| Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. Tier 1 remains deferred. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
-| Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML exist with redacted evidence, locations, history context, exit gates, and deterministic snapshots. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
+| Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, exit gates, and deterministic snapshots. Protected actions do not affect finding statistics or gates. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
 | CLI/config | Partial | The CLI is thin and feature-gates the Tier 0 flag. Clap defaults currently overwrite TOML `working_tree`, `history`, `severity_gate`, and network choices; relative baseline resolution and CLI precedence need tests/fixes. |
 | Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. No measured low-single-digit performance artifact, static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
 | Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, and a mocked Tier 0 exposed-chain test exist. There is no precision/recall metrics artifact or benchmark; three architecture cases remain ignored/deferred. |
@@ -389,16 +417,15 @@ feature graphs.
 5. Add CLI integration tests for both feature modes and correct exit codes.
 6. Update README examples only after the behavior is proven.
 
-### Phase 4 — complete Tier 0 observability without broadening authority
+### Completed in Phase 3C — Tier 0 observability without broader authority
 
-1. Add structured, redacted per-action outcomes for exposed, protected/empty,
-   not-found, key-rejected, root-unavailable, and transport-error attempts.
-2. Record method-equivalent intent, normalized endpoint, table, and outcome;
-   never record keys, headers, or rows.
-3. Keep Network failure nonfatal to LocalStatic findings and keep all tests on
-   the injected mock client.
-4. Do not add writes, arbitrary URLs, live CI, registry egress, or Tier 1 as
-   part of this phase.
+Structured records now cover root enumeration/unavailability, exposed,
+protected/empty, not-found, key-rejected, invalid-response, and transport-error
+attempts. They record GET intent, normalized endpoint, optional table, status
+when present, outcome, and an exposure-only row count. Mock tests prove that
+keys, headers, response bodies, and rows are absent. Network failure remains
+nonfatal, and no writes, arbitrary URLs, live CI, registry egress, or Tier 1
+work was added.
 
 ### Phase 5 — add measured assurance
 

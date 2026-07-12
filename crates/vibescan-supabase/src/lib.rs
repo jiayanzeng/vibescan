@@ -14,8 +14,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use vibescan_types::{
-    CandidateKind, Category, Confidence, Evidence, Finding, FindingId, Location, SecretCandidate,
-    SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
+    CandidateKind, Category, Confidence, Evidence, Finding, FindingId, Location,
+    NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome,
+    SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
 };
 
 const SUPABASE_URL_SUFFIX: &str = ".supabase.co";
@@ -79,6 +80,7 @@ pub struct Tier0RlsProbeInput {
 pub struct Tier0RlsProbeOutput {
     pub findings: Vec<Finding>,
     pub warnings: Vec<Tier0RlsProbeWarning>,
+    pub actions: Vec<NetworkActionAudit>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -128,16 +130,23 @@ pub trait RlsHttpClient {
 
 #[derive(Debug)]
 pub enum RlsProbeError {
-    Http { url: String, source: String },
+    Http {
+        url: String,
+        status: Option<u16>,
+        source: String,
+    },
     InvalidProjectUrl(String),
     Json(serde_json::Error),
-    OpenApi { url: String, status: u16 },
+    OpenApi {
+        url: String,
+        status: u16,
+    },
 }
 
 impl fmt::Display for RlsProbeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Http { url, source } => {
+            Self::Http { url, source, .. } => {
                 write!(formatter, "RLS probe HTTP failed for {url}: {source}")
             }
             Self::InvalidProjectUrl(url) => {
@@ -178,13 +187,41 @@ pub fn probe_tier0_read_with_client(
     match client.get(&openapi_url, &headers) {
         Ok(openapi) => match openapi.status {
             200 => match tables_from_openapi(&openapi.body) {
-                Ok(openapi_tables) => tables.extend(openapi_tables),
-                Err(error) => output.warnings.push(Tier0RlsProbeWarning::Transport {
-                    url: openapi_url.clone(),
-                    message: error.to_string(),
-                }),
+                Ok(openapi_tables) => {
+                    output.actions.push(network_action(
+                        NetworkActionKind::RootEnumeration,
+                        &openapi_url,
+                        None,
+                        Some(200),
+                        NetworkActionOutcome::RootEnumerated,
+                        None,
+                    ));
+                    tables.extend(openapi_tables);
+                }
+                Err(error) => {
+                    output.actions.push(network_action(
+                        NetworkActionKind::RootEnumeration,
+                        &openapi_url,
+                        None,
+                        Some(200),
+                        NetworkActionOutcome::InvalidResponse,
+                        None,
+                    ));
+                    output.warnings.push(Tier0RlsProbeWarning::Transport {
+                        url: openapi_url.clone(),
+                        message: error.to_string(),
+                    });
+                }
             },
             status @ (401 | 403) => {
+                output.actions.push(network_action(
+                    NetworkActionKind::RootEnumeration,
+                    &openapi_url,
+                    None,
+                    Some(status),
+                    NetworkActionOutcome::RootUnavailable,
+                    None,
+                ));
                 output
                     .warnings
                     .push(Tier0RlsProbeWarning::RootEnumerationUnavailable {
@@ -192,15 +229,35 @@ pub fn probe_tier0_read_with_client(
                         status,
                     })
             }
-            _ => output.warnings.push(Tier0RlsProbeWarning::Transport {
-                url: openapi_url.clone(),
-                message: format!("OpenAPI root returned HTTP {}", openapi.status),
-            }),
+            _ => {
+                output.actions.push(network_action(
+                    NetworkActionKind::RootEnumeration,
+                    &openapi_url,
+                    None,
+                    Some(openapi.status),
+                    NetworkActionOutcome::InvalidResponse,
+                    None,
+                ));
+                output.warnings.push(Tier0RlsProbeWarning::Transport {
+                    url: openapi_url.clone(),
+                    message: format!("OpenAPI root returned HTTP {}", openapi.status),
+                });
+            }
         },
-        Err(error) => output.warnings.push(Tier0RlsProbeWarning::Transport {
-            url: openapi_url.clone(),
-            message: error.to_string(),
-        }),
+        Err(error) => {
+            output.actions.push(network_action(
+                NetworkActionKind::RootEnumeration,
+                &openapi_url,
+                None,
+                error.http_status(),
+                NetworkActionOutcome::TransportError,
+                None,
+            ));
+            output.warnings.push(Tier0RlsProbeWarning::Transport {
+                url: openapi_url.clone(),
+                message: error.to_string(),
+            });
+        }
     }
 
     if tables.is_empty() {
@@ -219,6 +276,14 @@ pub fn probe_tier0_read_with_client(
         let response = match client.get(&endpoint, &headers) {
             Ok(response) => response,
             Err(error) => {
+                output.actions.push(network_action(
+                    NetworkActionKind::TableRead,
+                    &endpoint,
+                    Some(&table),
+                    error.http_status(),
+                    NetworkActionOutcome::TransportError,
+                    None,
+                ));
                 output.warnings.push(Tier0RlsProbeWarning::Transport {
                     url: endpoint,
                     message: error.to_string(),
@@ -229,13 +294,50 @@ pub fn probe_tier0_read_with_client(
         match response.status {
             200 => {}
             401 => {
+                output.actions.push(network_action(
+                    NetworkActionKind::TableRead,
+                    &endpoint,
+                    Some(&table),
+                    Some(401),
+                    NetworkActionOutcome::KeyRejected,
+                    None,
+                ));
                 output
                     .warnings
                     .push(Tier0RlsProbeWarning::KeyRejected { url: endpoint });
                 continue;
             }
-            403 | 404 => continue,
+            403 => {
+                output.actions.push(network_action(
+                    NetworkActionKind::TableRead,
+                    &endpoint,
+                    Some(&table),
+                    Some(403),
+                    NetworkActionOutcome::Protected,
+                    None,
+                ));
+                continue;
+            }
+            404 => {
+                output.actions.push(network_action(
+                    NetworkActionKind::TableRead,
+                    &endpoint,
+                    Some(&table),
+                    Some(404),
+                    NetworkActionOutcome::NotFound,
+                    None,
+                ));
+                continue;
+            }
             _ => {
+                output.actions.push(network_action(
+                    NetworkActionKind::TableRead,
+                    &endpoint,
+                    Some(&table),
+                    Some(response.status),
+                    NetworkActionOutcome::InvalidResponse,
+                    None,
+                ));
                 output.warnings.push(Tier0RlsProbeWarning::Transport {
                     url: endpoint,
                     message: format!("table probe returned HTTP {}", response.status),
@@ -247,6 +349,14 @@ pub fn probe_tier0_read_with_client(
         let body = match serde_json::from_str::<Value>(&response.body) {
             Ok(body) => body,
             Err(error) => {
+                output.actions.push(network_action(
+                    NetworkActionKind::TableRead,
+                    &endpoint,
+                    Some(&table),
+                    Some(200),
+                    NetworkActionOutcome::InvalidResponse,
+                    None,
+                ));
                 output.warnings.push(Tier0RlsProbeWarning::Transport {
                     url: endpoint,
                     message: format!("table probe JSON parse failed: {error}"),
@@ -254,8 +364,31 @@ pub fn probe_tier0_read_with_client(
                 continue;
             }
         };
-        let observed_row_count = body.as_array().map_or(0, Vec::len) as u64;
+        let Some(rows) = body.as_array() else {
+            output.actions.push(network_action(
+                NetworkActionKind::TableRead,
+                &endpoint,
+                Some(&table),
+                Some(200),
+                NetworkActionOutcome::InvalidResponse,
+                None,
+            ));
+            output.warnings.push(Tier0RlsProbeWarning::Transport {
+                url: endpoint,
+                message: "table probe response was not a JSON array".to_owned(),
+            });
+            continue;
+        };
+        let observed_row_count = rows.len() as u64;
         if observed_row_count > 0 {
+            output.actions.push(network_action(
+                NetworkActionKind::TableRead,
+                &endpoint,
+                Some(&table),
+                Some(200),
+                NetworkActionOutcome::Exposed,
+                Some(observed_row_count),
+            ));
             output.findings.push(rls_exposed_finding(
                 &input.project,
                 &input.key_location,
@@ -263,11 +396,48 @@ pub fn probe_tier0_read_with_client(
                 &endpoint,
                 observed_row_count,
             ));
+        } else {
+            output.actions.push(network_action(
+                NetworkActionKind::TableRead,
+                &endpoint,
+                Some(&table),
+                Some(200),
+                NetworkActionOutcome::NoRowsObserved,
+                None,
+            ));
         }
     }
 
     dedup_probe_warnings(&mut output.warnings);
     Ok(output)
+}
+
+fn network_action(
+    kind: NetworkActionKind,
+    endpoint: &str,
+    table: Option<&str>,
+    status: Option<u16>,
+    outcome: NetworkActionOutcome,
+    observed_row_count: Option<u64>,
+) -> NetworkActionAudit {
+    NetworkActionAudit {
+        kind,
+        intent: NetworkActionIntent::Get,
+        endpoint: endpoint.to_owned(),
+        table: table.map(str::to_owned),
+        status,
+        outcome,
+        observed_row_count,
+    }
+}
+
+impl RlsProbeError {
+    fn http_status(&self) -> Option<u16> {
+        match self {
+            Self::Http { status, .. } => *status,
+            _ => None,
+        }
+    }
 }
 
 #[cfg(feature = "network")]
@@ -285,6 +455,7 @@ impl ReqwestRlsHttpClient {
             .build()
             .map_err(|source| RlsProbeError::Http {
                 url: "client setup".to_owned(),
+                status: None,
                 source: source.to_string(),
             })?;
         Ok(Self { client })
@@ -304,11 +475,13 @@ impl RlsHttpClient for ReqwestRlsHttpClient {
         }
         let response = request.send().map_err(|source| RlsProbeError::Http {
             url: url.to_owned(),
+            status: None,
             source: source.to_string(),
         })?;
         let status = response.status().as_u16();
         let body = response.text().map_err(|source| RlsProbeError::Http {
             url: url.to_owned(),
+            status: Some(status),
             source: source.to_string(),
         })?;
         Ok(RlsHttpResponse { status, body })
@@ -952,6 +1125,14 @@ mod tests {
         client.assert_all_requests_include_apikey(&input.public_key);
         assert_eq!(output.warnings, Vec::new());
         assert_eq!(output.findings.len(), 1);
+        assert_eq!(output.actions.len(), client.request_count());
+        assert_eq!(
+            output.actions[0].outcome,
+            NetworkActionOutcome::RootEnumerated
+        );
+        assert_eq!(output.actions[1].outcome, NetworkActionOutcome::Exposed);
+        assert_eq!(output.actions[1].observed_row_count, Some(1));
+        assert!(output.actions[0].observed_row_count.is_none());
         let finding = &output.findings[0];
         assert_eq!(finding.category, Category::Rls);
         assert_eq!(finding.severity, Severity::Critical);
@@ -974,6 +1155,10 @@ mod tests {
         assert_eq!(*observed_row_count, 1);
         assert_eq!(*exposure, vibescan_types::RlsExposure::Exposed);
         assert!(!format!("{finding:?}").contains("not included in finding"));
+        let serialized_actions = serde_json::to_string(&output.actions).expect("actions serialize");
+        assert!(!serialized_actions.contains(&input.public_key));
+        assert!(!serialized_actions.contains("apikey"));
+        assert!(!serialized_actions.contains("not included in finding"));
     }
 
     #[test]
@@ -1015,6 +1200,74 @@ mod tests {
         client.assert_all_requests_include_apikey(&tier0_input().public_key);
         assert!(output.findings.is_empty());
         assert_eq!(output.warnings, Vec::new());
+        assert_eq!(output.actions.len(), client.request_count());
+        assert_eq!(
+            output
+                .actions
+                .iter()
+                .map(|action| action.outcome)
+                .collect::<Vec<_>>(),
+            vec![
+                NetworkActionOutcome::RootEnumerated,
+                NetworkActionOutcome::NoRowsObserved,
+                NetworkActionOutcome::NotFound,
+                NetworkActionOutcome::Protected,
+            ]
+        );
+        assert!(
+            output
+                .actions
+                .iter()
+                .all(|action| action.observed_row_count.is_none())
+        );
+    }
+
+    #[test]
+    fn tier0_read_probe_audits_invalid_responses_without_response_material() {
+        let client = FakeRlsClient::new([
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+                RlsHttpResponse {
+                    status: 500,
+                    body: "sensitive root response".to_owned(),
+                },
+            ),
+            (
+                "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+                RlsHttpResponse {
+                    status: 200,
+                    body: r#"{"sensitive":"not an array"}"#.to_owned(),
+                },
+            ),
+        ]);
+        let input = tier0_input_with_tables(["profiles"]);
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        assert_eq!(output.actions.len(), client.request_count());
+        assert!(
+            output
+                .actions
+                .iter()
+                .all(|action| action.outcome == NetworkActionOutcome::InvalidResponse)
+        );
+        let serialized_actions = serde_json::to_string(&output.actions).expect("actions serialize");
+        assert!(!serialized_actions.contains("sensitive"));
+        assert!(!serialized_actions.contains(&input.public_key));
+    }
+
+    #[test]
+    fn tier0_read_probe_audits_transport_errors_for_each_attempt() {
+        let client = FakeRlsClient::default();
+        let input = tier0_input_with_tables(["profiles"]);
+
+        let output = probe_tier0_read_with_client(&client, &input).expect("probe succeeds");
+
+        assert_eq!(output.actions.len(), 2);
+        assert_eq!(output.actions.len(), client.request_count());
+        assert!(output.actions.iter().all(|action| {
+            action.status.is_none() && action.outcome == NetworkActionOutcome::TransportError
+        }));
     }
 
     #[test]
@@ -1041,6 +1294,13 @@ mod tests {
 
         client.assert_all_requests_include_apikey(&input.public_key);
         assert_eq!(output.findings.len(), 1);
+        assert_eq!(output.actions.len(), client.request_count());
+        assert_eq!(
+            output.actions[0].outcome,
+            NetworkActionOutcome::RootUnavailable
+        );
+        assert_eq!(output.actions[0].status, Some(403));
+        assert_eq!(output.actions[1].outcome, NetworkActionOutcome::Exposed);
         assert!(matches!(
             output.warnings.as_slice(),
             [Tier0RlsProbeWarning::RootEnumerationUnavailable { status: 403, .. }]
@@ -1076,6 +1336,9 @@ mod tests {
 
         client.assert_all_requests_include_apikey(&input.public_key);
         assert!(output.findings.is_empty());
+        assert_eq!(output.actions.len(), client.request_count());
+        assert_eq!(output.actions[1].outcome, NetworkActionOutcome::KeyRejected);
+        assert_eq!(output.actions[1].status, Some(401));
         assert!(matches!(
             output.warnings.as_slice(),
             [Tier0RlsProbeWarning::KeyRejected { .. }]
@@ -1260,6 +1523,10 @@ mod tests {
                 );
             }
         }
+
+        fn request_count(&self) -> usize {
+            self.requests.borrow().len()
+        }
     }
 
     impl RlsHttpClient for FakeRlsClient {
@@ -1277,6 +1544,7 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| RlsProbeError::Http {
                     url: url.to_owned(),
+                    status: None,
                     source: "missing fake response".to_owned(),
                 })
         }
