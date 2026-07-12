@@ -625,6 +625,30 @@ Exit criteria:
 - Missing named baselines fail visibly.
 - Baseline suppression is tested with a real synthetic baseline file.
 
+Implemented on 2026-07-12:
+
+- `--history`/`--no-history` and `--working-tree`/`--no-working-tree`
+  provide paired explicit overrides. Absent scope, size, commit-budget, and
+  severity options preserve repository TOML.
+- Severity and all LocalStatic configuration now follow built-in defaults,
+  repository `vibescan.toml`, then explicit CLI values. Invalid configured
+  severities fail rather than silently reverting.
+- Configured baseline/custom-rule paths and CLI baseline paths resolve from the
+  discovered repository root unless absolute. Missing named files are
+  operational errors; `None` remains reserved for no configured baseline.
+- Real-binary tests prove both CLI and configured relative baselines suppress a
+  real synthetic finding, while missing paths return exit code 2.
+- Custom detector configuration is additive: embedded rules and global safety
+  allowlists remain, custom rules/allowlists append, and duplicate rule IDs are
+  rejected instead of replacing shipped behavior.
+- Repository Network configuration is deliberately inert for enablement. Only
+  an explicit runtime `--rls-tier0-read-probe` action in a network-enabled
+  binary can enable requests.
+
+Both unfiltered workspace matrices, all focused CLI/core/secrets tests, both
+golden modes, report snapshots, the exact-DAG/transport checker, and the local
+hardening aggregate pass. No live Network action was used.
+
 ## Suggested merge sequence
 
 1. `test: lock identity, warning, location, and baseline regressions`

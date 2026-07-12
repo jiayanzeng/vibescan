@@ -38,6 +38,14 @@ impl Detector {
         RulesetConfig::from_toml(DEFAULT_RULESET_TOML)?.compile()
     }
 
+    /// Build a detector by retaining the embedded ruleset and appending a
+    /// custom ruleset. Duplicate rule IDs are rejected rather than overridden.
+    pub fn default_rules_with_custom_toml(input: &str) -> Result<Self, DetectorError> {
+        RulesetConfig::from_toml(DEFAULT_RULESET_TOML)?
+            .merge(RulesetConfig::from_toml(input)?)?
+            .compile()
+    }
+
     /// Build a detector from TOML using the gitleaks-style surface supported by
     /// this crate.
     pub fn from_toml(input: &str) -> Result<Self, DetectorError> {
@@ -278,6 +286,22 @@ impl RulesetConfig {
             global_allowlists,
         })
     }
+
+    fn merge(mut self, custom: Self) -> Result<Self, DetectorError> {
+        let mut rule_ids = self
+            .rules
+            .iter()
+            .map(|rule| rule.id.clone())
+            .collect::<BTreeSet<_>>();
+        for rule in &custom.rules {
+            if !rule_ids.insert(rule.id.clone()) {
+                return Err(DetectorError::DuplicateRuleId(rule.id.clone()));
+            }
+        }
+        self.rules.extend(custom.rules);
+        self.allowlists.extend(custom.allowlists);
+        Ok(self)
+    }
 }
 
 /// One configured detection rule.
@@ -462,6 +486,7 @@ pub enum DetectorError {
         pattern: String,
         source: regex::Error,
     },
+    DuplicateRuleId(String),
     Toml(toml::de::Error),
 }
 
@@ -470,6 +495,9 @@ impl fmt::Display for DetectorError {
         match self {
             Self::Regex { pattern, source } => {
                 write!(formatter, "invalid regex pattern {pattern:?}: {source}")
+            }
+            Self::DuplicateRuleId(rule_id) => {
+                write!(formatter, "duplicate detector rule id: {rule_id}")
             }
             Self::Toml(source) => write!(formatter, "invalid ruleset TOML: {source}"),
         }
@@ -491,6 +519,60 @@ mod tests {
     #[test]
     fn default_rules_compile() {
         Detector::default_rules().expect("embedded default ruleset compiles");
+    }
+
+    #[test]
+    fn custom_rules_append_without_replacing_defaults_or_safety_allowlists() {
+        let detector = Detector::default_rules_with_custom_toml(
+            r#"
+            [[rules]]
+            id = "custom-service-token"
+            kind = "provider_secret"
+            regex = '''(custom_[A-Za-z0-9]{24,})'''
+            keywords = ["custom_"]
+            "#,
+        )
+        .expect("merged ruleset compiles");
+
+        let unit = working_tree_unit(
+            "src/app.ts",
+            "const custom = 'custom_abcdefghijklmnopqrstuvwxyz';\nconst supabase = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';",
+        );
+        let candidates = detector.detect_unit(&unit);
+
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.rule_id.0 == "custom-service-token")
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.rule_id.0 == "supabase-secret-key")
+        );
+
+        let allowlisted = working_tree_unit(
+            ".env.example",
+            "const custom = 'custom_abcdefghijklmnopqrstuvwxyz';",
+        );
+        assert!(detector.detect_unit(&allowlisted).is_empty());
+    }
+
+    #[test]
+    fn custom_rules_cannot_override_an_embedded_rule_id() {
+        let error = Detector::default_rules_with_custom_toml(
+            r#"
+            [[rules]]
+            id = "supabase-secret-key"
+            kind = "provider_secret"
+            regex = '''(override_[A-Za-z0-9]{24,})'''
+            "#,
+        )
+        .expect_err("duplicate rule id rejected");
+
+        assert!(
+            matches!(error, DetectorError::DuplicateRuleId(rule_id) if rule_id == "supabase-secret-key")
+        );
     }
 
     #[test]

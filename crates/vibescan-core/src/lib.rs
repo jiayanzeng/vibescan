@@ -44,6 +44,7 @@ pub struct ScanConfig {
     pub severity_gate: Severity,
     pub path_allowlists: Vec<String>,
     pub baseline_path: Option<PathBuf>,
+    pub custom_rules_path: Option<PathBuf>,
     pub tier0_read_probe: bool,
 }
 
@@ -82,6 +83,7 @@ impl Default for ScanConfig {
             severity_gate: Severity::High,
             path_allowlists: Vec::new(),
             baseline_path: None,
+            custom_rules_path: None,
             tier0_read_probe: false,
         }
     }
@@ -99,13 +101,17 @@ impl ScanConfig {
             let parsed: FileConfig =
                 toml::from_str(&fs::read_to_string(&config_path).map_err(CoreError::Io)?)
                     .map_err(CoreError::Toml)?;
-            config.apply_file_config(parsed);
+            config.apply_file_config(parsed, &config_root)?;
         }
 
         Ok(config)
     }
 
-    fn apply_file_config(&mut self, parsed: FileConfig) {
+    fn apply_file_config(
+        &mut self,
+        parsed: FileConfig,
+        config_root: &Path,
+    ) -> Result<(), CoreError> {
         if let Some(scan) = parsed.scan {
             if let Some(value) = scan.working_tree {
                 self.include_working_tree = value;
@@ -119,8 +125,9 @@ impl ScanConfig {
             if let Some(value) = scan.max_bytes {
                 self.max_bytes = value;
             }
-            if let Some(value) = scan.severity_gate.and_then(parse_severity) {
-                self.severity_gate = value;
+            if let Some(value) = scan.severity_gate {
+                self.severity_gate = parse_severity(&value)
+                    .ok_or_else(|| CoreError::InvalidSeverity(value.clone()))?;
             }
         }
 
@@ -129,14 +136,51 @@ impl ScanConfig {
         }
 
         if let Some(baseline) = parsed.baseline {
-            self.baseline_path = baseline.path.map(PathBuf::from);
+            self.baseline_path = baseline
+                .path
+                .map(PathBuf::from)
+                .map(|path| resolve_path(config_root, path));
         }
 
-        if let Some(network) = parsed.network {
-            if let Some(tier0_read_probe) = network.tier0_read_probe {
-                self.tier0_read_probe = tier0_read_probe;
-            }
+        if let Some(rules) = parsed.rules {
+            self.custom_rules_path = rules
+                .path
+                .map(PathBuf::from)
+                .map(|path| resolve_path(config_root, path));
         }
+
+        // Repository config may disable Network work, but only an explicit
+        // runtime action may enable it. A configured `true` is intentionally
+        // inert until the CLI or another caller confirms the action.
+        if parsed
+            .network
+            .is_some_and(|network| network.tier0_read_probe == Some(false))
+        {
+            self.tier0_read_probe = false;
+        }
+
+        Ok(())
+    }
+}
+
+/// Resolve a CLI/config path relative to the discovered target repository.
+pub fn resolve_repository_path(
+    target: impl AsRef<Path>,
+    path: impl AsRef<Path>,
+) -> Result<PathBuf, CoreError> {
+    let path = path.as_ref();
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let root = discover_repository_root(target.as_ref()).map_err(CoreError::Git)?;
+    Ok(root.join(path))
+}
+
+fn resolve_path(root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
     }
 }
 
@@ -145,6 +189,7 @@ struct FileConfig {
     scan: Option<ScanSection>,
     ignore: Option<IgnoreSection>,
     baseline: Option<BaselineSection>,
+    rules: Option<RulesSection>,
     network: Option<NetworkSection>,
 }
 
@@ -169,6 +214,11 @@ struct BaselineSection {
 }
 
 #[derive(Debug, Deserialize)]
+struct RulesSection {
+    path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct NetworkSection {
     tier0_read_probe: Option<bool>,
 }
@@ -178,7 +228,7 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     let started = Instant::now();
     let started_at = Timestamp::now().to_string();
     let target_path = target.as_ref();
-    let baseline = Baseline::load(config.baseline_path.as_ref())?;
+    let baseline = Baseline::load(config.baseline_path.as_deref())?;
 
     let walk = collect_repository(
         target_path,
@@ -194,7 +244,7 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
 
     let mut warnings = walk.warnings;
     let units = walk.units;
-    let detector = Detector::default_rules().map_err(CoreError::Detector)?;
+    let detector = load_detector(config.custom_rules_path.as_deref())?;
     let candidates = detector.detect_units(&units);
 
     let classifier = SupabaseClassifier::new();
@@ -1704,7 +1754,7 @@ fn history_scope(
     }
 }
 
-fn parse_severity(value: String) -> Option<Severity> {
+fn parse_severity(value: &str) -> Option<Severity> {
     match value.to_ascii_lowercase().as_str() {
         "critical" => Some(Severity::Critical),
         "high" => Some(Severity::High),
@@ -1744,12 +1794,15 @@ struct Baseline {
 }
 
 impl Baseline {
-    fn load(path: Option<&PathBuf>) -> Result<Self, CoreError> {
+    fn load(path: Option<&Path>) -> Result<Self, CoreError> {
         let Some(path) = path else {
             return Ok(Self::default());
         };
         if !path.exists() {
-            return Ok(Self::default());
+            return Err(CoreError::ConfiguredPathMissing {
+                kind: "baseline",
+                path: path.to_path_buf(),
+            });
         }
 
         let content = fs::read_to_string(path).map_err(CoreError::Io)?;
@@ -1776,24 +1829,51 @@ impl Baseline {
     }
 }
 
+fn load_detector(custom_rules_path: Option<&Path>) -> Result<Detector, CoreError> {
+    let Some(path) = custom_rules_path else {
+        return Detector::default_rules().map_err(CoreError::Detector);
+    };
+    if !path.exists() {
+        return Err(CoreError::ConfiguredPathMissing {
+            kind: "custom rules",
+            path: path.to_path_buf(),
+        });
+    }
+    let custom = fs::read_to_string(path).map_err(CoreError::Io)?;
+    Detector::default_rules_with_custom_toml(&custom).map_err(CoreError::Detector)
+}
+
 /// Core pipeline error.
 #[derive(Debug)]
 pub enum CoreError {
+    ConfiguredPathMissing { kind: &'static str, path: PathBuf },
     Detector(vibescan_secrets::DetectorError),
     Git(vibescan_git::GitWalkError),
     Io(io::Error),
     Json(serde_json::Error),
     Toml(toml::de::Error),
+    InvalidSeverity(String),
 }
 
 impl fmt::Display for CoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ConfiguredPathMissing { kind, path } => {
+                write!(
+                    formatter,
+                    "configured {kind} file does not exist: {}",
+                    path.display()
+                )
+            }
             Self::Detector(source) => write!(formatter, "detector setup failed: {source}"),
             Self::Git(source) => write!(formatter, "git collection failed: {source}"),
             Self::Io(source) => write!(formatter, "filesystem operation failed: {source}"),
             Self::Json(source) => write!(formatter, "JSON parse failed: {source}"),
             Self::Toml(source) => write!(formatter, "configuration TOML parse failed: {source}"),
+            Self::InvalidSeverity(value) => write!(
+                formatter,
+                "invalid configured severity {value:?}; expected critical, high, medium, low, or info"
+            ),
         }
     }
 }
@@ -2701,6 +2781,81 @@ mod tests {
         let result = scan(&target, config).expect("scan succeeds");
 
         assert!(result.findings.is_empty());
+    }
+
+    #[test]
+    fn config_preserves_all_localstatic_values_and_resolves_repo_relative_paths() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "vibescan.toml",
+            r#"
+            [scan]
+            working_tree = false
+            history = false
+            max_commits = 17
+            max_bytes = 4096
+            severity_gate = "info"
+
+            [baseline]
+            path = "config/baseline.json"
+
+            [rules]
+            path = "config/custom-rules.toml"
+            "#,
+        );
+        repo.write("config/baseline.json", "[]");
+        repo.write("config/custom-rules.toml", "");
+        repo.write("src/app.ts", "console.log('clean');\n");
+
+        let config = ScanConfig::load(repo.path().join("src")).expect("config loads");
+
+        assert!(!config.include_working_tree);
+        assert!(!config.include_history);
+        assert_eq!(config.max_commits, Some(17));
+        assert_eq!(config.max_bytes, 4096);
+        assert_eq!(config.severity_gate, Severity::Info);
+        assert_eq!(
+            config.baseline_path,
+            Some(repo.path().join("config/baseline.json"))
+        );
+        assert_eq!(
+            config.custom_rules_path,
+            Some(repo.path().join("config/custom-rules.toml"))
+        );
+    }
+
+    #[test]
+    fn repository_config_cannot_enable_network_without_runtime_confirmation() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write("vibescan.toml", "[network]\ntier0_read_probe = true\n");
+
+        let config = ScanConfig::load(repo.path()).expect("config loads");
+
+        assert!(!config.tier0_read_probe);
+    }
+
+    #[test]
+    fn repository_path_resolution_preserves_absolute_paths() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        let absolute = repo.path().join("outside-name.json");
+
+        let resolved = resolve_repository_path(repo.path(), &absolute).expect("path resolves");
+
+        assert_eq!(resolved, absolute);
+    }
+
+    #[test]
+    fn invalid_configured_severity_is_rejected() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write("vibescan.toml", "[scan]\nseverity_gate = \"urgent\"\n");
+
+        let error = ScanConfig::load(repo.path()).expect_err("invalid severity rejected");
+
+        assert!(matches!(error, CoreError::InvalidSeverity(value) if value == "urgent"));
     }
 
     #[test]

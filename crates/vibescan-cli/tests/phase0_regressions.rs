@@ -31,6 +31,84 @@ fn explicit_cli_scope_flag_overrides_toml_value() {
 }
 
 #[test]
+fn explicit_enable_flags_override_disabled_toml_scopes() {
+    let repo = TestRepo::new();
+    repo.write(
+        "vibescan.toml",
+        "[scan]\nhistory = false\nworking_tree = false\n",
+    );
+    repo.write(
+        "src/app.ts",
+        "const key = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';\n",
+    );
+
+    let output = vibescan(repo.path(), &["--history", "--working-tree"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("history budgeted"), "stdout was: {stdout}");
+    assert!(
+        stdout.contains("Supabase secret key"),
+        "stdout was: {stdout}"
+    );
+}
+
+#[test]
+fn explicit_disable_flag_overrides_enabled_working_tree_config() {
+    let repo = TestRepo::new();
+    repo.write(
+        "vibescan.toml",
+        "[scan]\nhistory = false\nworking_tree = true\n",
+    );
+    repo.write(
+        "src/app.ts",
+        "const key = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';\n",
+    );
+
+    let output = vibescan(repo.path(), &["--no-working-tree"]);
+
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Supabase secret key"));
+}
+
+#[test]
+fn configured_severity_is_preserved_and_explicit_cli_value_wins() {
+    let repo = TestRepo::new();
+    repo.write(
+        "vibescan.toml",
+        "[scan]\nhistory = false\nseverity_gate = \"info\"\n",
+    );
+    repo.write(
+        "src/app.ts",
+        "const key = 'sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';\n",
+    );
+
+    let configured = vibescan(repo.path(), &[]);
+    let overridden = vibescan(repo.path(), &["--severity-gate", "high"]);
+
+    assert_eq!(configured.status.code(), Some(1));
+    assert!(overridden.status.success());
+}
+
+#[test]
+fn repository_network_config_alone_never_enables_a_request() {
+    let repo = TestRepo::new();
+    repo.write(
+        "vibescan.toml",
+        "[scan]\nhistory = false\n[network]\ntier0_read_probe = true\n",
+    );
+
+    let output = vibescan(repo.path(), &[]);
+
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("network: disabled"),
+        "stdout was: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
 fn missing_explicit_baseline_is_an_operational_error() {
     let repo = TestRepo::new();
 
@@ -52,6 +130,105 @@ fn missing_configured_baseline_is_an_operational_error() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(!output.stderr.is_empty());
+}
+
+#[test]
+fn relative_cli_baseline_suppresses_a_real_synthetic_finding() {
+    let repo = TestRepo::new();
+    repo.write(
+        "src/app.ts",
+        "const stripe = 'sk_live_abcdefghijklmnopqrstuvwxyz123456';\n",
+    );
+    let first = vibescan(repo.path(), &["--format", "json", "--no-history"]);
+    assert_eq!(first.status.code(), Some(1));
+    repo.write_bytes("baselines/current.json", &first.stdout);
+
+    let suppressed = vibescan(
+        repo.path(),
+        &[
+            "--format",
+            "json",
+            "--no-history",
+            "--baseline",
+            "baselines/current.json",
+        ],
+    );
+
+    assert!(suppressed.status.success());
+    let stdout = String::from_utf8_lossy(&suppressed.stdout);
+    assert!(stdout.contains("\"findings\": []"), "stdout was: {stdout}");
+}
+
+#[test]
+fn relative_configured_baseline_suppresses_a_real_synthetic_finding() {
+    let repo = TestRepo::new();
+    repo.write(
+        "src/app.ts",
+        "const stripe = 'sk_live_abcdefghijklmnopqrstuvwxyz123456';\n",
+    );
+    let first = vibescan(repo.path(), &["--format", "json", "--no-history"]);
+    assert_eq!(first.status.code(), Some(1));
+    repo.write_bytes("config/current-baseline.json", &first.stdout);
+    repo.write(
+        "vibescan.toml",
+        "[scan]\nhistory = false\n[baseline]\npath = \"config/current-baseline.json\"\n",
+    );
+
+    let suppressed = vibescan(repo.path(), &["--format", "json"]);
+
+    assert!(suppressed.status.success());
+    let stdout = String::from_utf8_lossy(&suppressed.stdout);
+    assert!(stdout.contains("\"findings\": []"), "stdout was: {stdout}");
+}
+
+#[test]
+fn configured_custom_rules_are_repo_relative_and_additive() {
+    let repo = TestRepo::new();
+    repo.write(
+        "vibescan.toml",
+        "[scan]\nhistory = false\n[rules]\npath = \"config/custom-rules.toml\"\n",
+    );
+    repo.write(
+        "config/custom-rules.toml",
+        r#"
+        [[rules]]
+        id = "custom-service-token"
+        kind = "provider_secret"
+        regex = '''(custom_[A-Za-z0-9]{24,})'''
+        keywords = ["custom_"]
+        "#,
+    );
+    repo.write(
+        "src/app.ts",
+        "const custom = 'custom_abcdefghijklmnopqrstuvwxyz';\nconst supabase = 'sb_secret_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';\n",
+    );
+
+    let output = vibescan(repo.path(), &["--severity-gate", "info"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("custom-service-token"),
+        "stdout was: {stdout}"
+    );
+    assert!(
+        stdout.contains("Supabase secret key"),
+        "stdout was: {stdout}"
+    );
+}
+
+#[test]
+fn missing_configured_custom_rules_are_an_operational_error() {
+    let repo = TestRepo::new();
+    repo.write(
+        "vibescan.toml",
+        "[rules]\npath = \"config/missing-rules.toml\"\n",
+    );
+
+    let output = vibescan(repo.path(), &[]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("custom rules"));
 }
 
 fn vibescan(repo: &Path, args: &[&str]) -> std::process::Output {
@@ -93,6 +270,10 @@ impl TestRepo {
     }
 
     fn write(&self, path: &str, content: &str) {
+        self.write_bytes(path, content.as_bytes());
+    }
+
+    fn write_bytes(&self, path: &str, content: &[u8]) {
         let path = self.path.join(path);
         fs::create_dir_all(path.parent().expect("file has parent")).expect("parent created");
         fs::write(path, content).expect("file written");

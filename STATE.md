@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-12
 
-Current implementation baseline: `98f943a` (`main`) plus the Phase 4 worktree
+Current implementation baseline: `b637a38` (`main`) plus the Phase 5 worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -23,18 +23,21 @@ unambiguous projects before Tier 0 probing. Phase 3C now records every attempted
 Tier 0 root/table GET as redacted scan-scope evidence and renders it in JSON,
 SARIF, TTY, and HTML. Phase 4 now enforces the authoritative seven-crate DAG
 across normal, build, dev, target, optional, and feature-activated dependencies.
+Phase 5 now enforces default < repository config < explicit CLI precedence,
+strict repository-root path handling, named-baseline failures, and additive
+custom rules without allowing repository config alone to enable Network work.
 
 The strict completion verdict is nevertheless **partial**, not complete.
-The configuration contract, extendable ruleset surface, dependency
-intelligence, performance/precision evidence, and distribution requirements
-still have remaining work.
+Dependency intelligence, performance/precision evidence, and distribution
+requirements still have remaining work.
 
 Use these three lenses when discussing completion:
 
 - **Runnable v1 coverage:** all eight section-15 steps exist and the Phase
-  1–4 regression matrix is green.
-- **Strict buildable-v1 conformance:** partial because CLI/config behavior still
-  has gaps.
+  1–5 regression matrix is green.
+- **Strict buildable-v1 conformance:** the previously identified identity,
+  Network semantics, auditability, crate-DAG, and CLI/config blockers are
+  resolved; broader full-spec and assurance work remains.
 - **Entire architecture document:** partial. Online dependency intelligence,
   full section-14 assurance, performance proof, Tier 1, and distribution are
   missing or explicitly deferred.
@@ -45,15 +48,41 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 4 starts from `98f943a`, which contains Phases 0–3C. The current worktree
-moves cross-crate integration coverage into core, removes both sibling
-dev-dependencies and the CLI-to-types edge, exports the gate severity through
-core, and strengthens the boundary checker with exact-DAG validation and
-synthetic negative controls. No scan behavior, request authority, target data,
-or report artifact changed.
+Phase 5 starts from `b637a38`, which contains Phases 0–4. The current worktree
+adds explicit paired CLI scope overrides, preserves absent LocalStatic values,
+resolves CLI/config paths from the repository root, makes missing named files
+operational errors, wires additive custom rules, and updates documentation and
+regressions. No request authority, target data, or report artifact changed.
 
-All Phase 1–4 regressions are green. The suite remains intentionally red only
-for the three Phase 5 CLI/baseline cases.
+All Phase 1–5 regressions and both unfiltered workspace matrices are green.
+
+## Phase 5 verification observed on 2026-07-12
+
+The following pass on the current Phase 5 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-secrets --locked
+cargo test -p vibescan-core --locked
+cargo test -p vibescan-cli --locked
+cargo test -p vibescan-cli --features network --locked
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-core --test golden_corpus --features network --locked
+cargo test -p vibescan-report --test report_snapshots --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The default workspace matrix reports 123 passed and 4 intentionally ignored;
+the `network` matrix reports 128 passed and 3 intentionally ignored. The CLI
+real-binary suite passes 12/12 in both modes. The hardening aggregate passes and
+skips its optional real-repository leg because no fixture was supplied. No live
+Network action was run.
 
 ## Phase 4 verification observed on 2026-07-12
 
@@ -264,14 +293,14 @@ After the documentation changes, the closeout pass also reran and passed:
 | Content handling | Substantially implemented | Binary/size skips, ignore layers, forced real-env/client-bundle scanning, inline allow, and commit allowlists exist. Historical paths intentionally use current ignore state. |
 | Scan pipeline | Partial | All five phases exist and exact `ContentId` lookup now binds enrichment to the candidate revision. Units/candidates/findings remain materialized rather than streamed. |
 | Location classification | Verified for covered Tier C and Phase 1 cases | Whole-segment monorepo matching, server-first precedence, substring controls, and identical-content server/browser occurrence retention are tested. |
-| Generic secret substrate | Partial application contract | Keyword prefilter, regex, entropy, allowlists, attribution, and the required provider families exist. `Detector::from_toml` is not wired through core/CLI, so the architecture's extendable ruleset is library-only. |
+| Generic secret substrate | Phase 5 application contract verified | Keyword prefilter, regex, entropy, allowlists, attribution, and required provider families exist. Repository-configured custom rules now append to embedded rules/allowlists; duplicate IDs are rejected and mandatory defaults remain active. |
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
 | Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. Tier 1 remains deferred. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, exit gates, and deterministic snapshots. Protected actions do not affect finding statistics or gates. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
-| CLI/config | Partial | The CLI is thin and feature-gates the Tier 0 flag. Clap defaults currently overwrite TOML `working_tree`, `history`, `severity_gate`, and network choices; relative baseline resolution and CLI precedence need tests/fixes. |
+| CLI/config | Phase 5 complete | LocalStatic precedence is defaults < repository TOML < explicitly supplied CLI values, with paired scope flags. CLI/config baseline and custom-rule paths are repository-root-relative unless absolute; named missing files exit 2; real baselines suppress findings. Repository config alone cannot enable Network work. |
 | Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. No measured low-single-digit performance artifact, static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
 | Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, and a mocked Tier 0 exposed-chain test exist. There is no precision/recall metrics artifact or benchmark; three architecture cases remain ignored/deferred. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
@@ -290,8 +319,8 @@ Tier C is implemented and covered for its named acceptance paths:
 Phases 1–2 now cover the identity/linkage cases that Tier C did not: identical
 content at different paths, commit membership stored in additional provenance,
 two historical contents at one path, and a project URL split from a client key.
-The next correctness priority is Phase 5's CLI/config precedence and baseline
-path/error behavior.
+The next priority is measured assurance: deterministic precision/recall and
+performance artifacts for the already-green implementation.
 
 ## Strict gaps and known risks
 
@@ -326,13 +355,14 @@ path/error behavior.
    removed, and the checker validates every declared dependency kind plus both
    resolved feature graphs.
 
-2. CLI defaults overwrite repository config even when the user did not supply
-   an option. The affected fields include working-tree/history selection,
-   severity gate, and the network config value in network builds.
+2. **CLI/config precedence — resolved in Phase 5.** LocalStatic clap values are
+   applied only when explicit, paired scope flags override both directions, and
+   repository Network configuration remains inert without runtime confirmation.
 
-3. Baseline/custom-rules paths need an explicit repository-root resolution
-   contract. The detector can parse custom TOML, but the scan pipeline always
-   constructs the embedded default detector.
+3. **Baseline/custom-rules paths — resolved in Phase 5.** Relative paths use
+   the discovered repository root, absolute paths are preserved, missing named
+   files fail operationally, and custom rules append without replacing embedded
+   rules or safety allowlists.
 
 4. Project-scoped table harvesting — resolved in Phase 3B. Exact `ContentId`
    association wins; otherwise deterministic app/package scope is used only
@@ -431,17 +461,14 @@ reachability assertions. Synthetic controls prove rejection of a sibling
 dev-dependency, an unauthorized direct/optional edge, and LocalStatic transport
 leakage.
 
-### Phase 3 — make configuration truthful end to end
+### Completed in Phase 5 — make configuration truthful end to end
 
-1. Represent CLI overrides as optional/explicit values so absent flags preserve
-   TOML settings.
-2. Test precedence: defaults < repository config < explicit CLI arguments.
-3. Resolve baseline and custom-rules paths relative to the discovered repo
-   root; preserve absolute paths.
-4. Define and implement custom ruleset merge/replace behavior without removing
-   mandatory Supabase rules or safety allowlists.
-5. Add CLI integration tests for both feature modes and correct exit codes.
-6. Update README examples only after the behavior is proven.
+LocalStatic CLI overrides are explicit and paired where booleans require both
+directions. Repository configuration sits between built-in defaults and
+explicit CLI values. Relative baseline/custom-rule paths resolve from the
+repository root; named missing files fail with exit 2; synthetic real baselines
+suppress findings. Custom rules append to embedded defaults and duplicate IDs
+are rejected. Repository configuration alone cannot confirm Network work.
 
 ### Completed in Phase 3C — Tier 0 observability without broader authority
 
@@ -453,7 +480,7 @@ keys, headers, response bodies, and rows are absent. Network failure remains
 nonfatal, and no writes, arbitrary URLs, live CI, registry egress, or Tier 1
 work was added.
 
-### Phase 5 — add measured assurance
+### Next — add measured assurance
 
 1. Build a deterministic precision/recall harness over the golden corpus and
    publish a machine-readable report with corpus version and expected totals.

@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, ValueEnum};
+use clap::{ArgAction, Parser, ValueEnum};
 use vibescan_core::{
-    OutputFormat as CoreOutputFormat, OutputStyle, ScanConfig, Severity, scan_and_render,
+    OutputFormat as CoreOutputFormat, OutputStyle, ScanConfig, Severity, resolve_repository_path,
+    scan_and_render,
 };
 
 #[derive(Debug, Parser)]
@@ -22,33 +23,41 @@ struct Cli {
     #[arg(short, long, value_enum, default_value_t = OutputFormat::Tty)]
     format: OutputFormat,
 
-    /// Disable git history scanning.
-    #[arg(long)]
+    /// Explicitly enable git history scanning, overriding repository config.
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_history")]
+    history: bool,
+
+    /// Explicitly disable git history scanning, overriding repository config.
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "history")]
     no_history: bool,
 
-    /// Disable working tree scanning.
-    #[arg(long)]
+    /// Explicitly enable working tree scanning, overriding repository config.
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "no_working_tree")]
+    working_tree: bool,
+
+    /// Explicitly disable working tree scanning, overriding repository config.
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "working_tree")]
     no_working_tree: bool,
 
     /// Maximum commits to scan from all refs. Use --exhaustive-history to remove the cap.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "exhaustive_history")]
     max_commits: Option<usize>,
 
     /// Scan history without a commit cap.
-    #[arg(long)]
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "max_commits")]
     exhaustive_history: bool,
 
     /// Maximum file/blob bytes to scan.
     #[arg(long)]
     max_bytes: Option<usize>,
 
-    /// Baseline file: either a prior ScanResult JSON or a JSON array of finding IDs.
+    /// Baseline file, resolved from the target repository unless absolute.
     #[arg(long)]
     baseline: Option<PathBuf>,
 
     /// Severity gate for the process exit code.
-    #[arg(long, value_enum, default_value_t = SeverityArg::High)]
-    severity_gate: SeverityArg,
+    #[arg(long, value_enum)]
+    severity_gate: Option<SeverityArg>,
 
     /// Print ANSI colors in TTY output.
     #[arg(long)]
@@ -114,8 +123,16 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let mut config = ScanConfig::load(&cli.target)?;
 
-    config.include_history = !cli.no_history;
-    config.include_working_tree = !cli.no_working_tree;
+    if cli.history {
+        config.include_history = true;
+    } else if cli.no_history {
+        config.include_history = false;
+    }
+    if cli.working_tree {
+        config.include_working_tree = true;
+    } else if cli.no_working_tree {
+        config.include_working_tree = false;
+    }
     if let Some(max_commits) = cli.max_commits {
         config.max_commits = Some(max_commits);
     }
@@ -126,13 +143,16 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         config.max_bytes = max_bytes;
     }
     if let Some(baseline) = cli.baseline {
-        config.baseline_path = Some(baseline);
+        config.baseline_path = Some(resolve_repository_path(&cli.target, baseline)?);
     }
+    config.tier0_read_probe = false;
     #[cfg(feature = "network")]
     {
         config.tier0_read_probe = cli.rls_tier0_read_probe;
     }
-    config.severity_gate = cli.severity_gate.into();
+    if let Some(severity_gate) = cli.severity_gate {
+        config.severity_gate = severity_gate.into();
+    }
 
     let (output, code) = scan_and_render(
         &cli.target,

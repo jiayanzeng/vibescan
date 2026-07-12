@@ -116,6 +116,12 @@ Use a baseline file:
 cargo run -p vibescan-cli -- /path/to/repo --baseline baseline.json
 ```
 
+Relative baseline paths are resolved from the discovered target repository,
+not the caller's working directory. A named baseline must exist and parse; a
+missing or invalid file is an operational error (exit code 2). Use `--history`
+or `--no-history`, and `--working-tree` or `--no-working-tree`, to explicitly
+override repository scan-scope settings in either direction.
+
 Build with Tier 0 network probing support and opt in to read-only RLS probes:
 
 ```sh
@@ -143,12 +149,27 @@ paths = ["docs/**"]
 [baseline]
 path = "baseline.json"
 
+[rules]
+path = "config/custom-rules.toml"
+
 [network]
 tier0_read_probe = false
 ```
 
 Config ignore paths are fed through the same override layer as git ignores. They
 cannot hide real `.env` files from the local scanner.
+
+Configuration precedence is built-in defaults, then repository
+`vibescan.toml`, then CLI arguments the user explicitly supplied. Relative
+baseline and custom-rule paths are repository-root-relative; absolute paths are
+preserved. Custom rule files are additive: embedded rules and safety allowlists
+remain active, custom rules and allowlists append, and duplicate rule IDs are
+rejected instead of replacing a shipped rule.
+
+Repository configuration cannot enable Network work by itself. Even if
+`tier0_read_probe = true` is present, the current process remains LocalStatic
+unless a `network`-enabled binary is invoked with the explicit
+`--rls-tier0-read-probe` flag.
 
 ## Repository Notes
 
