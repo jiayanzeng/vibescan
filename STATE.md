@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-12
 
-Current implementation baseline: `e3f3b60` (`main`) plus the Phase 1 worktree
+Current implementation baseline: `245445d` (`main`) plus the Phase 2 worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -14,9 +14,9 @@ does not override the architecture or prove completion by itself.
 
 vibescan is a substantial, runnable local-first Rust CLI. Every build-order
 step in architecture section 15 (steps 1–8) has an implementation, Tier C has
-landed, and Phase 1 of `HIGH_PRIORITY_GAPS_PLAN.md` now preserves exact content
-identity and every source occurrence through collection, detection, and
-finding construction.
+landed, Phase 1 preserves exact content/source occurrences, and Phase 2 now
+uses that identity for exact Supabase enrichment, conservative project-aware
+coalescing, Tier 0 input preparation, and provenance-aware correlation.
 
 The strict completion verdict is nevertheless **partial**, not complete.
 Several later cross-phase linkage defects can still suppress the headline
@@ -42,16 +42,40 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 1 starts from `e3f3b60`, which contains the Phase 0 regression lock. The
-current worktree changes shared types plus the git, secrets, Supabase, and core
-consumers, together with the Phase 1 planning/status documentation. No fixture
+Phase 2 starts from `245445d`, which contains the Phase 0 regression lock and
+Phase 1 identity model. The current worktree changes `vibescan-core` plus the
+Phase 2 planning/status documentation. No shared serialized shape, fixture
 manifest, report snapshot, network transport, CLI behavior, or target-project
 data was changed.
 
-The Phase 0 suite remains intentionally red for unfinished Phases 2–5. Phase 1
-turns the identical-content/alternate-path regression green; the historical
-same-path project-context regression remains red because exact enrichment is
-explicitly Phase 2.
+All Phase 1–2 identity/linkage regressions are green. The suite remains
+intentionally red only for unfinished Phase 3 warning/table-scope behavior and
+Phase 4 CLI/baseline behavior.
+
+## Phase 2 verification observed on 2026-07-12
+
+The following pass on the current Phase 2 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test -p vibescan-core --locked
+cargo test -p vibescan-core --features network --locked -- \
+  --skip tier0_probe_inputs_keep_harvested_tables_project_local \
+  --skip tier0_probe_inputs_do_not_cross_probe_ambiguous_harvested_table
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-report --test report_snapshots --locked
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+Default and network workspace matrices pass when only the later-phase known-red
+tests are excluded. No golden or report snapshot changed, and no live Network
+action was run. An unfiltered default `--no-fail-fast` audit confirms that the
+remaining failures are exactly the three Phase 4 CLI/baseline cases and two
+Phase 3 root-warning cases; the network matrix additionally retains the two
+Phase 3 project-table-scope cases.
 
 ## Phase 1 verification observed on 2026-07-12
 
@@ -123,13 +147,13 @@ After the documentation changes, the closeout pass also reran and passed:
 | Seven-crate workspace | Partial under the literal rule | The production DAG is layered and acyclic, but `vibescan-git` and `vibescan-supabase` each dev-depend on sibling `vibescan-secrets`. The boundary script checks normal edges only. |
 | Shared data model | Phase 1 identity complete | `ContentId`, `UnitLocation`, `ScannableUnit.locations`, and `UnitRef.locations` form one canonical occurrence model; singular competing fields were removed. |
 | Content handling | Substantially implemented | Binary/size skips, ignore layers, forced real-env/client-bundle scanning, inline allow, and commit allowlists exist. Historical paths intentionally use current ignore state. |
-| Scan pipeline | Partial | All five phases exist and exact content identity now survives into candidates, but units/candidates/findings are materialized rather than streamed and core still uses the legacy path-keyed enrichment lookup pending Phase 2. |
+| Scan pipeline | Partial | All five phases exist and exact `ContentId` lookup now binds enrichment to the candidate revision. Units/candidates/findings remain materialized rather than streamed. |
 | Location classification | Verified for covered Tier C and Phase 1 cases | Whole-segment monorepo matching, server-first precedence, substring controls, and identical-content server/browser occurrence retention are tested. |
 | Generic secret substrate | Partial application contract | Keyword prefilter, regex, entropy, allowlists, attribution, and the required provider families exist. `Detector::from_toml` is not wired through core/CLI, so the architecture's extendable ruleset is library-only. |
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
-| Supabase key classification | Partial | New/legacy classes and project extraction exist. New-format project association is same-unit only; historical versions at one path can receive the wrong unit content; no user-supplied project/key pair exists. |
+| Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
 | Tier 0 RLS probe | Partial, happy path strong | Feature/runtime gating, `apikey`, LocalStatic candidate harvest, URL restriction, GET-only probing, warning taxonomy, mock tests, and no row retention exist. Candidate tables are global across projects, and protected attempts are not retained as auditable action outcomes. |
-| Correlation | Partial | The two v1 rules are registered declaratively and covered in standard cases. Committed predicates ignore `additional_provenance`, and projectless/project-bearing copies of one key can remain split, causing false negatives. |
+| Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML exist with redacted evidence, locations, history context, exit gates, and deterministic snapshots. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
 | CLI/config | Partial | The CLI is thin and feature-gates the Tier 0 flag. Clap defaults currently overwrite TOML `working_tree`, `history`, `severity_gate`, and network choices; relative baseline resolution and CLI precedence need tests/fixes. |
@@ -148,10 +172,11 @@ Tier C is implemented and covered for its named acceptance paths:
   best-effort OpenAPI supplementation, distinct degraded warnings, read-only
   table probing, and the enabled mocked exposed-public-key-chain golden.
 
-Tier C passing does not cover the newly identified identity/linkage cases:
-identical content at different paths, commit membership stored only in
-`additional_provenance`, two historical contents at one path, and a project URL
-split from the client key. Those cases are now the first correctness priority.
+Phases 1–2 now cover the identity/linkage cases that Tier C did not: identical
+content at different paths, commit membership stored in additional provenance,
+two historical contents at one path, and a project URL split from a client key.
+The next correctness priority is Phase 3's warning semantics and project-scoped
+table harvesting.
 
 ## Strict gaps and known risks
 
@@ -164,26 +189,20 @@ split from the client key. Those cases are now the first correctness priority.
    scanned once while both paths, classes, and provenances reach candidates and
    findings.
 
-2. **Committed predicates ignore additional provenance.**
+2. **Committed predicates and additional provenance — resolved in Phase 2.**
 
-   The working tree is collected before history. If identical committed
-   content is still present, commit provenance is commonly stored in
-   `additional_provenance`, while both correlation rules inspect only the
-   primary provenance. The architecture's independent “or committed” branch
-   can therefore fail.
+   Both v1 rules now use one `location_has_commit` predicate covering the
+   primary and every additional provenance.
 
-3. **Historical candidates can receive the wrong project context.**
+3. **Historical project-context swaps — resolved in Phase 2.**
 
-   Core builds a `path -> content` map for Supabase enrichment. Multiple
-   historical blobs at one path overwrite each other in that map, so a
-   candidate may be paired with a different revision's project URL.
+   Core now resolves enrichment content by the candidate's exact `ContentId`.
 
-4. **One key can remain split between projectless and project-bearing copies.**
+4. **Projectless/project-bearing copies — resolved conservatively in Phase 2.**
 
-   Coalescing includes optional project URL in its key. A browser copy of a
-   public key with no co-located URL and a server/config copy with the URL can
-   remain separate. The server copy can initiate a probe while the client copy
-   cannot join the same-project correlation.
+   Two-stage coalescing joins projectless evidence only when the base group has
+   exactly one known normalized project. Multiple known projects remain
+   separate and retain a separate projectless bucket rather than guessing.
 
 ### P1 — contract and configuration gaps
 

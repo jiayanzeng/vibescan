@@ -25,7 +25,8 @@ use vibescan_supabase::probe_tier0_read;
 use vibescan_types::{
     Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope, Location,
     LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats, ScannableUnit,
-    ScopeWarning, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass,
+    ScopeWarning, SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
+    UnitRef,
 };
 
 /// Current crate version used in scan results.
@@ -197,37 +198,27 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     let classifier = SupabaseClassifier::new();
     let unit_content = units
         .iter()
-        .flat_map(|unit| {
-            unit.locations
-                .iter()
-                .map(|location| (location.path.0.as_str(), unit.content.as_slice()))
-        })
+        .map(|unit| (&unit.content_id, unit.content.as_slice()))
         .collect::<BTreeMap<_, _>>();
-    let supabase_classifications = candidates
+    let classified_keys = candidates
         .iter()
         .filter_map(|candidate| {
             classifier
                 .classify_candidate_with_unit_content(
                     candidate,
-                    unit_content
-                        .get(
-                            candidate
-                                .unit_ref
-                                .locations
-                                .first()
-                                .expect("candidates retain a source location")
-                                .path
-                                .0
-                                .as_str(),
-                        )
-                        .copied(),
+                    unit_content.get(&candidate.unit_ref.content_id).copied(),
                 )
-                .map(|finding| (candidate, finding))
+                .map(|finding| ClassifiedKeyFact {
+                    finding,
+                    raw_key: candidate.raw_match.clone(),
+                    unit_refs: vec![candidate.unit_ref.clone()],
+                })
         })
         .collect::<Vec<_>>();
-    let mut findings = supabase_classifications
+    let classified_keys = coalesce_classified_key_facts(classified_keys);
+    let mut findings = classified_keys
         .iter()
-        .map(|(_, finding)| finding.clone())
+        .map(|fact| fact.finding.clone())
         .collect::<Vec<_>>();
     findings.extend(resolve_generic_candidates(&candidates));
     findings.extend(scan_dependency_integrity(&walk.repo_root)?);
@@ -236,7 +227,7 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
         #[cfg(feature = "network")]
         {
             let table_candidates = harvest_table_names(&units);
-            for input in tier0_probe_inputs(&supabase_classifications, &table_candidates) {
+            for input in tier0_probe_inputs(&classified_keys, &table_candidates) {
                 match probe_tier0_read(&input) {
                     Ok(mut output) => {
                         findings.append(&mut output.findings);
@@ -368,10 +359,7 @@ fn correlate_exposed_public_key(rule: &CorrelationRule, findings: &[Finding]) ->
                 ..
             }
         ) && (max_location_class(&finding.locations) == LocationClass::ClientReachable
-            || finding
-                .locations
-                .iter()
-                .any(|location| matches!(location.provenance, Provenance::Commit { .. })))
+            || finding.locations.iter().any(location_has_commit))
     });
 
     public_keys
@@ -379,7 +367,10 @@ fn correlate_exposed_public_key(rule: &CorrelationRule, findings: &[Finding]) ->
             findings.iter().filter_map(move |rls_finding| {
                 let same_project =
                     project_url_from_key(key_finding).zip(project_url_from_rls(rls_finding));
-                if !matches!(same_project, Some((a, b)) if a == b) {
+                if !matches!(
+                    same_project,
+                    Some((a, b)) if normalized_project_url(a) == normalized_project_url(b)
+                ) {
                     return None;
                 }
                 let Evidence::RlsProbe {
@@ -394,18 +385,20 @@ fn correlate_exposed_public_key(rule: &CorrelationRule, findings: &[Finding]) ->
 
                 let rule_id = CorrelationRuleId(rule.id.to_owned());
                 let id = correlation_id(&rule_id, &[&key_finding.id, &rls_finding.id]);
+                let mut locations = key_finding
+                    .locations
+                    .iter()
+                    .cloned()
+                    .chain(rls_finding.locations.iter().cloned())
+                    .collect::<Vec<_>>();
+                sort_locations(&mut locations);
                 Some(Finding {
                     id,
                     category: Category::Correlation,
                     severity: Severity::Critical,
                     title: format!("Public Supabase key can read unprotected table {table}"),
                     detail: "A browser-reachable Supabase public key is present and an API-exposed table on the same project is readable without additional authorization.".to_owned(),
-                    locations: key_finding
-                        .locations
-                        .iter()
-                        .cloned()
-                        .chain(rls_finding.locations.iter().cloned())
-                        .collect(),
+                    locations,
                     evidence: Evidence::Correlation {
                         rule_id,
                         reproduction: Some(format!(
@@ -431,17 +424,16 @@ fn correlate_elevated_key_moots_rls(rule: &CorrelationRule, findings: &[Finding]
                     class: SupabaseKeyClass::SecretNew | SupabaseKeyClass::ServiceRoleLegacy,
                     ..
                 }
-            ) && finding
-                .locations
-                .iter()
-                .any(|location| matches!(location.provenance, Provenance::Commit { .. }))
+            ) && finding.locations.iter().any(location_has_commit)
         })
         .filter_map(|key_finding| {
             let key_project = project_url_from_key(key_finding)?;
             let related_rls = findings
                 .iter()
                 .filter(|finding| {
-                    project_url_from_rls(finding).is_some_and(|project| project == key_project)
+                    project_url_from_rls(finding).is_some_and(|project| {
+                        normalized_project_url(project) == normalized_project_url(key_project)
+                    })
                 })
                 .map(|finding| finding.id.clone())
                 .collect::<Vec<_>>();
@@ -452,15 +444,19 @@ fn correlate_elevated_key_moots_rls(rule: &CorrelationRule, findings: &[Finding]
 
             let mut related = vec![key_finding.id.clone()];
             related.extend(related_rls);
+            related.sort();
+            related.dedup();
             let rule_id = CorrelationRuleId(rule.id.to_owned());
             let related_refs = related.iter().collect::<Vec<_>>();
+            let mut locations = key_finding.locations.clone();
+            sort_locations(&mut locations);
             Some(Finding {
                 id: correlation_id(&rule_id, &related_refs),
                 category: Category::Correlation,
                 severity: Severity::Critical,
                 title: "Exposed elevated Supabase key bypasses RLS".to_owned(),
                 detail: "An elevated Supabase key is committed for this project. RLS findings on the same project are moot until this key is rotated because elevated keys bypass RLS entirely.".to_owned(),
-                locations: key_finding.locations.clone(),
+                locations,
                 evidence: Evidence::Correlation {
                     rule_id,
                     reproduction: None,
@@ -505,24 +501,108 @@ fn resolve_generic_candidates(candidates: &[SecretCandidate]) -> Vec<Finding> {
         .collect()
 }
 
+struct ClassifiedKeyFact {
+    finding: Finding,
+    #[cfg_attr(not(feature = "network"), allow(dead_code))]
+    raw_key: Vec<u8>,
+    unit_refs: Vec<UnitRef>,
+}
+
+fn coalesce_classified_key_facts(facts: Vec<ClassifiedKeyFact>) -> Vec<ClassifiedKeyFact> {
+    let mut groups = BTreeMap::<FindingCoalesceBaseKey, Vec<ClassifiedKeyFact>>::new();
+    for fact in facts {
+        let key = coalesce_key(&fact.finding).expect("classified key has a coalesce key");
+        groups.entry(key.base).or_default().push(fact);
+    }
+
+    groups
+        .into_iter()
+        .flat_map(|(base, facts)| coalesce_classified_key_group(base, facts))
+        .collect()
+}
+
+fn coalesce_classified_key_group(
+    base: FindingCoalesceBaseKey,
+    facts: Vec<ClassifiedKeyFact>,
+) -> Vec<ClassifiedKeyFact> {
+    let mut known = BTreeMap::<String, (SupabaseProject, Vec<ClassifiedKeyFact>)>::new();
+    let mut projectless = Vec::new();
+
+    for fact in facts {
+        if let Some(project) = project_from_key_finding(&fact.finding).cloned() {
+            let normalized = normalized_project_url(&project.url);
+            known
+                .entry(normalized)
+                .or_insert_with(|| (project, Vec::new()))
+                .1
+                .push(fact);
+        } else {
+            projectless.push(fact);
+        }
+    }
+
+    if known.len() == 1 {
+        let (_, (project, mut facts)) = known.pop_first().expect("one known project");
+        facts.append(&mut projectless);
+        return vec![merge_classified_key_group(base, Some(project), facts)];
+    }
+
+    let mut output = known
+        .into_values()
+        .map(|(project, facts)| merge_classified_key_group(base.clone(), Some(project), facts))
+        .collect::<Vec<_>>();
+    if !projectless.is_empty() {
+        output.push(merge_classified_key_group(base, None, projectless));
+    }
+    output
+}
+
+fn merge_classified_key_group(
+    base: FindingCoalesceBaseKey,
+    project: Option<SupabaseProject>,
+    mut facts: Vec<ClassifiedKeyFact>,
+) -> ClassifiedKeyFact {
+    facts.sort_by(|left, right| left.finding.id.cmp(&right.finding.id));
+    let mut merged = facts.remove(0);
+    sort_locations(&mut merged.finding.locations);
+    for fact in facts {
+        merge_findings(&mut merged.finding, fact.finding);
+        merged.unit_refs.extend(fact.unit_refs);
+    }
+    merged.unit_refs.sort_by(|left, right| {
+        left.content_id
+            .cmp(&right.content_id)
+            .then_with(|| left.locations.cmp(&right.locations))
+    });
+    merged.unit_refs.dedup();
+    set_key_project(&mut merged.finding, project.as_ref());
+    merged.finding.id = coalesced_finding_id(&FindingCoalesceKey {
+        base,
+        project_url: project
+            .as_ref()
+            .map(|project| normalized_project_url(&project.url)),
+    });
+    merged
+}
+
 #[cfg(feature = "network")]
 fn tier0_probe_inputs(
-    classifications: &[(&SecretCandidate, Finding)],
+    classifications: &[ClassifiedKeyFact],
     candidate_tables: &BTreeSet<String>,
 ) -> Vec<Tier0RlsProbeInput> {
     let mut by_project = BTreeMap::<String, Tier0RlsProbeInput>::new();
-    for (candidate, finding) in classifications {
+    for fact in classifications {
         let Some(input) = (|| {
             let Evidence::SupabaseKey {
                 class: SupabaseKeyClass::PublishableNew | SupabaseKeyClass::AnonLegacy,
                 project: Some(project),
                 ..
-            } = &finding.evidence
+            } = &fact.finding.evidence
             else {
                 return None;
             };
-            let public_key = std::str::from_utf8(&candidate.raw_match).ok()?.to_owned();
-            let key_location = finding.locations.first()?.clone();
+            let public_key = std::str::from_utf8(&fact.raw_key).ok()?.to_owned();
+            let key_location = best_key_location(&fact.finding.locations)?.clone();
             Some(Tier0RlsProbeInput {
                 project: project.clone(),
                 public_key,
@@ -545,6 +625,16 @@ fn tier0_probe_inputs(
         }
     }
     by_project.into_values().collect()
+}
+
+#[cfg(feature = "network")]
+fn best_key_location(locations: &[Location]) -> Option<&Location> {
+    locations.iter().max_by(|left, right| {
+        location_class_rank(left.location_class)
+            .cmp(&location_class_rank(right.location_class))
+            .then_with(|| right.path.cmp(&left.path))
+            .then_with(|| span_key(&right.span).cmp(&span_key(&left.span)))
+    })
 }
 
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
@@ -1082,48 +1172,102 @@ fn project_url_from_rls(finding: &Finding) -> Option<&str> {
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct FindingCoalesceKey {
+struct FindingCoalesceBaseKey {
     category: Category,
     rule_or_class: String,
     fingerprint: String,
-    project_url: Option<String>,
     severity: Severity,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct FindingCoalesceKey {
+    base: FindingCoalesceBaseKey,
+    project_url: Option<String>,
+}
+
 fn coalesce_findings(findings: Vec<Finding>) -> Vec<Finding> {
-    let mut coalesced = BTreeMap::<FindingCoalesceKey, Finding>::new();
+    let mut groups = BTreeMap::<FindingCoalesceBaseKey, Vec<Finding>>::new();
     let mut passthrough = Vec::new();
 
-    for mut finding in findings {
+    for finding in findings {
         let Some(key) = coalesce_key(&finding) else {
             passthrough.push(finding);
             continue;
         };
-        finding.id = coalesced_finding_id(&key);
-        sort_locations(&mut finding.locations);
+        groups.entry(key.base).or_default().push(finding);
+    }
 
-        match coalesced.entry(key) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(finding);
-            }
-            std::collections::btree_map::Entry::Occupied(mut entry) => {
-                merge_findings(entry.get_mut(), finding);
-            }
+    for (base, findings) in groups {
+        passthrough.extend(coalesce_finding_group(base, findings));
+    }
+    passthrough
+}
+
+fn coalesce_finding_group(base: FindingCoalesceBaseKey, findings: Vec<Finding>) -> Vec<Finding> {
+    let mut known = BTreeMap::<String, (SupabaseProject, Vec<Finding>)>::new();
+    let mut projectless = Vec::new();
+
+    for finding in findings {
+        if let Some(project) = project_from_key_finding(&finding).cloned() {
+            let normalized = normalized_project_url(&project.url);
+            known
+                .entry(normalized)
+                .or_insert_with(|| (project, Vec::new()))
+                .1
+                .push(finding);
+        } else {
+            projectless.push(finding);
         }
     }
 
-    passthrough.extend(coalesced.into_values());
-    passthrough
+    if known.len() == 1 {
+        let (_, (project, mut findings)) = known.pop_first().expect("one known project");
+        findings.append(&mut projectless);
+        return vec![merge_finding_group(base, Some(project), findings)];
+    }
+
+    let mut output = known
+        .into_values()
+        .map(|(project, findings)| merge_finding_group(base.clone(), Some(project), findings))
+        .collect::<Vec<_>>();
+    if !projectless.is_empty() {
+        output.push(merge_finding_group(base, None, projectless));
+    }
+    output
+}
+
+fn merge_finding_group(
+    base: FindingCoalesceBaseKey,
+    project: Option<SupabaseProject>,
+    mut findings: Vec<Finding>,
+) -> Finding {
+    findings.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut merged = findings.remove(0);
+    sort_locations(&mut merged.locations);
+    for finding in findings {
+        merge_findings(&mut merged, finding);
+    }
+    set_key_project(&mut merged, project.as_ref());
+    let key = FindingCoalesceKey {
+        base,
+        project_url: project
+            .as_ref()
+            .map(|project| normalized_project_url(&project.url)),
+    };
+    merged.id = coalesced_finding_id(&key);
+    merged
 }
 
 fn coalesce_key(finding: &Finding) -> Option<FindingCoalesceKey> {
     match &finding.evidence {
         Evidence::Secret { fingerprint, .. } => Some(FindingCoalesceKey {
-            category: finding.category,
-            rule_or_class: secret_rule_key(finding).to_owned(),
-            fingerprint: fingerprint.0.clone(),
+            base: FindingCoalesceBaseKey {
+                category: finding.category,
+                rule_or_class: secret_rule_key(finding).to_owned(),
+                fingerprint: fingerprint.0.clone(),
+                severity: finding.severity,
+            },
             project_url: None,
-            severity: finding.severity,
         }),
         Evidence::SupabaseKey {
             class,
@@ -1131,13 +1275,15 @@ fn coalesce_key(finding: &Finding) -> Option<FindingCoalesceKey> {
             fingerprint,
             ..
         } => Some(FindingCoalesceKey {
-            category: finding.category,
-            rule_or_class: format!("supabase-key:{}", supabase_key_class_key(*class)),
-            fingerprint: fingerprint.0.clone(),
+            base: FindingCoalesceBaseKey {
+                category: finding.category,
+                rule_or_class: format!("supabase-key:{}", supabase_key_class_key(*class)),
+                fingerprint: fingerprint.0.clone(),
+                severity: finding.severity,
+            },
             project_url: project
                 .as_ref()
                 .map(|project| normalized_project_url(&project.url)),
-            severity: finding.severity,
         }),
         _ => None,
     }
@@ -1145,17 +1291,17 @@ fn coalesce_key(finding: &Finding) -> Option<FindingCoalesceKey> {
 
 fn coalesced_finding_id(key: &FindingCoalesceKey) -> FindingId {
     let mut hasher = Sha256::new();
-    hasher.update(category_key(key.category).as_bytes());
+    hasher.update(category_key(key.base.category).as_bytes());
     hasher.update(b"\0");
-    hasher.update(key.rule_or_class.as_bytes());
+    hasher.update(key.base.rule_or_class.as_bytes());
     hasher.update(b"\0");
-    hasher.update(key.fingerprint.as_bytes());
+    hasher.update(key.base.fingerprint.as_bytes());
     hasher.update(b"\0");
     hasher.update(key.project_url.as_deref().unwrap_or("<none>").as_bytes());
     hasher.update(b"\0");
-    hasher.update(severity_key(key.severity).as_bytes());
+    hasher.update(severity_key(key.base.severity).as_bytes());
 
-    let prefix = if key.rule_or_class.starts_with("supabase-key:") {
+    let prefix = if key.base.rule_or_class.starts_with("supabase-key:") {
         "supabase-key"
     } else {
         "secret"
@@ -1164,6 +1310,29 @@ fn coalesced_finding_id(key: &FindingCoalesceKey) -> FindingId {
         "{prefix}-{}",
         hex::encode(&hasher.finalize()[..12])
     ))
+}
+
+fn project_from_key_finding(finding: &Finding) -> Option<&SupabaseProject> {
+    match &finding.evidence {
+        Evidence::SupabaseKey {
+            project: Some(project),
+            ..
+        } => Some(project),
+        _ => None,
+    }
+}
+
+fn set_key_project(finding: &mut Finding, project: Option<&SupabaseProject>) {
+    if let Evidence::SupabaseKey {
+        project: finding_project,
+        ..
+    } = &mut finding.evidence
+    {
+        *finding_project = project.cloned();
+        if let Some(project) = finding_project {
+            project.url = normalized_project_url(&project.url);
+        }
+    }
 }
 
 fn merge_findings(existing: &mut Finding, incoming: Finding) {
@@ -1263,6 +1432,12 @@ fn max_location_class(locations: &[Location]) -> LocationClass {
         .map(|location| location.location_class)
         .max_by_key(|class| location_class_rank(*class))
         .unwrap_or(LocationClass::Unknown)
+}
+
+fn location_has_commit(location: &Location) -> bool {
+    std::iter::once(&location.provenance)
+        .chain(location.additional_provenance.iter())
+        .any(|provenance| matches!(provenance, Provenance::Commit { .. }))
 }
 
 fn location_class_rank(location_class: LocationClass) -> u8 {
@@ -1810,6 +1985,48 @@ mod tests {
     }
 
     #[test]
+    fn project_enrichment_coalescing_is_independent_of_input_order() {
+        let known = public_key_finding();
+        let mut projectless = known.clone();
+        projectless.id = FindingId("projectless".to_owned());
+        projectless.locations[0].path = RepoPath("dist/config.js".to_owned());
+        if let Evidence::SupabaseKey { project, .. } = &mut projectless.evidence {
+            *project = None;
+        }
+
+        let forward = coalesce_findings(vec![known.clone(), projectless.clone()]);
+        let reverse = coalesce_findings(vec![projectless, known]);
+
+        assert_eq!(forward, reverse);
+        assert_eq!(forward.len(), 1);
+        assert!(matches!(
+            forward[0].evidence,
+            Evidence::SupabaseKey {
+                project: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn unambiguous_project_enrichment_intentionally_changes_baseline_identity() {
+        let known = public_key_finding();
+        let mut projectless = known.clone();
+        projectless.id = FindingId("projectless".to_owned());
+        projectless.locations[0].path = RepoPath("dist/config.js".to_owned());
+        if let Evidence::SupabaseKey { project, .. } = &mut projectless.evidence {
+            *project = None;
+        }
+
+        let projectless_id = coalesce_findings(vec![projectless.clone()])[0].id.clone();
+        let known_id = coalesce_findings(vec![known.clone()])[0].id.clone();
+        let enriched_id = coalesce_findings(vec![projectless, known])[0].id.clone();
+
+        assert_ne!(projectless_id, enriched_id);
+        assert_eq!(enriched_id, known_id);
+    }
+
+    #[test]
     fn historical_versions_at_same_path_keep_their_own_project_context() {
         let repo = TestRepo::new();
         repo.git(["init"]);
@@ -1888,10 +2105,10 @@ mod tests {
         {
             project.url = "https://abcdefghijklmnopqrst.supabase.co".to_owned();
         }
-        let classifications = vec![
-            (&server_candidate, server_finding),
-            (&client_candidate, client_finding),
-        ];
+        let classifications = coalesce_classified_key_facts(vec![
+            classified_key_fact(&server_candidate, server_finding),
+            classified_key_fact(&client_candidate, client_finding),
+        ]);
         let candidate_tables = BTreeSet::from(["profiles".to_owned()]);
 
         let inputs = tier0_probe_inputs(&classifications, &candidate_tables);
@@ -1906,6 +2123,49 @@ mod tests {
             LocationClass::ClientReachable
         );
         assert_eq!(inputs[0].candidate_tables, candidate_tables);
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
+    fn coalesced_projectless_client_copy_drives_known_project_probe() {
+        let server_candidate =
+            publishable_candidate("apps/web/.env.local", LocationClass::ServerOnly);
+        let client_candidate = publishable_candidate(
+            "apps/web/.next/static/chunks/x.js",
+            LocationClass::ClientReachable,
+        );
+        let server_finding = public_key_finding_at(
+            "server-key",
+            "apps/web/.env.local",
+            LocationClass::ServerOnly,
+        );
+        let mut client_finding = public_key_finding_at(
+            "client-key",
+            "apps/web/.next/static/chunks/x.js",
+            LocationClass::ClientReachable,
+        );
+        if let Evidence::SupabaseKey { project, .. } = &mut client_finding.evidence {
+            *project = None;
+        }
+
+        let facts = coalesce_classified_key_facts(vec![
+            classified_key_fact(&server_candidate, server_finding),
+            classified_key_fact(&client_candidate, client_finding),
+        ]);
+        let inputs = tier0_probe_inputs(&facts, &BTreeSet::from(["profiles".to_owned()]));
+
+        assert_eq!(facts.len(), 1);
+        assert_eq!(facts[0].finding.locations.len(), 2);
+        assert_eq!(facts[0].unit_refs.len(), 2);
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(
+            inputs[0].project.url,
+            "https://abcdefghijklmnopqrst.supabase.co"
+        );
+        assert_eq!(
+            inputs[0].key_location.path.0,
+            "apps/web/.next/static/chunks/x.js"
+        );
     }
 
     #[cfg(feature = "network")]
@@ -1937,7 +2197,10 @@ mod tests {
             project.ref_id = Some("zyxwvutsrqponmlkjihg".to_owned());
             project.url = "https://zyxwvutsrqponmlkjihg.supabase.co".to_owned();
         }
-        let classifications = vec![(&candidate_a, finding_a), (&candidate_b, finding_b)];
+        let classifications = coalesce_classified_key_facts(vec![
+            classified_key_fact(&candidate_a, finding_a),
+            classified_key_fact(&candidate_b, finding_b),
+        ]);
         let harvested = BTreeSet::from(["accounts_a".to_owned(), "accounts_b".to_owned()]);
 
         let inputs = tier0_probe_inputs(&classifications, &harvested);
@@ -1985,7 +2248,10 @@ mod tests {
             project.ref_id = Some("zyxwvutsrqponmlkjihg".to_owned());
             project.url = "https://zyxwvutsrqponmlkjihg.supabase.co".to_owned();
         }
-        let classifications = vec![(&candidate_a, finding_a), (&candidate_b, finding_b)];
+        let classifications = coalesce_classified_key_facts(vec![
+            classified_key_fact(&candidate_a, finding_a),
+            classified_key_fact(&candidate_b, finding_b),
+        ]);
         let ambiguously_scoped_tables = BTreeSet::from(["shared_profiles".to_owned()]);
 
         let inputs = tier0_probe_inputs(&classifications, &ambiguously_scoped_tables);
@@ -2854,6 +3120,15 @@ mod tests {
                 col_start: 1,
                 col_end: 55,
             },
+        }
+    }
+
+    #[cfg(feature = "network")]
+    fn classified_key_fact(candidate: &SecretCandidate, finding: Finding) -> ClassifiedKeyFact {
+        ClassifiedKeyFact {
+            finding,
+            raw_key: candidate.raw_match.clone(),
+            unit_refs: vec![candidate.unit_ref.clone()],
         }
     }
 

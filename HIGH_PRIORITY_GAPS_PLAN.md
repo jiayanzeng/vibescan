@@ -401,6 +401,29 @@ unexplained snapshot refresh.
 Exit criteria: all four P0 regressions and the unique-location regression pass,
 while known-different projects remain negative controls.
 
+#### Phase 2 status — implemented (2026-07-12)
+
+- Core enrichment now resolves source bytes exclusively by `ContentId`, so
+  historical revisions at one path cannot exchange project context.
+- An internal classified-key fact retains the resolved finding, transient raw
+  key, and exact `UnitRef` context. Facts are coalesced before Tier 0 input
+  selection; raw keys never enter findings, results, logs, or snapshots.
+- Finding and classified-fact coalescing use the same two-stage policy:
+  fingerprint/class/severity base groups are partitioned by normalized known
+  project, projectless copies join only a single unambiguous project, and an
+  ambiguous projectless copy remains separate.
+- Both correlation rules use `location_has_commit`, including additional
+  provenance. Composite locations use the canonical deterministic
+  sort/deduplication helper, and related/correlation identities remain stable
+  across input order.
+- A baseline regression records the intentional identity transition when
+  reliable project evidence enriches a formerly projectless finding. Existing
+  golden manifests and report snapshots require no refresh.
+
+All Phase 2 and known-different-project controls pass in default and network
+core tests. The remaining deliberate red cases belong to Phase 3 warning/table
+scope work and Phase 4 CLI/baseline behavior.
+
 ### Phase 3 — correct Tier 0 outcomes and project-scope candidate harvesting
 
 #### 3A. Correct warning semantics
