@@ -1,8 +1,8 @@
 # vibescan State
 
-Reviewed: 2026-07-12
+Reviewed: 2026-07-15
 
-Current implementation baseline: `b637a38` (`main`) plus the Phase 5 worktree
+Current implementation baseline: `9eb5a44` (`main`) plus the Tier D1 worktree
 described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -48,13 +48,51 @@ counting. The default production dependency graph remains transport-free.
 
 ## Current worktree context
 
-Phase 5 starts from `b637a38`, which contains Phases 0–4. The current worktree
-adds explicit paired CLI scope overrides, preserves absent LocalStatic values,
-resolves CLI/config paths from the repository root, makes missing named files
-operational errors, wires additive custom rules, and updates documentation and
-regressions. No request authority, target data, or report artifact changed.
+The Tier D1 worktree started clean at `9eb5a44`. It adds a standalone JSON
+invariant checker, separates offline and real-repository hardening modes, routes
+the original target plus the sanitized and planted controls through that
+checker, and adds unconditional/offline plus secret-gated/real-repository CI
+jobs. LocalStatic remains the default. The optional real-target Tier 0 path
+requires the existing feature/runtime opt-in plus
+`VIBESCAN_REAL_REPO_NETWORK=1`; no live Network action was run here.
 
-All Phase 1–5 regressions and both unfiltered workspace matrices are green.
+All Phase 1–5 regressions and both unfiltered workspace matrices remain green.
+
+## Tier D1 verification observed on 2026-07-15
+
+The following pass on the current Tier D1 worktree:
+
+```sh
+python3 scripts/real-repo-invariants.py --self-test
+python3 scripts/real-repo-invariants.py \
+  tests/fixtures/offline-composite-exposed-public-key-chain/expected.json
+bash -n scripts/verify-hardening-checks.sh
+ruby -e 'require "yaml"; YAML.load_file(".github/workflows/ci.yml")'
+bash scripts/verify-hardening-checks.sh
+bash scripts/verify-hardening-checks.sh --real-repo-only \
+  /Users/yzjia/test/astroscout
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test --workspace --features network --locked
+git diff --check
+```
+
+The no-argument hardening command runs the default workspace matrix (**123
+passed, 4 intentionally ignored**), the checker self-tests, and the Network
+boundary, then emits `real-repo leg skipped: no fixture`. The Network workspace
+matrix reports **128 passed, 3 intentionally ignored**. A synthetic Git-backed
+smoke target exercised the real-only path, sanitized zero-finding control, and
+planted positive control; its positive run emitted
+`REALREPO_INVARIANTS ok coverage=100.00% findings=1 projects=0`.
+
+The explicitly supplied AstroScout repository then passed the complete
+LocalStatic real-repository leg, including both controls, and emitted
+`REALREPO_INVARIANTS ok coverage=100.00% findings=3 projects=1`. This records a
+genuine §17 coverage data point without changing the `src/api/` rule. No live
+Supabase target was contacted. The private-fixture CI job requires
+`VIBESCAN_REAL_REPO_REPOSITORY` plus `VIBESCAN_REAL_REPO_TOKEN` and reports a
+loud skip when they are absent.
 
 ## Phase 5 verification observed on 2026-07-12
 
@@ -302,7 +340,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, exit gates, and deterministic snapshots. Protected actions do not affect finding statistics or gates. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
 | CLI/config | Phase 5 complete | LocalStatic precedence is defaults < repository TOML < explicitly supplied CLI values, with paired scope flags. CLI/config baseline and custom-rule paths are repository-root-relative unless absolute; named missing files exit 2; real baselines suppress findings. Repository config alone cannot enable Network work. |
 | Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. No measured low-single-digit performance artifact, static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
-| Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, and a mocked Tier 0 exposed-chain test exist. There is no precision/recall metrics artifact or benchmark; three architecture cases remain ignored/deferred. |
+| Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, a mocked Tier 0 exposed-chain test, and the Tier D1 scripted real-repository invariant/CI path exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project). There is still no precision/recall metrics artifact or performance-counter fixture; three architecture cases remain ignored/deferred. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
 ## Tier C status
@@ -319,8 +357,10 @@ Tier C is implemented and covered for its named acceptance paths:
 Phases 1–2 now cover the identity/linkage cases that Tier C did not: identical
 content at different paths, commit membership stored in additional provenance,
 two historical contents at one path, and a project URL split from a client key.
-The next priority is measured assurance: deterministic precision/recall and
-performance artifacts for the already-green implementation.
+The next priority is Tier D2/D3 measured assurance: deterministic
+precision/recall and performance-counter artifacts for the already-green
+implementation. Tier D1 now has one explicit local real-repository coverage
+record; the private CI fixture remains optional and secret-gated.
 
 ## Strict gaps and known risks
 
@@ -385,8 +425,9 @@ performance artifacts for the already-green implementation.
   corpus licensing/attribution should receive a durable audit artifact before
   broad expansion.
 - README documents the basic test and boundary commands, not the complete
-  closeout matrix. `verify-hardening-checks.sh` is a useful helper but omits
-  fmt, clippy, network-feature tests, and diff checks; it must not be treated as
+  closeout matrix. `verify-hardening-checks.sh` now owns the default/offline and
+  optional real-repository D1 legs, but it still omits fmt, clippy,
+  network-feature workspace tests, and diff checks; it must not be treated as
   the full gate.
 
 ## Architecture ambiguities requiring an explicit decision
@@ -487,7 +528,8 @@ work was added.
 2. Add a representative local performance fixture and measure wall time,
    scanned blobs, dedup ratio, peak/materialized unit counts, and truncation.
 3. Add a canonical full-verification script or prominently document the exact
-   root `AGENTS.md` matrix; keep the optional real-repo smoke leg separate.
+   root `AGENTS.md` matrix. Keep Tier D1's real-repository leg separate and
+   explicitly fixture/Network-gated.
 4. Extend CI only with deterministic offline checks.
 
 ### Deferred tracks — require a separate architecture decision

@@ -55,3 +55,46 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
       - run: bash scripts/check-network-boundary.sh
+
+  hardening-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - run: bash scripts/verify-hardening-checks.sh --offline-only
+
+  hardening-real-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Real-repository leg unavailable on pull requests
+        if: github.event_name != 'push'
+        run: 'echo "real-repo leg skipped: fixture secrets are unavailable on pull requests"'
+      - name: Check private fixture gate
+        id: fixture
+        if: github.event_name == 'push'
+        env:
+          FIXTURE_REPOSITORY: ${{ vars.VIBESCAN_REAL_REPO_REPOSITORY }}
+          FIXTURE_TOKEN: ${{ secrets.VIBESCAN_REAL_REPO_TOKEN }}
+        run: |
+          if [[ -z "$FIXTURE_REPOSITORY" || -z "$FIXTURE_TOKEN" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "real-repo leg skipped: no fixture repository variable/secret"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@1.85.0
+        if: steps.fixture.outputs.enabled == 'true'
+      - uses: actions/checkout@v4
+        if: steps.fixture.outputs.enabled == 'true'
+        with:
+          repository: ${{ vars.VIBESCAN_REAL_REPO_REPOSITORY }}
+          token: ${{ secrets.VIBESCAN_REAL_REPO_TOKEN }}
+          path: real-repo-fixture
+      - name: Validate private real-repository fixture
+        if: steps.fixture.outputs.enabled == 'true'
+        env:
+          VIBESCAN_REAL_REPO_NETWORK: ${{ vars.VIBESCAN_REAL_REPO_NETWORK }}
+        run: >-
+          bash scripts/verify-hardening-checks.sh --real-repo-only
+          "$GITHUB_WORKSPACE/real-repo-fixture"
