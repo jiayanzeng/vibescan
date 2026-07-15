@@ -10,10 +10,10 @@
 ## 1. Design principles (invariants — do not violate)
 
 1. **Local-first, network-explicit.** Modules split into two disjoint classes: `LocalStatic` (touch only the filesystem and the local git object store — *never* the network) and `Network` (talk to the user's own Supabase project). `LocalStatic` is the default. Every `Network` action is opt-in, logged, and — for anything that could mutate state — gated behind explicit ownership confirmation. This boundary is architectural, not a runtime flag: the crate dependency graph enforces that `LocalStatic` code paths cannot reach a network client.
-2. **Own-assets-only.** The tool scans assets the user controls. It is never designed to point at arbitrary third-party URLs. This constrains the RLS/probe surface (see §7).
+2. **Own-assets-only.** The tool scans assets the user controls. It is never designed to point at arbitrary third-party URLs. This constrains the RLS/probe surface (see §7). **Scope of the invariant (resolved, §17.5):** it governs interaction with *target systems* — vibescan reads from, probes, and (never) writes to only the user's own project. It does not by itself forbid a read-only lookup of *public metadata about public artifacts* ("does npm package `foo` exist"). Such lookups are a distinct egress class with their own contract (§11.1): off by default, separately opted in, never carrying secrets or file contents. Absent that opt-in, the tool talks to nothing but the user's own project.
 3. **Never persist writes.** No `Network` code path may create, modify, or delete data in the target project in v1. Write-exposure is *inferred* (from credentialed introspection), never *demonstrated* by writing. (See §7.3.)
 4. **Don't reinvent generic detection.** The regex+entropy+allowlist substrate is commodity (gitleaks, ripsecrets, secretscan all do it well and free). Adopt a known-good pattern corpus and spend effort only on the Supabase-specific layer and correlation.
-5. **Secrets stay on the machine.** No secret value is transmitted anywhere except, in the credentialed path, directly from the user's machine to the user's own Supabase endpoint. Findings carry a redacted display form for any output that could leave the machine, and the full match only for local rendering.
+5. **Secrets stay on the machine.** No secret value is transmitted anywhere except, in the credentialed path, directly from the user's machine to the user's own Supabase endpoint. Findings carry a redacted display form in **every serialized output** — JSON, SARIF, and HTML alike, all of which can leave the machine the moment they are written to disk. The full match is rendered only by the interactive TTY reporter, which writes to a terminal and is never persisted by the tool. There is no "local HTML" disclosure mode (resolved, §17.3; testable form in §13.3).
 6. **Findings must be reproducible and actionable.** Every finding carries evidence (where, and — for correlated findings — a concrete reproduction) and a remediation. A finding a user can't verify or fix is noise.
 
 ---
@@ -97,7 +97,7 @@ The vocabulary every phase speaks. Shapes below are contracts, not Rust.
 - `span: (line, col_start, col_end)`.
 
 **`Finding`** — a resolved, reportable result.
-- `id: string` — stable finding id (rule + normalized-secret hash + location), used for dedup and baselines.
+- `id: string` — stable finding id: `rule_or_class` + normalized-secret fingerprint + normalized project (when known). **Path-independent by construction** (resolved, §17.4): the same secret seen in a bundle, a server env file, and a historical blob is *one* `Finding` carrying several `locations` — never several findings. Coalescing (§6.6) and the §12 rule-1 predicate depend on this, baselines key on it, and a file move must therefore not resurrect a suppressed finding.
 - `category: Category` — `SecretExposure` | `KeyClassification` | `Rls` | `DependencyIntegrity` | `Correlation`.
 - `severity: Severity` — `Critical` | `High` | `Medium` | `Low` | `Info`.
 - `title`, `detail: string`.
@@ -241,7 +241,7 @@ This is the logic that makes vibescan smarter than a generic scanner, which woul
 | Class | Detection | Privilege | Severity rule |
 |---|---|---|---|
 | `PublishableNew` (`sb_publishable_…`) | prefix match | low, RLS-gated | **Info** alone; **Critical** only via RLS correlation |
-| `SecretNew` (`sb_secret_…`) | prefix match | elevated, **bypasses RLS** | **Critical** if in any scanned content that is committed or `ClientReachable`; High if in a gitignored server env (still flag — it's in the tree) |
+| `SecretNew` (`sb_secret_…`) | prefix match | elevated, **bypasses RLS** | **Critical** wherever it appears in scanned content — committed, `ClientReachable`, *or* a gitignored server env (resolved, §17.1). An elevated key bypasses RLS entirely; being untracked shrinks neither its blast radius nor the chance it is pasted somewhere worse |
 | `AnonLegacy` (JWT, `role=anon`) | base64url-decode payload; check `role`, `iss`, `ref` | low, RLS-gated | same as `PublishableNew` |
 | `ServiceRoleLegacy` (JWT, `role=service_role`) | JWT decode + role claim | elevated, **bypasses RLS** | same as `SecretNew` |
 | `Unknown` | shape matched but neither prefix nor decodable role | — | Low / `Review` |
@@ -267,11 +267,56 @@ Implements the three tiers of §7. Contracts:
 ---
 
 ## 11. Dependency integrity spec (`vibescan-supabase` or a `core` submodule)
-Parse manifests/lockfiles (npm; Python if present). For each dependency:
-- **Nonexistent package** → not resolvable on the registry ⇒ likely AI-hallucinated (slopsquat bait). High.
-- **Suspicious newcomer** → recently published, near-zero downloads, name within edit-distance of a popular package ⇒ Medium/`Review`.
+
+Parse manifests/lockfiles (npm; Python if present). The check splits into a v1
+`LocalStatic` half and a post-v1 `Network` half; the split is normative
+(resolved, §17.5).
+
+**11.0 — `LocalStatic` structural checks (v1, always on).** No egress, no
+consent needed:
+- **Malformed / unresolvable specifier** → a dependency whose name or version
+  requirement cannot be a valid registry package (illegal name, empty name,
+  vendored `node_modules/` path, `git+`/URL specifier where a registry package
+  is declared) ⇒ Medium/`Review`.
+- **Structural risk signals** → a dependency declared in a manifest with no
+  corresponding lockfile entry, or a lockfile entry resolving to a
+  non-registry source ⇒ Medium/`Review`.
+These are the only dependency findings v1 emits.
+
+### 11.1 — Registry-backed checks (post-v1, `Network` — *Registry* class)
+The high-signal checks below require third-party egress and are therefore
+**deferred out of v1** and specified, not built, here. When they land they must
+satisfy this contract in full:
+- **Nonexistent package** → not resolvable on the registry ⇒ likely
+  AI-hallucinated (slopsquat bait). High.
+- **Suspicious newcomer** → recently published, near-zero downloads, name within
+  edit-distance of a popular package ⇒ Medium/`Review`.
 - **Known-malicious** → matches an advisory feed (OSV) ⇒ Critical.
-This check is cheap, high-signal, and network-optional (registry lookups are a `Network` action; provide an offline mode that does structural checks only).
+
+**Contract (all clauses required before any of the above ships):**
+1. **Consent.** Off by default. A dedicated opt-in (`--registry-checks`) that is
+   *separate* from the Supabase network opt-in — enabling Tier 0 must never
+   enable registry egress, and vice versa. Repository config alone cannot enable
+   it (same rule as §7's Network work).
+2. **Payload.** Package names and version requirements only. Never a secret,
+   never file contents, never a path, never the repo name or remote URL. The
+   request set is a function of the manifests alone and must be reproducible
+   from them.
+3. **Privacy disclosure.** The scan scope records, and the report renders, that
+   package names left the machine and to which hosts — an unlisted private
+   dependency name *is* a disclosure and the user must be able to see it
+   happened.
+4. **Caching.** Responses cached locally with an explicit TTL; a cache hit makes
+   no request. Cache is keyed by name+version and holds no user data.
+5. **Failure semantics.** Non-fatal and distinguishable: `RegistryUnavailable`,
+   `RateLimited`, `NotFound` (the actual finding), `InvalidResponse`. Never
+   conflate an unreachable registry with a nonexistent package — a network
+   outage must not manufacture a High finding.
+6. **Ownership.** Lives in its own crate (`vibescan-registry`), which is the
+   nearest parent of its HTTP transport, exactly as `vibescan-supabase` is for
+   the RLS probe. `vibescan-core` gains an optional, feature-gated edge to it;
+   the §13.3 boundary assertion and the workspace-DAG checker are updated in the
+   same change. `LocalStatic` crates stay transport-free.
 
 ---
 
@@ -280,7 +325,7 @@ This check is cheap, high-signal, and network-optional (registry lookups are a `
 The headline stage. Consumes the full `Finding` set and produces composite `Correlation` findings that reference their constituents via `related`.
 
 **v1 kill-chain rules (declarative; each rule = predicate over findings → composite finding):**
-1. **Exposed-public-key chain (the Moltbook chain):** a low-privilege key finding (`PublishableNew`/`AnonLegacy`) with `location_class = ClientReachable` (or committed) **AND** at least one `Rls` `Exposed`/RLS-off finding on the *same project* ⇒ one **Critical** composite: "public key ships to the browser **and** table X is unprotected — anyone can read/modify your data," with the reproduction from the RLS finding. This composite outranks and absorbs the two constituents in the summary view. The `location_class = ClientReachable` predicate is satisfied by §6.2's segment-aware classification at any nesting depth, and by the coalesced finding carrying the most client-reachable class among its locations. The `(or committed)` branch remains an independent trigger. If neither the classification nor the committed-provenance branch holds, the chain does not fire — a key that exists only in a gitignored server env with no client-reachable copy is correctly not a browser-exposure chain.
+1. **Exposed-public-key chain (the Moltbook chain):** a low-privilege key finding (`PublishableNew`/`AnonLegacy`) with `location_class = ClientReachable` (or committed) **AND** at least one `Rls` `Exposed`/RLS-off finding on the *same project* ⇒ one **Critical** composite: "public key ships to the browser **and** table X is unprotected — anyone can read your data (write exposure is **inferred, never demonstrated** — §7.3 — so the composite claims reads only, and says so in those words)," with the reproduction from the RLS finding. This composite outranks and absorbs the two constituents in the summary view. The `location_class = ClientReachable` predicate is satisfied by §6.2's segment-aware classification at any nesting depth, and by the coalesced finding carrying the most client-reachable class among its locations. The `(or committed)` branch remains an independent trigger. If neither the classification nor the committed-provenance branch holds, the chain does not fire — a key that exists only in a gitignored server env with no client-reachable copy is correctly not a browser-exposure chain.
 2. **Elevated-key-in-tree:** a `SecretNew`/`ServiceRoleLegacy` finding anywhere committed ⇒ already Critical standalone, but correlation annotates that *all other RLS findings on that project are moot* while this key is exposed (an elevated key bypasses RLS entirely), so remediation ordering puts it first.
 
 Correlation rules are data, not hardcoded branches — new chains are added as rules. Keep the engine small; two rules ship in v1.
@@ -298,11 +343,12 @@ Correlation rules are data, not hardcoded branches — new chains are added as r
 ### 13.2 Performance model
 - Keyword pre-filter before regex; parallel blob scanning (rayon-style) across the `ScannableUnit` stream; tree-diff to scan only changed blobs across history; content-hash dedup before detection.
 - **Target:** a typical vibe-coded repo (a few hundred files, moderate history) scans in low single-digit seconds on a laptop, network tiers excluded.
+- **Proof obligation (v1 closeout).** The target above is a claim until it is measured. The scan must emit deterministic counters in `ScanStats` — paths walked, blobs read, unique contents after dedup, dedup ratio, units materialized, budget/truncation flags — and a wall-clock `duration`. A committed performance fixture (deterministically generated, not vendored) records both. **CI gates the counters, never the wall time**; wall time is recorded and trended, since a shared runner cannot support a timing assertion. A counter regression (e.g. dedup ratio collapsing) is a build failure.
 
 ### 13.3 Security & privacy invariants (restating §1 as testable requirements)
 - `LocalStatic` crates have **no** network dependency in their dependency tree — enforce by construction and assert in CI.
 - No v1 code path writes to a target project.
-- Any output format that can leave the machine (SARIF/JSON destined for upload, HTML for hosting) uses the **redacted** secret form; full matches appear only in local TTY/HTML rendered on the user's machine.
+- **Every serialized output format — JSON, SARIF, and HTML — uses the redacted secret form unconditionally.** There is no "local HTML" mode: an HTML artifact is shareable the instant it exists on disk, and the tool cannot police where it travels afterwards, so it never contains a full match. Full matches appear only in the interactive TTY renderer. Assert this in the report snapshot tests, per format (resolved, §17.3).
 - Credentialed-tier secrets are read from env, held in memory only for the request lifetime, and transmitted only to the user's own project endpoint.
 
 ### 13.4 Output & exit codes
@@ -314,11 +360,54 @@ Correlation rules are data, not hardcoded branches — new chains are added as r
 ## 14. Testing strategy
 
 A security tool's credibility is its false-positive/negative rate; tests are load-bearing.
-- **Vulnerable-fixture corpus:** a set of deliberately-broken sample repos as golden inputs — the exposed-public-key chain, an elevated key committed then removed (history-only), an RLS-off table, a permissive `USING (true)` policy, a hallucinated dependency. Each fixture asserts the exact findings and severities produced.
-- **Precision/recall harness:** measure detection against the corpus plus a clean control repo (which must produce zero findings) to catch false positives.
-- **Snapshot tests** for each report format.
-- **Boundary assertion:** an automated check that no `LocalStatic` crate transitively depends on a network crate.
-- **Network tiers** are tested against a disposable throwaway project or a mocked PostgREST/introspection surface — never against shared infrastructure.
+
+**Fixture corpus — two tiers (resolved, §17.6).** Every fixture is committed and
+carries an `expected.json`. What differs is whether it is *live* (asserted on
+every run) or *gated* (present, `#[ignore]`d, carrying an explicit
+`TODO(<tier>)` naming the capability it waits on). A gated fixture is a scheduled
+verification gap, **not** a v1 blocker — but it must never be silently deleted or
+left with a stale TODO.
+- **Live (v1, must stay green):** the exposed-public-key chain (offline
+  composite, plus the mocked-PostgREST Tier 0 chain under `--features network`),
+  an elevated key committed then removed (history-only), a monorepo layout
+  exercising §6.2 at depth, vendor-chunk noise, nested gitignore, a malformed
+  dependency (§11.0), and a **clean control repo that must produce zero
+  findings**.
+- **Gated (post-v1, `#[ignore]` + `TODO`):** an RLS-off table and a permissive
+  `USING (true)` policy — both require Tier 1 introspection (§7.2), deferred by
+  §15 — and a hallucinated dependency, which requires the registry tier (§11.1).
+  Each is un-gated by the change that lands its tier, in that change.
+
+**Precision/recall harness (v1 closeout requirement).** Measuring detection is
+itself a deliverable, not a byproduct of the goldens. The harness runs the *live*
+corpus plus the clean control and emits a **machine-readable metrics report**
+(JSON) containing: corpus version, per-fixture expected vs observed finding
+counts, true positives, false positives, false negatives, precision, recall, and
+the classification-coverage rate (share of findings whose `location_class` is not
+`Unknown`). The report is compared against a **committed baseline**; any
+regression in precision, recall, or coverage fails the build, and any intended
+change to them is an explicit, reviewed baseline update. Zero false positives on
+the clean control is a hard gate — a security tool that cries wolf is uninstalled.
+
+**Real-repository validation (v1 closeout requirement).** Flat, synthetic
+fixtures have repeatedly failed to expose defects that only appear against a real
+monorepo — §6.2's root-anchored classifier and the duplicate-probe bug both
+survived a green unit suite and died on first contact with a real Next.js +
+Supabase repo. A scan against a real repository is therefore a **required,
+scripted validation step**, not an optional convenience: it runs the repo-agnostic
+invariants (one finding per fingerprint, one Tier 0 input per project, no
+`Unknown` class on a path §6.2 says is classifiable, no absolute paths or raw
+secrets in serialized output), a sanitized zero-finding control, and a planted
+positive control.
+
+**Snapshot tests** for each report format, asserting redaction per format (§13.3).
+
+**Boundary assertion:** an automated check that no `LocalStatic` crate transitively
+depends on a network crate, across every dependency kind and both feature graphs.
+
+**Network tiers** are tested against a mocked PostgREST/introspection surface, or a
+disposable throwaway project — never against shared infrastructure. Default tests
+make zero requests.
 
 ---
 
@@ -334,7 +423,9 @@ Implement bottom-up so each layer is testable before the next:
 7. `vibescan-cli` — wire it together; ship the **free local tier** (steps 1–6, no network).
 8. `vibescan-supabase` RLS **Tier 0 read probe** (first `Network` code, opt-in) — completes the reproduced Moltbook chain end-to-end.
 
-**Everything past step 8 is post-v1 and deferred:** Tier 1 credentialed introspection and policy-logic analysis (paid/deep); the npm/cross-compile release pipeline (parallel track); and the later gated DAST/write-probe work. Do not build these in the first pass.
+**Step 9 — v1 closeout (assurance, not features).** Steps 1–8 make the product *run*; step 9 is what makes its output *believable*, and v1 is not done without it: the §14 precision/recall harness with a committed baseline, the §13.2 performance counters with a deterministic fixture, and the §14 scripted real-repository validation — all three wired into CI. No new detection breadth belongs in step 9.
+
+**Everything past step 9 is post-v1 and deferred:** Tier 1 credentialed introspection and policy-logic analysis (paid/deep); registry-backed dependency intelligence (§11.1); the npm/cross-compile release pipeline (parallel track); and the later gated DAST/write-probe work. Do not build these in the first pass.
 
 ---
 
@@ -345,4 +436,79 @@ Implement bottom-up so each layer is testable before the next:
 - No client-side-auth-pattern heuristic scanner in the first pass (it's `Review`-confidence and noisy; add once the confident checks are solid).
 - No configurability beyond the TOML surface in §9.
 
-**The buildable v1 is small on purpose:** steps 1–8 above. The moat is not the size of the codebase; it is the correlation and the Supabase semantics. Ship that, then let real usage decide what to deepen.
+**The buildable v1 is small on purpose:** steps 1–9 above (8 to run, 9 to be believed). The moat is not the size of the codebase; it is the correlation and the Supabase semantics. Ship that, then let real usage decide what to deepen.
+
+---
+
+## 17. Decision log — resolved ambiguities (2026-07-13)
+
+Six passages of this document contradicted each other or under-specified a
+behavior the implementation had to choose anyway. Each is now resolved in the
+section cited; the resolutions are recorded here so a future agent can see *what*
+was decided and *why*, and so `STATE.md`'s "conservative policy until the
+architecture is clarified" paragraph can be retired. Where the code had already
+made the conservative choice, the decision ratifies it — the spec moved to the
+code, not the reverse.
+
+**17.1 — Elevated keys are Critical everywhere (§10.1).** The old severity table
+carved out "High if in a gitignored server env" while the mechanics bullet two
+lines later said elevated keys are Critical essentially wherever they appear.
+Resolved in favor of Critical: `.gitignore` is not a security boundary (the file
+is on disk, ships in tarballs, gets pasted into issues), and an elevated key
+bypasses RLS regardless of where it sits. The implementation already emitted
+Critical.
+
+**17.2 — Tier 0 claims reads only (§12 rule 1).** The rule-1 composite message
+said "read/modify," but a Tier 0 read probe demonstrates exactly one thing: a
+read. Write exposure is inferred from Tier 1 introspection and never demonstrated
+(§1.3, §7.3). Overclaiming in the headline finding is the fastest way to lose a
+security tool's credibility, so the composite now says reads, and names write
+exposure as an inference.
+
+**17.3 — All serialized output is redacted; no local-HTML mode (§1.5, §13.3).**
+The old text required redaction for anything that "could leave the machine" and
+then permitted full matches in "local TTY/HTML." HTML has no local mode in
+practice — it is a file, and files are shared. Resolved: JSON, SARIF, and HTML are
+redacted unconditionally; only the interactive TTY renderer shows a full match,
+because it writes to a terminal and is never persisted.
+
+**17.4 — Finding identity is path-independent (§4).** The data model said the
+finding id includes the location; coalescing (§6.6) and rule 1 (§12) require one
+identity for one secret across many locations, and baselines require an id stable
+under a file move. Resolved in favor of coalescing: id = rule/class + secret
+fingerprint + normalized project; locations are a list *inside* the finding. The
+implementation already did this.
+
+**17.5 — Third-party egress is a separate, gated class (§1.2, §11).**
+"Own-assets-only" (§1.2) and "registry/OSV lookups" (§11) were in direct conflict;
+the implementation resolved it by shipping offline structural checks only, which
+left the hallucinated-dependency fixture — one of the five original corpus
+fixtures — permanently stubbed. Resolved by scoping the invariant rather than
+breaking it: own-assets-only governs *target-system interaction*, and a read-only
+lookup of public metadata about a public package is a different act. It gets its
+own class with a full contract (§11.1: separate opt-in, package names only, no
+secrets/paths/contents, disclosed in scan scope, cached, failure-distinguishable,
+owned by a `vibescan-registry` crate that is the nearest parent of its transport).
+It stays **post-v1 and off by default**; v1 ships §11.0 only. The ambiguity is
+resolved; the work is scheduled, not blocked.
+
+**17.6 — The corpus has live and gated tiers (§14, §15).** §14 named five
+vulnerable fixtures; §15 deferred the tier two of them need, and the registry tier
+the third needs. Resolved as a normative two-tier corpus: gated fixtures stay
+committed, `#[ignore]`d, and TODO-tagged with the capability they wait on, and are
+un-gated by the change that lands that capability. Precision/recall is computed
+over the live tier only, so the metric is never diluted by a fixture that cannot
+run.
+
+### Open question (deliberately not resolved here)
+
+**§6.2 `src/api/` → `ServerOnly`.** The segment rules treat a package-level
+`api/` or `src/api/` root as a decisive server signal. In many Vite/Next
+frontends, `src/api/` is instead a *client-side* wrapper module — it ships to the
+browser and is exactly where a publishable key and a table name live together.
+The rule is spec-conformant as written and the `(or committed)` branch of §12
+rule 1 keeps the chain firing for committed source, but the reported
+`location_class` would be wrong, and the classification-coverage metric would look
+healthier than it is. Do not change the rule on intuition. Measure it: the real-
+repository validation (§14) and the coverage metric exist precisely to produce the
+evidence, and this question is revisited when that evidence lands.
