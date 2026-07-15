@@ -1,13 +1,21 @@
+mod common;
+
 #[cfg(feature = "network")]
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
+use common::{
+    LIVE_FIXTURES, LiveFixture, fixture_dir, materialize_fixture, offline_composite_findings,
+    synthetic_rls_finding,
+};
+#[cfg(feature = "network")]
+use common::{
+    absorb_exposed_public_key_constituents_for_test, synthetic_project,
+    synthetic_public_key_finding,
+};
 use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, correlate_findings, scan};
 #[cfg(feature = "network")]
@@ -16,55 +24,8 @@ use vibescan_supabase::{
     probe_tier0_read_with_client,
 };
 use vibescan_types::{
-    Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, Location, LocationClass,
-    Provenance, RepoPath, RlsExposure, ScanResult, SecretFingerprint, Severity, Span,
-    SupabaseKeyClass, SupabaseProject,
+    Category, CorrelationRuleId, Evidence, Finding, LocationClass, Provenance, ScanResult, Severity,
 };
-
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-const LIVE_FIXTURES: &[GoldenFixture] = &[
-    GoldenFixture {
-        name: "clean-control",
-        history: false,
-    },
-    GoldenFixture {
-        name: "history-only-elevated-key",
-        history: true,
-    },
-    GoldenFixture {
-        name: "publishable-client-reachable",
-        history: false,
-    },
-    GoldenFixture {
-        name: "vendor-chunks-noise",
-        history: false,
-    },
-    GoldenFixture {
-        name: "monorepo-layout",
-        history: false,
-    },
-    GoldenFixture {
-        name: "nested-gitignore",
-        history: false,
-    },
-    GoldenFixture {
-        name: "malformed-dependency",
-        history: false,
-    },
-];
-
-#[derive(Clone, Copy, Debug)]
-struct GoldenFixture {
-    name: &'static str,
-    history: bool,
-}
-
-impl GoldenFixture {
-    fn include_location_classes(self) -> bool {
-        self.name == "monorepo-layout"
-    }
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct GoldenManifest {
@@ -133,7 +94,7 @@ fn golden_corpus_matches_expected_manifests() {
             },
         )
         .unwrap_or_else(|error| panic!("{} scan failed: {error}", fixture.name));
-        let actual = manifest_from_result(&result, fixture.include_location_classes());
+        let actual = manifest_from_result(&result, include_location_classes(fixture));
         assert_or_update_manifest(fixture_dir(fixture.name).join("expected.json"), &actual);
     }
 }
@@ -154,8 +115,8 @@ fn golden_corpus_is_deterministic_across_runs() {
             .unwrap_or_else(|error| panic!("{} second scan failed: {error}", fixture.name));
 
         assert_eq!(
-            manifest_from_result(&first, fixture.include_location_classes()),
-            manifest_from_result(&second, fixture.include_location_classes()),
+            manifest_from_result(&first, include_location_classes(fixture)),
+            manifest_from_result(&second, include_location_classes(fixture)),
             "{} canonical findings changed between runs",
             fixture.name
         );
@@ -164,18 +125,10 @@ fn golden_corpus_is_deterministic_across_runs() {
 
 #[test]
 fn offline_composite_exposed_public_key_chain_golden() {
-    let key = synthetic_public_key_finding();
-    let rls = synthetic_rls_finding();
-    let correlation = correlate_findings(&[key.clone(), rls.clone()])
-        .into_iter()
-        .next()
-        .expect("correlation emitted");
-    assert_eq!(correlation.severity, Severity::Critical);
-
-    let mut findings = vec![key, rls, correlation];
-    absorb_exposed_public_key_constituents_for_test(&mut findings);
+    let findings = offline_composite_findings();
     assert_eq!(findings.len(), 1, "constituents should be absorbed");
     assert_eq!(findings[0].category, Category::Correlation);
+    assert_eq!(findings[0].severity, Severity::Critical);
 
     let manifest = GoldenManifest {
         todo: None,
@@ -269,7 +222,7 @@ fn network_hallucinated_dependency_fixture() {
 
 #[test]
 fn monorepo_bundle_key_can_drive_exposed_public_key_chain() {
-    let fixture = GoldenFixture {
+    let fixture = LiveFixture {
         name: "monorepo-layout",
         history: false,
     };
@@ -317,6 +270,10 @@ fn ignored_network_fixture(name: &str) {
         manifest.is_file(),
         "network placeholder fixture {name} must carry expected.json"
     );
+}
+
+fn include_location_classes(fixture: &LiveFixture) -> bool {
+    fixture.name == "monorepo-layout"
 }
 
 fn manifest_from_result(result: &ScanResult, include_location_classes: bool) -> GoldenManifest {
@@ -516,186 +473,6 @@ fn assert_or_update_manifest(path: PathBuf, actual: &GoldenManifest) {
         "golden manifest drifted at {}; rerun with UPDATE_GOLDEN=1 to accept",
         path.display()
     );
-}
-
-fn materialize_fixture(fixture: &GoldenFixture) -> PathBuf {
-    if fixture.history {
-        materialize_history_fixture(fixture.name)
-    } else {
-        materialize_working_tree_fixture(fixture.name)
-    }
-}
-
-fn materialize_working_tree_fixture(name: &str) -> PathBuf {
-    let source = fixture_dir(name).join("repo");
-    let destination = unique_temp_dir(name);
-    copy_dir(&source, &destination);
-    run_git(&destination, ["init"]);
-    destination
-}
-
-fn materialize_history_fixture(name: &str) -> PathBuf {
-    let destination = unique_temp_dir(name);
-    let bundle = fixture_dir(name).join("history.bundle");
-    let output = Command::new("git")
-        .arg("clone")
-        .arg(&bundle)
-        .arg(&destination)
-        .output()
-        .unwrap_or_else(|error| panic!("git clone {} failed: {error}", bundle.display()));
-    assert!(
-        output.status.success(),
-        "git clone {} failed\nstdout:\n{}\nstderr:\n{}",
-        bundle.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    destination
-}
-
-fn copy_dir(source: &Path, destination: &Path) {
-    fs::create_dir_all(destination)
-        .unwrap_or_else(|error| panic!("create {}: {error}", destination.display()));
-    for entry in fs::read_dir(source)
-        .unwrap_or_else(|error| panic!("read fixture source {}: {error}", source.display()))
-    {
-        let entry = entry.expect("fixture entry is readable");
-        let source_path = entry.path();
-        let destination_path = destination.join(entry.file_name());
-        let file_type = entry.file_type().expect("fixture entry type is readable");
-        if file_type.is_dir() {
-            copy_dir(&source_path, &destination_path);
-        } else if file_type.is_file() {
-            fs::copy(&source_path, &destination_path).unwrap_or_else(|error| {
-                panic!(
-                    "copy {} to {}: {error}",
-                    source_path.display(),
-                    destination_path.display()
-                )
-            });
-        }
-    }
-}
-
-fn run_git<const N: usize>(repo: &Path, args: [&str; N]) {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .expect("git command starts");
-    assert!(
-        output.status.success(),
-        "git failed in {}\nstdout:\n{}\nstderr:\n{}",
-        repo.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-fn unique_temp_dir(name: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time after epoch")
-        .as_nanos();
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let path = env::temp_dir().join(format!(
-        "vibescan-golden-{name}-{}-{nonce}-{counter}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&path).unwrap_or_else(|error| panic!("create {}: {error}", path.display()));
-    path
-}
-
-fn fixture_dir(name: &str) -> PathBuf {
-    workspace_root().join("tests").join("fixtures").join(name)
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-        .to_path_buf()
-}
-
-fn synthetic_public_key_finding() -> Finding {
-    Finding {
-        id: FindingId("golden-key".to_owned()),
-        category: Category::KeyClassification,
-        severity: Severity::Info,
-        title: "Supabase publishable key found".to_owned(),
-        detail: "synthetic public key".to_owned(),
-        locations: vec![Location {
-            path: RepoPath("src/app/page.tsx".to_owned()),
-            span: Some(Span {
-                line: 2,
-                col_start: 14,
-                col_end: 72,
-            }),
-            provenance: Provenance::WorkingTree,
-            additional_provenance: Vec::new(),
-            location_class: LocationClass::ClientReachable,
-        }],
-        evidence: Evidence::SupabaseKey {
-            class: SupabaseKeyClass::PublishableNew,
-            redacted: "sb_pub...6789".to_owned(),
-            project: Some(synthetic_project()),
-            fingerprint: SecretFingerprint("golden-public-fingerprint".to_owned()),
-        },
-        remediation: "fix RLS if exposed".to_owned(),
-        related: Vec::new(),
-        confidence: Confidence::Likely,
-    }
-}
-
-fn synthetic_rls_finding() -> Finding {
-    Finding {
-        id: FindingId("golden-rls".to_owned()),
-        category: Category::Rls,
-        severity: Severity::Critical,
-        title: "Supabase table profiles is readable with the public key".to_owned(),
-        detail: "synthetic RLS exposure".to_owned(),
-        locations: Vec::new(),
-        evidence: Evidence::RlsProbe {
-            project: synthetic_project(),
-            table: "profiles".to_owned(),
-            endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1"
-                .to_owned(),
-            observed_row_count: 1,
-            exposure: RlsExposure::Exposed,
-        },
-        remediation: "tighten RLS".to_owned(),
-        related: Vec::new(),
-        confidence: Confidence::Confirmed,
-    }
-}
-
-fn synthetic_project() -> SupabaseProject {
-    SupabaseProject {
-        ref_id: Some("abcdefghijklmnopqrst".to_owned()),
-        url: "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
-    }
-}
-
-fn absorb_exposed_public_key_constituents_for_test(findings: &mut Vec<Finding>) {
-    let absorbed = findings
-        .iter()
-        .filter_map(|finding| {
-            let Evidence::Correlation { rule_id, .. } = &finding.evidence else {
-                return None;
-            };
-            if rule_id == &CorrelationRuleId("exposed-public-key-chain".to_owned()) {
-                Some(finding.related.clone())
-            } else {
-                None
-            }
-        })
-        .flatten()
-        .collect::<BTreeSet<_>>();
-
-    findings.retain(|finding| {
-        finding.category == Category::Correlation || !absorbed.contains(&finding.id)
-    });
 }
 
 #[cfg(feature = "network")]

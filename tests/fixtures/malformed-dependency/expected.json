@@ -3,6 +3,9 @@
     {
       "stable_key": "dependency-a21f190b20a81c18859ec3bd",
       "rule_id": "dependency:invalid_package_name",
+      "truth": {
+        "fingerprint": "dependency:Bad Package"
+      },
       "category": "dependency_integrity",
       "severity": "high",
       "locations": [
@@ -19,6 +22,9 @@
     {
       "stable_key": "dependency-dac915b7a5944885eb177ed9",
       "rule_id": "dependency:empty_version_specifier",
+      "truth": {
+        "fingerprint": "dependency:left-pad"
+      },
       "category": "dependency_integrity",
       "severity": "high",
       "locations": [

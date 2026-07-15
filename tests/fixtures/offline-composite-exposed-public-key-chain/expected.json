@@ -3,6 +3,10 @@
     {
       "stable_key": "correlation-bbe52f3871cc49267639496b",
       "rule_id": "exposed-public-key-chain",
+      "truth": {
+        "fingerprint": "correlation:exposed-public-key-chain:profiles",
+        "project": "https://abcdefghijklmnopqrst.supabase.co"
+      },
       "category": "correlation",
       "severity": "critical",
       "locations": [

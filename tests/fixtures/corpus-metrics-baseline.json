@@ -1,0 +1,69 @@
+{
+  "corpus_version": "tier-d2-live-v1",
+  "totals": {
+    "tp": 8,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "coverage": 0.6
+  },
+  "per_fixture": {
+    "clean-control": {
+      "expected": 0,
+      "observed": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0
+    },
+    "history-only-elevated-key": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "malformed-dependency": {
+      "expected": 2,
+      "observed": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0
+    },
+    "monorepo-layout": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "nested-gitignore": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "offline-composite-exposed-public-key-chain": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "publishable-client-reachable": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "vendor-chunks-noise": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    }
+  }
+}
