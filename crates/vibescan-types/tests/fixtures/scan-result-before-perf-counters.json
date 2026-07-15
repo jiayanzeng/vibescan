@@ -1,0 +1,26 @@
+{
+  "findings": [],
+  "scope": {
+    "target": ".",
+    "working_tree": true,
+    "history": {
+      "mode": "working_tree_only"
+    },
+    "network": {
+      "enabled": false,
+      "tier0_read_probe": false,
+      "tier1_introspection": false
+    },
+    "warnings": []
+  },
+  "tool_version": "0.1.0",
+  "started_at": "2026-01-01T00:00:00Z",
+  "duration_ms": 7,
+  "stats": {
+    "by_severity": {},
+    "by_category": {},
+    "skipped_large_files": 0,
+    "skipped_binary_files": 0,
+    "scan_budget_hit": false
+  }
+}

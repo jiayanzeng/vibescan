@@ -37,6 +37,15 @@
               }
             ],
             "networkEnabled": true,
+            "scanStats": {
+              "blobsRead": 40,
+              "dedupRatioPercent": "25.00",
+              "pathsWalked": 40,
+              "scanBudgetHit": false,
+              "truncated": false,
+              "uniqueContents": 30,
+              "unitsMaterialized": 30
+            },
             "target": "fixtures/report-format-snapshots",
             "warnings": []
           }

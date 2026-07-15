@@ -52,12 +52,21 @@ pub struct WalkOutput {
     pub units: Vec<ScannableUnit>,
     pub warnings: Vec<ScopeWarning>,
     pub history: HistoryWalkStats,
+    pub stats: WalkStats,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HistoryWalkStats {
     pub scanned_commits: usize,
     pub truncated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WalkStats {
+    pub paths_walked: u64,
+    pub blobs_read: u64,
+    pub unique_contents: u64,
+    pub units_materialized: u64,
 }
 
 pub fn collect_repository(
@@ -93,11 +102,13 @@ pub fn collect_repository(
         )?;
     }
 
+    let stats = collector.stats();
     Ok(WalkOutput {
         repo_root,
         units: collector.into_units(),
         warnings,
         history,
+        stats,
     })
 }
 
@@ -143,7 +154,10 @@ fn collect_working_tree(
             continue;
         }
         let relative = relative_repo_path(repo_root, entry.path())?;
-        seen_paths.insert(relative.clone());
+        if !seen_paths.insert(relative.clone()) {
+            continue;
+        }
+        collector.record_path_walked();
         push_working_tree_file(
             collector,
             warnings,
@@ -174,6 +188,7 @@ fn collect_working_tree(
         if !seen_paths.insert(relative.clone()) {
             continue;
         }
+        collector.record_path_walked();
         push_working_tree_file(
             collector,
             warnings,
@@ -201,6 +216,7 @@ fn push_working_tree_file(
         return Ok(());
     }
     let content = fs::read(path).map_err(GitWalkError::Io)?;
+    collector.record_blob_read();
     push_content(
         collector,
         warnings,
@@ -335,6 +351,7 @@ fn collect_changed_blobs(
             continue;
         }
 
+        collector.record_path_walked();
         let mut buffer = Vec::new();
         let blob = objects
             .find_blob(&entry.id, &mut buffer)
@@ -343,6 +360,7 @@ fn collect_changed_blobs(
                 source: Box::new(source),
             })?;
         let content = blob.data.to_vec();
+        collector.record_blob_read();
         push_content(
             collector,
             warnings,
@@ -905,6 +923,8 @@ const ALWAYS_SKIP_PATTERNS: &[&str] = &[
 struct UnitCollector {
     by_content_id: BTreeMap<ContentId, usize>,
     units: Vec<ScannableUnit>,
+    paths_walked: u64,
+    blobs_read: u64,
 }
 
 impl UnitCollector {
@@ -912,6 +932,26 @@ impl UnitCollector {
         Self {
             by_content_id: BTreeMap::new(),
             units: Vec::new(),
+            paths_walked: 0,
+            blobs_read: 0,
+        }
+    }
+
+    fn record_path_walked(&mut self) {
+        self.paths_walked += 1;
+    }
+
+    fn record_blob_read(&mut self) {
+        self.blobs_read += 1;
+    }
+
+    fn stats(&self) -> WalkStats {
+        let materialized = self.units.len() as u64;
+        WalkStats {
+            paths_walked: self.paths_walked,
+            blobs_read: self.blobs_read,
+            unique_contents: materialized,
+            units_materialized: materialized,
         }
     }
 
@@ -1095,8 +1135,11 @@ mod tests {
             Provenance::WorkingTree,
         ));
 
+        let stats = collector.stats();
         let units = collector.into_units();
 
+        assert_eq!(stats.unique_contents, 1);
+        assert_eq!(stats.units_materialized, 1);
         assert_eq!(units.len(), 1);
         assert_eq!(
             units[0]

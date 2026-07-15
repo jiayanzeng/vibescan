@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-15
 
-Current implementation baseline: `66a5b59` (`main`, Tier D1) plus the Tier D2
+Current implementation baseline: `be9ee80` (`main`, Tier D2) plus the Tier D3
 worktree described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -28,7 +28,7 @@ strict repository-root path handling, named-baseline failures, and additive
 custom rules without allowing repository config alone to enable Network work.
 
 The strict completion verdict is nevertheless **partial**, not complete.
-Dependency intelligence, performance evidence, and distribution requirements
+Dependency intelligence, Tier D4 ratification, and distribution requirements
 still have remaining work.
 
 Use these three lenses when discussing completion:
@@ -36,11 +36,11 @@ Use these three lenses when discussing completion:
 - **Runnable v1 coverage:** all eight section-15 steps exist and the Phase
   1–5 regression matrix is green.
 - **Strict buildable-v1 conformance:** the previously identified identity,
-  Network semantics, auditability, crate-DAG, and CLI/config blockers are
-  resolved; broader full-spec and assurance work remains.
+  Network semantics, auditability, crate-DAG, CLI/config, real-repository,
+  precision/recall, and deterministic performance-counter blockers are
+  resolved; Tier D4 ratification remains.
 - **Entire architecture document:** partial. Online dependency intelligence,
-  performance proof, remaining section-14 assurance, Tier 1, and distribution
-  are missing or explicitly deferred.
+  Tier 1, and distribution are missing or explicitly deferred.
 
 No target-project write path was found. The production RLS transport exposes
 GET only, validates Supabase-owned URLs, and discards returned row data after
@@ -53,12 +53,59 @@ invariant checker, separates offline and real-repository hardening modes, routes
 the original target plus the sanitized and planted controls through that
 checker, and adds unconditional/offline plus secret-gated/real-repository CI
 jobs. D2 adds a live-tier-only precision/recall and classification-coverage
-harness with a committed machine-readable baseline. LocalStatic remains the
+harness with a committed machine-readable baseline. D3 starts from the clean
+`be9ee80` Tier D2 commit and adds exact collection/dedup counters, a generated
+performance fixture, and report-time dedup ratios. LocalStatic remains the
 default. The optional real-target Tier 0 path requires the existing
 feature/runtime opt-in plus `VIBESCAN_REAL_REPO_NETWORK=1`; no live Network
 action was run here.
 
 All Phase 1–5 regressions and both unfiltered workspace matrices remain green.
+
+## Tier D3 verification observed on 2026-07-15
+
+`ScanStats` now publishes `paths_walked`, `blobs_read`, `unique_contents`,
+`units_materialized`, and `truncated` as defaulted integer/boolean fields. The
+collector owns the pre/post-dedup measurements; core copies them into the scan
+result. Dedup ratio is derived from the exact counts at report time and is not
+stored as a float. An older-shape `ScanResult` JSON fixture without the five
+fields still deserializes and round-trips with zero/false defaults.
+
+The generated fixture creates 40 byte-deterministic TypeScript files with 30
+unique contents and 10 intentional duplicates. Two independent scans both
+produce **40 paths, 40 blobs, 30 unique contents, 30 materialized units, and a
+25.00% dedup ratio**. The pre-dedup negative control records 40 would-be unique
+inputs and proves the production counter differs by exactly 10. Explicit
+`--nocapture` runs recorded values from 12–33 ms; these values are logged only
+and no test compares or gates wall time. Existing default/network workspace CI
+jobs pick up the integration test automatically.
+
+The following pass is green on the current Tier D3 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo test -p vibescan-types --locked
+cargo test -p vibescan-git --locked
+cargo test -p vibescan-report --locked
+cargo test -p vibescan-core --test perf_counters --locked -- --nocapture
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-core --locked
+cargo test -p vibescan-core --features network --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh --offline-only
+git diff --check
+```
+
+The default workspace matrix reports **130 passed, 4 intentionally ignored**;
+the `network` matrix reports **135 passed, 3 intentionally ignored**. Golden
+manifests are unchanged because their builder still canonicalizes findings
+only. JSON, SARIF, TTY, and HTML report snapshots were intentionally regenerated
+and reviewed to expose the counters and derived ratio; no raw secret or
+absolute path was introduced. No live Network action was run.
 
 ## Tier D2 verification observed on 2026-07-15
 
@@ -383,10 +430,10 @@ After the documentation changes, the closeout pass also reran and passed:
 | Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. Tier 1 remains deferred. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
-| Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, exit gates, and deterministic snapshots. Protected actions do not affect finding statistics or gates. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
+| Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. Protected actions do not affect finding statistics or gates. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
 | CLI/config | Phase 5 complete | LocalStatic precedence is defaults < repository TOML < explicitly supplied CLI values, with paired scope flags. CLI/config baseline and custom-rule paths are repository-root-relative unless absolute; named missing files exit 2; real baselines suppress findings. Repository config alone cannot enable Network work. |
-| Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. No measured low-single-digit performance artifact, static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
-| Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, a mocked Tier 0 exposed-chain test, the Tier D1 scripted real-repository invariant/CI path, and the Tier D2 committed live-corpus metrics baseline exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); D2 records 1.0 precision, 1.0 recall, and 0.6 classification coverage over 8 live findings. There is still no performance-counter fixture; three architecture cases remain ignored/deferred. |
+| Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. Tier D3 now records deterministic collection/dedup counters and non-gated wall time. No static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
+| Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, a mocked Tier 0 exposed-chain test, the Tier D1 scripted real-repository invariant/CI path, the Tier D2 committed live-corpus metrics baseline, and the Tier D3 deterministic performance-counter gate exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); D2 records 1.0 precision, 1.0 recall, and 0.6 classification coverage over 8 live findings; D3 gates 40 blobs, 30 unique contents, 30 units, and 25.00% dedup. Three architecture cases remain ignored/deferred. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
 ## Tier C status
@@ -403,11 +450,11 @@ Tier C is implemented and covered for its named acceptance paths:
 Phases 1–2 now cover the identity/linkage cases that Tier C did not: identical
 content at different paths, commit membership stored in additional provenance,
 two historical contents at one path, and a project URL split from a client key.
-The next priority is Tier D3 measured assurance: a deterministic
-performance-counter artifact for the already-green implementation, followed by
-the Tier D4 resolved-ambiguity ratification. Tier D1 has one explicit local
-real-repository coverage record, Tier D2 has a committed live-corpus metrics
-baseline, and the private CI fixture remains optional and secret-gated.
+Tier D3 measured assurance is now complete for its deterministic counter gate.
+The next priority is Tier D4 resolved-ambiguity ratification. Tier D1 has one
+explicit local real-repository coverage record, Tier D2 has a committed
+live-corpus metrics baseline, and the private CI fixture remains optional and
+secret-gated.
 
 ## Strict gaps and known risks
 
@@ -462,8 +509,9 @@ baseline, and the private CI fixture remains optional and secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- No repeatable benchmark proves the low-single-digit local performance target
-  or bounds memory growth from the materialized pipeline.
+- Tier D3 now provides the required deterministic counter gate and records wall
+  time without asserting it. Longer-term timing trends and peak-memory growth
+  for the materialized pipeline are not yet tracked.
 - History-only remediation is present in general terms but should be tested for
   the architecture's explicit rewrite/force-push guidance.
 - The default ruleset is deliberately conservative; provider precision and
@@ -573,9 +621,10 @@ work was added.
    TP/FP/FN, precision, recall, and classification coverage. Clean-control FP
    and precision/recall regression checks are hard gates even during baseline
    regeneration.
-2. Add the Tier D3 representative local performance fixture and measure wall time,
-   scanned blobs, dedup ratio, peak/materialized unit counts, and truncation.
-3. Ratify the resolved section-17 decisions in Tier D4 after D3 evidence is in
+2. **Tier D3 complete:** the generated fixture gates exact paths, blobs, unique
+   contents, materialized units, truncation, and the derived dedup ratio while
+   recording but never gating `duration_ms`.
+3. Ratify the resolved section-17 decisions in Tier D4 now that D3 evidence is in
    hand; do not broaden `src/api/` classification from the current D1/D2 data.
 4. Add a canonical full-verification script or prominently document the exact
    root `AGENTS.md` matrix. Keep Tier D1's real-repository leg separate and

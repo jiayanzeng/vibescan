@@ -81,6 +81,11 @@
     "by_category": {},
     "skipped_large_files": 0,
     "skipped_binary_files": 0,
-    "scan_budget_hit": false
+    "scan_budget_hit": false,
+    "paths_walked": 40,
+    "blobs_read": 40,
+    "unique_contents": 30,
+    "units_materialized": 30,
+    "truncated": false
   }
 }

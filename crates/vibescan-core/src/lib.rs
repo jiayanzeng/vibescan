@@ -325,7 +325,7 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     absorb_correlated_constituents(&mut findings);
     sort_findings(&mut findings);
 
-    let stats = compute_stats(&findings, &warnings);
+    let stats = compute_stats(&findings, &warnings, walk.stats, walk.history.truncated);
     if !config.include_history {
         warnings.push(ScopeWarning::Other {
             message: "history scanning disabled".to_owned(),
@@ -1716,8 +1716,20 @@ fn sort_findings(findings: &mut [Finding]) {
     });
 }
 
-fn compute_stats(findings: &[Finding], warnings: &[ScopeWarning]) -> ScanStats {
-    let mut stats = ScanStats::default();
+fn compute_stats(
+    findings: &[Finding],
+    warnings: &[ScopeWarning],
+    collection: vibescan_git::WalkStats,
+    truncated: bool,
+) -> ScanStats {
+    let mut stats = ScanStats {
+        paths_walked: collection.paths_walked,
+        blobs_read: collection.blobs_read,
+        unique_contents: collection.unique_contents,
+        units_materialized: collection.units_materialized,
+        truncated,
+        ..ScanStats::default()
+    };
     for finding in findings {
         *stats.by_severity.entry(finding.severity).or_default() += 1;
         *stats.by_category.entry(finding.category).or_default() += 1;
@@ -1923,6 +1935,41 @@ mod tests {
                 .any(|finding| finding.category == Category::SecretExposure)
         );
         assert!(!result.scope.network.enabled);
+    }
+
+    #[test]
+    fn scan_stats_carries_history_truncation() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.git(["config", "user.email", "a@example.com"]);
+        repo.git(["config", "user.name", "A"]);
+        repo.write("src/app.ts", "export const version = 1;\n");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "one"]);
+        repo.write("src/app.ts", "export const version = 2;\n");
+        repo.git(["add", "."]);
+        repo.git(["commit", "-m", "two"]);
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_working_tree: false,
+                max_commits: Some(1),
+                ..ScanConfig::default()
+            },
+        )
+        .expect("budgeted scan succeeds");
+
+        assert!(result.stats.truncated);
+        assert!(result.stats.scan_budget_hit);
+        assert!(matches!(
+            result.scope.history,
+            HistoryScope::Budgeted {
+                scanned_commits: 1,
+                truncated: true,
+                ..
+            }
+        ));
     }
 
     #[test]

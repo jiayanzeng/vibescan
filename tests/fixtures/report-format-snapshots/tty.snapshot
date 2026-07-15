@@ -1,4 +1,5 @@
 vibescan snapshot - 1 finding(s) in 42 ms
+collection: paths 40 | blobs 40 | unique 30 | dedup 25.00% | units 30 | truncated no
 target: fixtures/report-format-snapshots | scope: working tree only | network: enabled
 
 network actions:

@@ -380,6 +380,29 @@ pub struct ScanStats {
     pub skipped_large_files: u64,
     pub skipped_binary_files: u64,
     pub scan_budget_hit: bool,
+    #[serde(default)]
+    pub paths_walked: u64,
+    #[serde(default)]
+    pub blobs_read: u64,
+    #[serde(default)]
+    pub unique_contents: u64,
+    #[serde(default)]
+    pub units_materialized: u64,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl ScanStats {
+    /// Share of read blobs removed by content-hash deduplication.
+    ///
+    /// The ratio is derived instead of serialized so persisted statistics stay
+    /// integer-exact and deterministic. An empty scan has a zero dedup ratio.
+    pub fn dedup_ratio(&self) -> f64 {
+        if self.blobs_read == 0 {
+            return 0.0;
+        }
+        1.0 - self.unique_contents as f64 / self.blobs_read as f64
+    }
 }
 
 /// A minimal sink contract for future streaming collectors.
@@ -462,5 +485,25 @@ mod tests {
             serde_json::from_str(encoded).expect("older network scope deserializes");
 
         assert!(decoded.actions.is_empty());
+    }
+
+    #[test]
+    fn scan_stats_defaults_performance_counters_when_reading_older_results() {
+        const OLDER_SCAN_RESULT: &str =
+            include_str!("../tests/fixtures/scan-result-before-perf-counters.json");
+
+        let decoded: ScanResult =
+            serde_json::from_str(OLDER_SCAN_RESULT).expect("older scan result deserializes");
+
+        assert_eq!(decoded.stats.paths_walked, 0);
+        assert_eq!(decoded.stats.blobs_read, 0);
+        assert_eq!(decoded.stats.unique_contents, 0);
+        assert_eq!(decoded.stats.units_materialized, 0);
+        assert!(!decoded.stats.truncated);
+
+        let round_tripped = serde_json::to_string(&decoded).expect("scan result serializes");
+        let reparsed: ScanResult =
+            serde_json::from_str(&round_tripped).expect("scan result round-trips");
+        assert_eq!(reparsed, decoded);
     }
 }

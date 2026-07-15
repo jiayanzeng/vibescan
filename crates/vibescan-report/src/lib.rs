@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use vibescan_types::{
     Category, Confidence, Evidence, Finding, HistoryScope, Location, NetworkActionAudit,
     NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, Provenance, ScanResult,
-    ScopeWarning, Severity,
+    ScanStats, ScopeWarning, Severity,
 };
 
 /// Output format supported by the report crate.
@@ -49,6 +49,18 @@ pub fn render_tty(result: &ScanResult, style: TtyStyle) -> String {
             result.tool_version,
             result.findings.len(),
             result.duration_ms
+        ),
+    );
+    push_line(
+        &mut output,
+        &format!(
+            "collection: paths {} | blobs {} | unique {} | dedup {:.2}% | units {} | truncated {}",
+            result.stats.paths_walked,
+            result.stats.blobs_read,
+            result.stats.unique_contents,
+            result.stats.dedup_ratio() * 100.0,
+            result.stats.units_materialized,
+            if result.stats.truncated { "yes" } else { "no" }
         ),
     );
     push_line(
@@ -161,6 +173,15 @@ pub fn render_html(result: &ScanResult) -> String {
         "<div class=\"pill\">findings: {}</div><div class=\"pill\">scope: {}</div>",
         result.findings.len(),
         escape_html(&history_summary(&result.scope.history))
+    ));
+    html.push_str(&format!(
+        "<div class=\"pill\">paths: {}</div><div class=\"pill\">blobs: {}</div><div class=\"pill\">unique: {}</div><div class=\"pill\">dedup: {:.2}%</div><div class=\"pill\">units: {}</div><div class=\"pill\">truncated: {}</div>",
+        result.stats.paths_walked,
+        result.stats.blobs_read,
+        result.stats.unique_contents,
+        result.stats.dedup_ratio() * 100.0,
+        result.stats.units_materialized,
+        if result.stats.truncated { "yes" } else { "no" }
     ));
     for (severity, count) in &result.stats.by_severity {
         html.push_str(&format!(
@@ -331,11 +352,24 @@ fn sarif_value(result: &ScanResult) -> Value {
                     "history": history_summary(&result.scope.history),
                     "networkEnabled": result.scope.network.enabled,
                     "networkActions": &result.scope.network.actions,
+                    "scanStats": scan_stats_value(&result.stats),
                     "warnings": result.scope.warnings.iter().map(warning_summary).collect::<Vec<_>>(),
                 }
             }],
             "results": results,
         }]
+    })
+}
+
+fn scan_stats_value(stats: &ScanStats) -> Value {
+    json!({
+        "pathsWalked": stats.paths_walked,
+        "blobsRead": stats.blobs_read,
+        "uniqueContents": stats.unique_contents,
+        "dedupRatioPercent": format!("{:.2}", stats.dedup_ratio() * 100.0),
+        "unitsMaterialized": stats.units_materialized,
+        "truncated": stats.truncated,
+        "scanBudgetHit": stats.scan_budget_hit,
     })
 }
 
@@ -672,6 +706,10 @@ mod tests {
             value["runs"][0]["invocations"][0]["properties"]["networkActions"][0]["outcome"],
             "protected"
         );
+        assert_eq!(
+            value["runs"][0]["invocations"][0]["properties"]["scanStats"]["dedupRatioPercent"],
+            "25.00"
+        );
     }
 
     #[test]
@@ -684,6 +722,7 @@ mod tests {
         assert!(output.contains("remediation: Rotate it."));
         assert!(output.contains("GET table read for table profiles"));
         assert!(output.contains("-> protected; HTTP 403"));
+        assert!(output.contains("dedup 25.00%"));
     }
 
     #[test]
@@ -725,6 +764,7 @@ mod tests {
         assert!(!output.contains("<script>alert(1)</script>"));
         assert!(output.contains("Network actions"));
         assert!(output.contains("&lt;private&gt;"));
+        assert!(output.contains("dedup: 25.00%"));
     }
 
     #[test]
@@ -792,6 +832,10 @@ mod tests {
         let stats = ScanStats {
             by_severity: BTreeMap::from([(Severity::Critical, 1)]),
             by_category: BTreeMap::from([(Category::SecretExposure, 1)]),
+            paths_walked: 40,
+            blobs_read: 40,
+            unique_contents: 30,
+            units_materialized: 30,
             ..ScanStats::default()
         };
 

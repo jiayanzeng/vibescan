@@ -133,6 +133,12 @@ fn sample_result() -> ScanResult {
         tool_version: "snapshot".to_owned(),
         started_at: "2026-01-01T00:00:00Z".to_owned(),
         duration_ms: 42,
-        stats: ScanStats::default(),
+        stats: ScanStats {
+            paths_walked: 40,
+            blobs_read: 40,
+            unique_contents: 30,
+            units_materialized: 30,
+            ..ScanStats::default()
+        },
     }
 }
