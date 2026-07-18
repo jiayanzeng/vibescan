@@ -420,7 +420,7 @@ Correlation rules are data, not hardcoded branches — new chains are added as r
 ### 13.1 Distribution & platform
 - **Single static binary**, no runtime and no C toolchain dependency. This dictates library choices upstream: gix pure-Rust feature set, pure-Rust `regex`, no libgit2, no OpenSSL-linking HTTP stack (use a pure-Rust TLS stack for the `Network` tiers).
 - **Targets:** macOS arm64/x64, Linux x64/arm64, Windows x64.
-- **Primary channel:** an npm wrapper package that ships (never downloads at install time) the correct prebuilt binary per platform so `npx vibescan` works for the JS-native audience. Secondary: `cargo install`, Homebrew.
+- **Primary channel:** the scoped `@vibescan/cli` npm wrapper package ships (never downloads at install time) the correct prebuilt binary per platform so `npx @vibescan/cli` works for the JS-native audience. The unscoped `vibescan` name is third-party-owned and is not a publication target. Secondary: `cargo install`, Homebrew.
 - Rationale: the audience lives in npm; the pure-Rust constraint is what makes per-target prebuilds painless.
 
 ### 13.2 Performance model

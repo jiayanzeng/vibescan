@@ -1,5 +1,5 @@
 {
-  "name": "vibescan",
+  "name": "@vibescan/cli",
   "version": "0.1.0",
   "description": "Local-first security scanner for vibe-coded web applications",
   "license": "MIT",

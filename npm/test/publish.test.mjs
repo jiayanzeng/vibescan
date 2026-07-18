@@ -5,13 +5,17 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { platforms, repositoryRoot } from "../scripts/platforms.mjs";
+import {
+  mainPackageName,
+  platforms,
+  repositoryRoot,
+} from "../scripts/platforms.mjs";
 
 test("publish plan sends platform packages before the main package with provenance", () => {
   const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibescan-publish-plan-"));
   try {
     const manifest = {
-      main: "vibescan-0.1.0.tgz",
+      main: "vibescan-cli-0.1.0.tgz",
       platforms: {},
     };
     fs.writeFileSync(path.join(packagesRoot, manifest.main), "main");
@@ -44,8 +48,10 @@ test("publish plan sends platform packages before the main package with provenan
     const plan = JSON.parse(result.stdout);
     assert.deepEqual(
       plan.map((entry) => entry.name),
-      [...platforms.map((platform) => platform.packageName), "vibescan"],
+      [...platforms.map((platform) => platform.packageName), mainPackageName],
     );
+    assert.ok(plan.every((entry) => entry.name.startsWith("@vibescan/")));
+    assert.ok(!plan.some((entry) => entry.name === "vibescan"));
     for (const entry of plan) {
       assert.deepEqual(entry.args, ["--access", "public", "--provenance"]);
     }

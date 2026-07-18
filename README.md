@@ -52,14 +52,14 @@ cargo build --workspace
 
 ## npm channel
 
-The npm channel uses one unscoped `vibescan` shim package and five exact-version
+The npm channel uses the scoped `@vibescan/cli` shim package and five exact-version
 platform packages under `@vibescan`. The platform packages carry the prebuilt
 binary itself; the shim has no `postinstall` and never fetches or executes a
 binary during installation. Linux packages carry the static musl builds without
 a `libc` restriction, so npm can install them on both glibc and musl hosts.
 
 Release CI locally packs and tests all five platform combinations with
-`--ignore-scripts`, exercises `npx vibescan --version`, and proves that clean and
+`--ignore-scripts`, exercises `npx @vibescan/cli --version`, and proves that clean and
 severity-gated scans preserve the Rust CLI's exit codes. Stable tags are wired to
 publish the five platform packages first and the main package last with npm
 provenance. Public availability still depends on the one-time registry ownership

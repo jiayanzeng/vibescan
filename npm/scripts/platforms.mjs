@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export const npmRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const repositoryRoot = path.resolve(npmRoot, "..");
+export const mainPackageName = "@vibescan/cli";
 
 export const platforms = Object.freeze([
   {

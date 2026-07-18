@@ -36,9 +36,9 @@ function missingOptionalDependency(packageName, cause) {
   const detail = cause && cause.code ? ` (${cause.code})` : "";
   fail(
     [
-      `vibescan could not find its platform package ${packageName}${detail}.`,
+      `@vibescan/cli could not find its platform package ${packageName}${detail}.`,
       "The optional dependency was probably skipped because node_modules was cached across operating systems, optional dependencies were disabled, or the lockfile is stale.",
-      "Run `npm ci` on a clean tree and do not share node_modules across operating systems.",
+      "Reinstall `@vibescan/cli` with `npm ci` on a clean tree and do not share node_modules across operating systems.",
       "If optional packages are intentionally disabled, use `cargo install vibescan-cli` or the shell installer from the GitHub release instead.",
       "vibescan will not download or execute a replacement binary automatically.",
     ].join("\n"),

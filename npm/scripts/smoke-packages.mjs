@@ -4,7 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { platformForTarget, readJson, repositoryRoot } from "./platforms.mjs";
+import {
+  mainPackageName,
+  platformForTarget,
+  readJson,
+  repositoryRoot,
+} from "./platforms.mjs";
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -81,11 +86,11 @@ try {
   );
   assertSuccess(installed, "npm install --ignore-scripts");
 
-  const version = run(npxCommand, ["--no-install", "vibescan", "--version"], {
+  const version = run(npxCommand, ["--no-install", mainPackageName, "--version"], {
     cwd: workingProject,
     env: commandEnvironment,
   });
-  assertSuccess(version, "npx vibescan --version");
+  assertSuccess(version, `npx ${mainPackageName} --version`);
   assert.match(version.stdout, new RegExp(`vibescan ${manifest.version.replaceAll(".", "\\.")}`));
 
   const cleanFixture = path.join(tempRoot, "clean");
@@ -101,14 +106,14 @@ try {
 
   const clean = run(
     npxCommand,
-    ["--no-install", "vibescan", "--no-history", "--format", "json", cleanFixture],
+    ["--no-install", mainPackageName, "--no-history", "--format", "json", cleanFixture],
     { cwd: workingProject, env: commandEnvironment },
   );
   assert.equal(clean.status, 0, `${clean.stdout}${clean.stderr}`);
 
   const trigger = run(
     npxCommand,
-    ["--no-install", "vibescan", "--no-history", "--format", "json", triggerFixture],
+    ["--no-install", mainPackageName, "--no-history", "--format", "json", triggerFixture],
     { cwd: workingProject, env: commandEnvironment },
   );
   assert.equal(trigger.status, 1, `${trigger.stdout}${trigger.stderr}`);
@@ -132,7 +137,7 @@ try {
   );
   assertSuccess(omitted, "npm install --omit=optional");
 
-  const missing = run(npxCommand, ["--no-install", "vibescan", "--version"], {
+  const missing = run(npxCommand, ["--no-install", mainPackageName, "--version"], {
     cwd: missingProject,
     env: commandEnvironment,
   });

@@ -1,4 +1,4 @@
-# vibescan
+# @vibescan/cli
 
 This is the npm launcher for the local-first `vibescan` security scanner.
 
@@ -10,7 +10,7 @@ for advanced or air-gapped environments.
 After publication, the intended entry point is:
 
 ```sh
-npx vibescan --version
+npx @vibescan/cli --version
 ```
 
 If npm omitted the platform package, reinstall on a clean tree with `npm ci` and

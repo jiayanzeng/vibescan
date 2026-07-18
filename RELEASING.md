@@ -4,16 +4,24 @@ Releases are tag-triggered and immutable. Prepare and review every registry and
 tap change before pushing the tag; never reuse a version after any package has
 been published.
 
+## npm entry-point decision (G4.0)
+
+The release owner selected the controlled scoped entry point on 2026-07-19:
+`@vibescan/cli`, invoked as `npx @vibescan/cli`. The third-party-owned unscoped
+`vibescan` package is not a publication target. The npm publisher must publish
+the five `@vibescan/cli-*` platform packages first and `@vibescan/cli` last;
+its print plan must contain only these six scoped identities.
+
 ## One-time publisher setup
 
-1. Confirm the eight crates.io names and all six npm names are controlled by the
-   release owner. Do not perform this live check from automated tests.
+1. Confirm the eight crates.io names and all six scoped npm names are controlled
+   by the release owner. Do not perform this live check from automated tests.
 2. For the first crates.io release, add a short-lived repository secret named
    `CARGO_REGISTRY_TOKEN`. crates.io requires the first version to be published
    with a token. Afterward, configure trusted publishing for each crate against
    `jiayanzeng/vibescan` and `release.yml`, then delete the secret.
 3. For the first npm release, ensure the `@vibescan` scope exists and add an
-   optional bootstrap secret named `NPM_TOKEN`. After all six packages exist,
+   optional bootstrap secret named `NPM_TOKEN`. After all six scoped packages exist,
    configure each package's trusted publisher for GitHub user `jiayanzeng`,
    repository `vibescan`, and workflow `release.yml`, then delete the secret.
    The caller filename is `release.yml` even though publication runs in a
@@ -75,7 +83,7 @@ its parent:
 8. `vibescan-cli`
 
 The npm job publishes all five `@vibescan/cli-*` platform packages before the
-unscoped `vibescan` package. Every `npm publish` uses `--provenance`; the main
+scoped `@vibescan/cli` package. Every `npm publish` uses `--provenance`; the main
 package stays last so users never receive a version whose exact optional
 dependencies have not been published.
 
@@ -97,7 +105,7 @@ gh attestation verify <archive> \
 Exercise every public channel:
 
 ```sh
-npx vibescan@<version> --version
+npx @vibescan/cli@<version> --version
 npm audit signatures
 cargo install vibescan-cli --version <version> --locked
 vibescan --version
