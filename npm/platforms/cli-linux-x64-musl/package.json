@@ -1,0 +1,22 @@
+{
+  "name": "@vibescan/cli-linux-x64-musl",
+  "version": "0.1.0",
+  "description": "statically linked vibescan binary for Linux x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jiayanzeng/vibescan.git"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "vibescan"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "vibescan",
+  "version": "0.1.0",
+  "description": "Local-first security scanner for vibe-coded web applications",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jiayanzeng/vibescan.git"
+  },
+  "type": "commonjs",
+  "bin": {
+    "vibescan": "bin/vibescan.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@vibescan/cli-darwin-arm64": "0.1.0",
+    "@vibescan/cli-darwin-x64": "0.1.0",
+    "@vibescan/cli-linux-arm64-musl": "0.1.0",
+    "@vibescan/cli-linux-x64-musl": "0.1.0",
+    "@vibescan/cli-win32-x64-msvc": "0.1.0"
+  }
+}

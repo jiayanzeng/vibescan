@@ -50,6 +50,31 @@ The project is a Cargo workspace with these crates:
 cargo build --workspace
 ```
 
+## npm channel
+
+The npm channel uses one unscoped `vibescan` shim package and five exact-version
+platform packages under `@vibescan`. The platform packages carry the prebuilt
+binary itself; the shim has no `postinstall` and never fetches or executes a
+binary during installation. Linux packages carry the static musl builds without
+a `libc` restriction, so npm can install them on both glibc and musl hosts.
+
+Release CI locally packs and tests all five platform combinations with
+`--ignore-scripts`, exercises `npx vibescan --version`, and proves that clean and
+severity-gated scans preserve the Rust CLI's exit codes. npm registry publication
+and provenance remain the separate G3 task, so this repository does not yet claim
+that the packages are publicly available.
+
+Run the source package and shim contract tests locally with:
+
+```sh
+npm --prefix npm test
+```
+
+If npm skips the matching optional package, the shim reports the usual cross-OS
+`node_modules` cache or stale-lockfile causes and recommends a clean `npm ci`,
+`cargo install vibescan`, or the shell installer. It never silently downloads a
+replacement.
+
 ## Test
 
 ```sh

@@ -1,0 +1,92 @@
+name: npm package smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: npm source contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - run: npm --prefix npm test
+
+  smoke:
+    name: npm smoke (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            binary: target/aarch64-apple-darwin/dist/vibescan
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            binary: target/x86_64-apple-darwin/dist/vibescan
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+            binary: target/aarch64-unknown-linux-musl/dist/vibescan
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+            binary: target/x86_64-unknown-linux-musl/dist/vibescan
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            binary: target/x86_64-pc-windows-msvc/dist/vibescan.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install native musl build tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build the platform binary
+        run: >-
+          cargo build
+          --profile dist
+          --package vibescan-cli
+          --target ${{ matrix.target }}
+          --locked
+
+      - name: Pack the matching npm packages
+        run: >-
+          node npm/scripts/build-packages.mjs
+          --target ${{ matrix.target }}
+          --binary ${{ matrix.binary }}
+          --out target/npm-packages
+
+      - name: Verify packed package contracts
+        run: >-
+          node npm/scripts/verify-packages.mjs
+          --packages target/npm-packages
+
+      - name: Install without scripts and exercise npx
+        run: >-
+          node npm/scripts/smoke-packages.mjs
+          --packages target/npm-packages
+          --target ${{ matrix.target }}
