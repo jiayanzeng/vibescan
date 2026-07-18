@@ -1,5 +1,11 @@
 # vibescan — Tier F Close-out Instructions
 
+Reviewed: 2026-07-18
+Status: **complete**. CF1 landed at `f215c6e`; CF2 refreshed `STATE.md` from the
+actual committed baseline and metrics. A same-day re-audit found every CF1/CF2
+acceptance criterion green. The problem statements below are retained as the
+historical rationale for the completed work, not as open tasks.
+
 Scope: the two residuals from the Tier F audit at `ca59d6e`. Tier F is
 functionally complete and every build/test gate passes; this close-out pins one
 unpinned acceptance criterion and refreshes stale status metadata. Authority is
@@ -205,3 +211,18 @@ document):
 3. After the edit, `git status` is clean except for `STATE.md` (plus CF1's files
    if landed together); `git diff --check` passes.
 4. No code, fixture, or metric file changed by this task.
+
+---
+
+## Completion record
+
+- **CF1 complete:** the private core merge helper is shared by production and
+  socket-free composed regressions. Both registry outage and OSV-snapshot failure
+  preserve every seeded §11.0 finding, remain non-fatal, retain their distinct
+  warnings, and manufacture no `NonexistentPackage` finding.
+- **CF2 complete:** `STATE.md` records the actual `f215c6e` baseline and the
+  committed `tier-f3-live-v1` totals (14 TP, 0 FP, 0 FN, precision 1.0, recall
+  1.0, coverage 0.75), with no stale dirty/uncommitted-F3 claim.
+- Focused CF1 tests pass under `registry` and `network,registry`; the full
+  default/network/registry/combined formatting, Clippy, test, boundary, and
+  hardening gates are green. No live egress was used.

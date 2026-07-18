@@ -145,6 +145,9 @@ opt-in, input plumbing, and disclosure shapes; F2 implemented the two confirmed
 detections, guards, failure taxonomy, and 24-hour caches; F3 promoted
 `hallucinated-dependency` into the golden and precision/recall corpus. The
 newcomer heuristic remains the separate deferred follow-up described above.
+The subsequent Tier F close-out is also complete: CF1 pins LocalStatic structural
+findings through composed Registry/OSV failures, and CF2 reconciles the committed
+F3 baseline and metrics in `STATE.md`. No Tier F acceptance residual remains.
 
 ---
 

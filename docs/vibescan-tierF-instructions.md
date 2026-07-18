@@ -2,6 +2,10 @@
 
 Reviewed: 2026-07-18
 Author: architecture review (Claude), for implementation by Codex
+Status: **complete and close-out verified** at the `f215c6e` implementation
+baseline plus the docs-only CF2 status refresh. F1–F3 satisfy every acceptance
+criterion; CF1 subsequently pinned F2 acceptance criterion 4's composed
+LocalStatic-survival case, and CF2 reconciled the status record.
 
 ## How to consume this document
 
@@ -389,7 +393,7 @@ default, npm-only; PyPI newcomer pending a download-signal decision), per §16 a
 
 ---
 
-## Completion status this track closes
+## Completion status — verified complete
 
 Track F delivers the Registry egress class per §11.1/§11.2: a `vibescan-registry`
 crate that is the nearest parent of its own sync/rustls transport, reachable from
@@ -402,6 +406,11 @@ guard) — plus the failure taxonomy and caching (F2); and the un-gating of
 **no corpus fixture remains gated** and the v1+ detection surface is fully exercised.
 The noisy newcomer heuristic remains deferred (§16), and the online dependency
 intelligence stays post-v1 and **off by default** (§11.1 clause 1).
+
+The 2026-07-18 close-out re-audit verified F1–F3 against the current source,
+fixtures, metrics, CI, and all four feature graphs. CF1 closes the former F2 AC4
+clause-3 pinning gap; CF2 removes the stale pre-F3 worktree metadata. No residual
+Tier F acceptance gap remains.
 
 ## Notes for review
 

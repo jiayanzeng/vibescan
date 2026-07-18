@@ -2,8 +2,7 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `aa0efdd` (`main`, Task F2) plus the Track F3
-worktree described below.
+Current implementation baseline: `f215c6e` (`main`, Task CF1 close-out).
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -66,8 +65,9 @@ transport-free.
 
 ## Current worktree context
 
-The worktree started clean at `aa0efdd`, which commits Tasks F1–F2. F1 adds the
-architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
+The checkout was clean at `f215c6e` when this close-out review began. That
+baseline commits Tasks F1–F3 and CF1. F1 adds the architecture-authorized eighth
+crate, `vibescan-registry`, with only the allowed
 `vibescan-registry -> vibescan-types` edge. Core owns parsing and orchestration;
 the CLI exposes `--registry-checks` only under its independent `registry`
 feature. Repository configuration cannot confirm Registry egress, and registry
@@ -93,14 +93,15 @@ registry, OSV, database, or target-project Network action was run.
 F3 materializes a public unscoped nonexistent-package fixture, drives F2 through
 an injected 404 source, and keeps a scoped npm 404 in the same manifest as a
 negative control. Its reviewed golden contains exactly one High confirmed
-`NonexistentPackage` finding. The `tier-f3-live-v1` metrics baseline records
-14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and coverage 0.75. No capability-
-gated corpus fixture remains; remaining ignored tests are feature-off stubs.
+`NonexistentPackage` finding. The committed metrics baseline has
+`corpus_version` `tier-f3-live-v1` and records 14 TP, 0 FP, 0 FN, precision 1.0,
+recall 1.0, and coverage 0.75. No capability-gated corpus fixture remains;
+remaining ignored tests are feature-off stubs.
 
 All Phase 1–5, Tier D, Tier E, and Track F regressions are green in the default,
 `network`, `registry`, and combined workspace matrices.
 
-## Track F verification observed on 2026-07-18
+## Track F verification and close-out re-audit observed on 2026-07-18
 
 The exact post-v1 eight-crate DAG is enforced across all declared dependency
 kinds and resolved feature graphs. The default graph has no transport, the
@@ -122,10 +123,22 @@ absolute paths. F3's shared mock helper proves the public name resolves once,
 the scoped name is never queried, and the golden/metrics harnesses observe the
 same single High finding.
 
-The following pass is green on the current Track F worktree:
+CF1 now pins F2 acceptance criterion 4 clause 3 with a composed core regression:
+all LocalStatic structural findings survive both a registry outage and an OSV
+snapshot failure without manufacturing a `NonexistentPackage` finding.
+The subsequent close-out re-audit found CF1–CF2 and F1–F3 complete against the
+current implementation, fixtures, committed metrics, CI, and boundary policy;
+no residual Tier F acceptance gap remains.
+
+The following pass is green on the committed Track F/CF1 baseline:
 
 ```sh
 cargo fmt --all -- --check
+cargo test -p vibescan-core --features registry registry_failure_tests --locked
+cargo test -p vibescan-core --features network,registry registry_failure_tests --locked
+cargo test -p vibescan-registry --features transport --locked
+cargo test -p vibescan-core --test golden_corpus --features network,registry --locked
+cargo test -p vibescan-core --test precision_recall --features registry --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --features network --locked -- -D warnings
 cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
@@ -143,9 +156,7 @@ git diff --check
 The snapshot update was run only after the additive Registry scope fields and
 synthetic disclosure action were intentional, reviewed, and rerun without the
 update guard. F3's golden and metrics updates were separately regenerated,
-reviewed, and rerun without their update guards. The worktree remains
-intentionally dirty only with the uncommitted F3 implementation. The hardening
-helper emitted
+reviewed, and rerun without their update guards. The hardening helper emitted
 `real-repo leg skipped: no fixture`.
 
 ## Tier E3 verification observed on 2026-07-18
@@ -165,10 +176,10 @@ client path; they contain no DB URL, password, row data, timestamp, or absolute
 host path. At that checkpoint, `hallucinated-dependency` was the only remaining
 capability-gated fixture; Track F3 has since promoted it under `registry`.
 
-The committed metrics baseline now includes both fixtures: **13 TP, 0 FP, 0 FN,
-precision 1.0, recall 1.0, coverage 0.75**. The clean-control FP gate remains
-zero, and the negative recall/FP controls still fail when intentionally
-perturbed.
+The current committed metrics baseline includes both fixtures and Track F3. Its
+`corpus_version` is `tier-f3-live-v1`, with **14 TP, 0 FP, 0 FN, precision 1.0,
+recall 1.0, and coverage 0.75**. The clean-control FP gate remains zero, and the
+negative recall/FP controls still fail when intentionally perturbed.
 
 The following pass is green on the current Tier E3 worktree:
 
