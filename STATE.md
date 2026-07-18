@@ -2,7 +2,7 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `f215c6e` (`main`, Task CF1 close-out).
+Current implementation baseline: `1dfa85c` (`main`, pre-Task G1).
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -38,8 +38,13 @@ rustls transport boundary, dependency-input plumbing, explicit CLI opt-in, and
 auditable scope shapes. Track F2 adds local OSV snapshot matching, public
 package-existence checks, precision guards, failure taxonomy, and 24-hour
 public-data caches. Track F3 activates the last gated corpus fixture through a
-mock registry and adds it to the committed metrics baseline. Distribution
-remains a separate post-v1 track.
+mock registry and adds it to the committed metrics baseline. Task G1 is
+implemented in the current worktree: the workspace is publish-ready, `dist`
+plans exactly the architecture's five targets with musl-only Linux, release CI
+generates checksums and attestations, and a blocking custom job checks both
+Linux binaries for static linkage. Track G remains partial until a tagged CI
+run supplies the cross-platform/attestation evidence and Tasks G2/G3 add the
+npm and secondary publication channels.
 Architecture §17.8 explicitly defers the noisy user-writable-metadata
 heuristic, so its absence is not an E2 gap. The verdict for the entire
 architecture document is therefore partial.
@@ -65,9 +70,14 @@ transport-free.
 
 ## Current worktree context
 
-The checkout was clean at `f215c6e` when this close-out review began. That
-baseline commits Tasks F1–F3 and CF1. F1 adds the architecture-authorized eighth
-crate, `vibescan-registry`, with only the allowed
+The checkout was clean at `1dfa85c` when Task G1 began. The current dirty tree
+contains only G1-owned changes: root release metadata and the `dist` profile,
+`dist-workspace.toml`, `rust-toolchain.toml`, generated `release.yml`, and the
+reusable Linux static-link verification workflow. No pre-existing user change
+was present or modified.
+
+The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
+architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
 `vibescan-registry -> vibescan-types` edge. Core owns parsing and orchestration;
 the CLI exposes `--registry-checks` only under its independent `registry`
 feature. Repository configuration cannot confirm Registry egress, and registry
@@ -100,6 +110,79 @@ remaining ignored tests are feature-off stubs.
 
 All Phase 1–5, Tier D, Tier E, and Track F regressions are green in the default,
 `network`, `registry`, and combined workspace matrices.
+
+## Track G1 verification observed on 2026-07-18
+
+G1 is release/distribution plumbing under architecture §13.1. It does not
+change scan behavior, the crate DAG, the LocalStatic default, runtime Network
+consent, or target-project access. Every intra-workspace dependency now carries
+both its local path and matching `0.1.0` registry version. The workspace repository
+URL now matches the checkout's actual `origin`,
+`https://github.com/jiayanzeng/vibescan`, rather than the prior placeholder.
+
+The checksum-verified official `dist` 0.32.0 binary initialized
+`dist-workspace.toml` and generated `.github/workflows/release.yml`. The plan
+contains exactly `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, and
+`x86_64-pc-windows-msvc`; no GNU/Linux artifact is planned. Shell and PowerShell
+installers are enabled, while npm and Homebrew remain G2/G3 work. SHA-256 emits
+the unified `sha256.sum`, and GitHub Artifact Attestations are enabled in the
+generated platform build jobs.
+
+The generated workflow reaches a configured global-artifact job only after all
+platform archives exist. That reusable job requires exactly two Linux musl
+archives, extracts one `vibescan` binary from each, requires `file` to report
+static/static-PIE linkage, and rejects an ELF interpreter or any `NEEDED`
+shared-library entry with `readelf`. Its success is a prerequisite for hosting
+the release. The generated workflow itself was not hand-edited; regenerating it
+from `dist-workspace.toml` is clean.
+
+Both Linux targets were also cross-built locally from the macOS arm64 host with
+temporary `cargo-zigbuild` 0.23.0 and Zig 0.16.0 tooling. `file` reported both
+ELFs as `statically linked`, and both archive SHA-256 files verified. `dist`
+0.32.0 has removed the older cargo-zigbuild/cargo-auditable incompatibility
+described in the G1 instruction note; G1 still deliberately leaves
+`cargo-auditable = false` so embedded dependency metadata is not silently added
+to this release-only task.
+
+The following commands passed on this G1 worktree using pinned Rust 1.85.0:
+
+```sh
+cargo build --workspace --locked
+dist generate
+dist plan
+dist build --artifacts=local --target=x86_64-unknown-linux-musl
+dist build --artifacts=local --target=aarch64-unknown-linux-musl
+file target/x86_64-unknown-linux-musl/dist/vibescan \
+  target/aarch64-unknown-linux-musl/dist/vibescan
+shasum -a 256 -c vibescan-cli-x86_64-unknown-linux-musl.tar.xz.sha256
+shasum -a 256 -c vibescan-cli-aarch64-unknown-linux-musl.tar.xz.sha256
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+Measured workspace results are **171 passed, 4 ignored** by default, **184
+passed, 1 ignored** with `network`, **183 passed, 3 ignored** with `registry`,
+and **196 passed, 0 ignored** with both features. The hardening aggregate passed
+and emitted `real-repo leg skipped: no fixture`. No live target, credential,
+registry lookup, release tag, package publication, or repository push was used.
+
+The remaining G1 proof is intentionally CI-observable: push a test release tag,
+confirm all five platform archives plus `sha256.sum`, and run
+`gh attestation verify` against the public repository. G2/G3 are not started.
+The Track G review must also flag architecture §13.1's `ships/downloads` wording
+for the architecture owner to narrow to ships-only; G1 does not edit the
+architecture.
 
 ## Track F verification and close-out re-audit observed on 2026-07-18
 
@@ -710,7 +793,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. Tier D3 now records deterministic collection/dedup counters and non-gated wall time. No static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
+| Security/nonfunctional | Partial; G1 implemented locally | Pure-Rust/default transport boundaries remain enforced. G1 provides the exact five-target release matrix, musl-only Linux artifacts, SHA-256 checksums, GitHub artifact attestations, and a blocking static-link verification job. A pushed test tag is still required to exercise the generated release workflow on hosted runners; the npm wrapper and Homebrew formula remain G2/G3 work. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -787,6 +870,11 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
+- **Track G1 implemented locally:** the release workspace, exact five-target
+  `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
+  blocking static-link verification are configured and locally validated. A
+  pushed test tag is still required for hosted release-CI evidence. G2 and G3
+  have not started.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
   the two confirmed checks and bounded privacy-aware caching; F3 activates the
@@ -908,8 +996,10 @@ Tier 0 behavior.
   mechanically decidable findings, and E3 correlation/fixtures are complete.
   Architecture §17.8 defers the metadata-keyed `Review` heuristic outside the
   confirmed set.
-- Cross-platform static binaries, npm wrapper, Homebrew, signing, and release
-  provenance: separate distribution track.
+- Distribution: G1's five-target static-binary matrix, checksums, attestations,
+  and release workflow are implemented locally; hosted proof awaits a pushed
+  test tag. The npm wrapper (G2) and Homebrew formula (G3) remain separate,
+  unstarted tasks.
 - Active DAST/write probes: prohibited in v1, not merely postponed.
 
 ## Closeout gate for future milestone claims

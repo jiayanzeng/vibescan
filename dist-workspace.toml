@@ -1,0 +1,26 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
+# Generate per-artifact SHA-256 files and the unified sha256.sum manifest.
+checksum = "sha256"
+# Attest every release artifact in the platform build jobs.
+github-attestations = true
+# Let dist select the native/cross compiler for each target. Embedded
+# cargo-auditable metadata is outside G1 and remains disabled.
+cargo-auditable = false
+# Run only after both Linux platform archives exist; a failure blocks hosting.
+global-artifacts-jobs = ["./verify-static-linux"]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false
