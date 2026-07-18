@@ -329,65 +329,108 @@ whole point of §13.2's "gates the counters, never the wall time."
 
 ## Task D4 — Retire resolved-ambiguity debt; ratify §17 in code and tests
 
+> **Revised 2026-07-18 after Codex escalation.** The original D4 asked for a test
+> asserting `render_tty().contains(raw)` — i.e. that TTY shows the *full* secret.
+> Codex correctly stopped: the code redacts the raw match at the candidate→finding
+> boundary (`redact_secret(&raw)` in `vibescan-core`), `Evidence` has no raw field,
+> and every renderer — TTY included — only ever sees the redacted form. Making TTY
+> show a full match would require a behavior/contract change (threading raw secrets
+> through `Finding` into the report layer) that fights the report contract, the
+> repository `AGENTS.md`, and the crate DAG. That was a flaw in the **spec draft**,
+> not the code. **§17.3 has been re-resolved to redact-everywhere** (see the
+> updated architecture). D4 is rescoped below to pin the *stronger* invariant. This
+> is assertion-only work; no behavior change is authorized, and none is needed.
+
 ### Spec basis
 
-- **§17.1–17.6 (new decision log):** the six ambiguities are resolved. Most were
-  resolved *in favor of what the code already did* — this task is about making
-  that alignment **explicit and asserted**, and removing the now-obsolete
-  "conservative policy until the architecture is clarified" paragraph from
-  `STATE.md` so a future agent doesn't re-litigate a settled question.
+- **§17.1–17.6 (decision log):** the six ambiguities are resolved, all in favor
+  of what the code already did. This task makes that alignment **explicit and
+  asserted** and removes the now-stale "conservative policy" paragraph from
+  `STATE.md`.
+- **§17.3 (final resolution):** *all* output — JSON, SARIF, HTML, and TTY — uses
+  the redacted form; the raw match never leaves the candidate phase. There is no
+  full-match output path in v1.
 
 ### Problem (root-caused)
 
-`STATE.md` still contains an "Architecture ambiguities requiring an explicit
-decision" section and a "Conservative policy until the architecture is
-clarified" paragraph. Those were correct *before* the §17 patch; they are now
-stale and actively misleading — they tell a future agent that settled questions
-are open. Several resolutions also lack a *pinning test*: e.g. §17.3 (all
-serialized formats redacted) is currently true but not asserted per-format, so a
-future "local HTML full-match" change could pass.
+Two independent pieces of debt, both verified against the current tree:
+
+1. **Stale `STATE.md`.** It still carries the "Architecture ambiguities requiring
+   an explicit decision" section (~L526) and the "Conservative policy until the
+   architecture is clarified" paragraph (~L550). Both were correct before §17;
+   they now tell a future agent that settled questions are open.
+2. **Under-pinned §17.3.** Redact-everywhere is *currently true* but not asserted
+   as an end-to-end invariant. A future change that threaded a raw value into a
+   renderer would pass CI. The pin must live at the **integration level** — the
+   `vibescan-report` crate cannot prove it, because that crate never sees a raw
+   candidate, so a redaction test written there is vacuous (exactly Codex's
+   observation).
+
+Already satisfied — **do not redo**: §17.1 is pinned by
+`gitignored_env_fixture_has_exact_elevated_key_finding` in `vibescan-core`, which
+asserts `Severity::Critical` + `SupabaseKeyClass::SecretNew` for a gitignored
+`.env`. D4 criterion for §17.1 is a *verification that this exists*, not a new test.
 
 ### File targets
 
 - **Edit:** `STATE.md` — replace the "Architecture ambiguities" section with a
-  short "Resolved in architecture §17 (2026-07-13)" pointer; delete the
-  conservative-policy paragraph.
-- **New/Edit:** `crates/vibescan-report/tests/report_snapshots.rs` — add a
-  per-format redaction assertion (§17.3): scan a fixture with a known secret,
-  render JSON / SARIF / HTML, assert none contains the raw secret body; the TTY
-  full-match path is exercised separately and explicitly.
-- **Edit (assertion only):** wherever elevated-key severity is tested, add an
-  explicit gitignored-server-env case asserting **Critical** (§17.1) if one does
-  not already exist.
+  short "Resolved in architecture §17 (2026-07-13; §17.3 finalized 2026-07-18)"
+  pointer; delete the conservative-policy paragraph.
+- **New:** an **integration** redaction test — put it where a full scan+render is
+  reachable (`crates/vibescan-core/tests/` alongside the golden corpus, or a
+  top-level `tests/`), **not** in `vibescan-report`. Plant a fixture with a known
+  raw secret; run `scan_and_render` for **every** format including TTY; assert the
+  raw body appears in none, and additionally assert the raw body is absent from
+  the serialized `ScanResult`.
+- **Edit:** `crates/vibescan-report/tests/report_snapshots.rs` — keep/extend the
+  *presentation* assertion only: the redacted form renders correctly per format.
+  This is separate from the security invariant above and is not vacuous for what
+  it claims (rendering), only for the security claim it must not be asked to make.
+- **Edit:** `crates/vibescan-core/tests/golden_corpus.rs` — relabel the gated
+  fixtures' `#[ignore]` reasons with the capability each actually waits on (see
+  criterion 4).
 
 ### Implementation guidance
 
-This is a documentation-truth + pinning-test task, **not** a behavior change. If
-implementing any assertion reveals the code does *not* match the §17 resolution,
-**stop and surface it** — that is a real bug the decision log exposed, not
-something to quietly fix under a "docs" task.
+Documentation-truth + pinning-test task, **no behavior change**. If any assertion
+reveals the code does *not* match a §17 resolution, **stop and surface it** — a
+real bug, not something to fix under a "docs" task. (§17.3 was already surfaced
+this way; that is why it is now redact-everywhere.)
 
-For §17.3, the cleanest pin is a single table-driven test:
-`for format in [Json, Sarif, Html] { assert!(!render(format).contains(raw)); }`
-plus one `assert!(render_tty().contains(raw))` to prove the TTY exception is
-real and intentional.
+For §17.3, the pin is a single table-driven integration test:
 
-Leave §17.5 (registry egress) and §17.6 (gated fixtures) as *documentation*
-only — their code lands with the post-v1 registry crate (out of Tier D scope).
-Just ensure the three gated fixtures still carry accurate `TODO(<tier>)`
-messages naming the capability, per §14.
+```
+let raw = "<the fixture's known raw secret>";
+for format in [Json, Sarif, Html, Tty] {
+    let (out, _) = scan_and_render(fixture, cfg, format, style)?;
+    assert!(!out.contains(raw), "{format:?} leaked the raw secret");
+}
+// and the boundary itself:
+let result = scan(fixture, cfg)?;
+assert!(!serde_json::to_string(&result)?.contains(raw));
+```
+
+There is deliberately **no** `render_tty().contains(raw)` assertion — TTY is
+redacted, and asserting otherwise is what blocked the original D4.
+
+Leave §17.5 (registry egress) and §17.6 (gated corpus) as documentation; their
+code lands post-v1. Just make the gated fixtures' TODO labels accurate now.
 
 ### Acceptance criteria (self-verifiable)
 
-1. `STATE.md` no longer contains the strings "requiring an explicit decision"
-   or "Conservative policy until the architecture is clarified"; it points to
-   architecture §17 instead.
-2. A per-format redaction test asserts JSON, SARIF, and HTML omit the raw
-   secret body while TTY includes it; green (proving §17.3 holds in code).
-3. An elevated-key-in-gitignored-server-env test asserts `Critical` (§17.1).
-4. The three gated fixtures (`rls-off-table`, `permissive-using-true-policy`,
-   `hallucinated-dependency`) remain `#[ignore]`d with accurate,
-   capability-naming `TODO` messages; no gated fixture was un-gated in Tier D.
+1. `STATE.md` no longer contains "requiring an explicit decision" or "Conservative
+   policy until the architecture is clarified"; it points to architecture §17.
+2. An **integration** redaction test asserts JSON, SARIF, HTML, **and TTY** all
+   omit the raw secret body, and that the raw body is absent from the serialized
+   `ScanResult`; green. (No assertion claims TTY contains the raw value.)
+3. §17.1 is confirmed already pinned (the gitignored-`.env` → `Critical` +
+   `SecretNew` test exists and passes); no duplicate test is added.
+4. Gated-fixture `#[ignore]` reasons are capability-accurate:
+   `rls-off-table` and `permissive-using-true-policy` → `TODO(tier1)` (both need
+   §7.2 introspection); `hallucinated-dependency` → `TODO(registry)` (needs
+   §11.1). The mocked exposed-public-key-chain fixture stays `TODO(network)` (it
+   runs under `--features network`; it is feature-gated, not capability-blocked).
+   No gated fixture is un-gated in Tier D.
 5. `cargo test --workspace` + `--features network` green; `fmt` + `clippy -D
    warnings` clean.
 
@@ -417,10 +460,12 @@ distribution pipeline — each of which requires its own instruction set.
 - **D3's discipline is "counters not clocks."** The most common way to get this
   wrong is a wall-time assertion that flakes on CI. Assert integer counters that
   are exact and deterministic; log time, never gate on it.
-- **D4 is the one task that might surface a real bug.** It is written as a
-  docs/pinning task on the assumption the code already matches §17 (it appears
-  to). If a pinning assertion fails, that is a genuine finding — escalate it,
-  don't paper over it under the "documentation" framing.
+- **D4 already surfaced the real issue — and the escalation worked as designed.**
+  The pinning discipline caught that the §17.3 *spec draft* (TTY shows full match)
+  contradicted the code, the report contract, and `AGENTS.md`. Codex stopped
+  rather than force a behavior change. Resolution: §17.3 is now redact-everywhere
+  and D4 is rescoped to pin that stronger invariant at the integration level. The
+  lesson is the intended one — a pinning task that fails is doing its job.
 - **Registry work stays out.** §11.1 is now fully specified precisely so it can
   be built *correctly later*, not so it can be rushed into v1. The
   hallucinated-dependency fixture stays gated until the `vibescan-registry`

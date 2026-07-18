@@ -203,19 +203,19 @@ fn network_exposed_public_key_chain_fixture_is_gated() {
 }
 
 #[test]
-#[ignore = "TODO(network): RLS-off requires policy/introspection fixture support beyond Tier 0 read probing"]
+#[ignore = "TODO(tier1): RLS-off requires credentialed policy introspection"]
 fn network_rls_off_table_fixture() {
     ignored_network_fixture("rls-off-table");
 }
 
 #[test]
-#[ignore = "TODO(network): permissive policy assertions require policy introspection fixture support"]
+#[ignore = "TODO(tier1): permissive policy assertions require credentialed policy introspection"]
 fn network_permissive_using_true_policy_fixture() {
     ignored_network_fixture("permissive-using-true-policy");
 }
 
 #[test]
-#[ignore = "TODO(network): enable when registry-backed dependency checks exist"]
+#[ignore = "TODO(registry): enable when registry-backed dependency checks exist"]
 fn network_hallucinated_dependency_fixture() {
     ignored_network_fixture("hallucinated-dependency");
 }

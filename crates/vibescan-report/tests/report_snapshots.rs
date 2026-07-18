@@ -9,6 +9,8 @@ use vibescan_types::{
     Provenance, RepoPath, ScanResult, ScanScope, ScanStats, SecretFingerprint, Severity, Span,
 };
 
+const REDACTED_SECRET: &str = "sk_liv...1234";
+
 #[test]
 fn report_format_snapshots_match() {
     let result = sample_result();
@@ -25,6 +27,24 @@ fn report_format_snapshots_match() {
         &render(&result, ReportFormat::Html).unwrap(),
     );
     assert_or_update_snapshot("tty.snapshot", &render_tty(&result, TtyStyle::Plain));
+}
+
+#[test]
+fn every_format_renders_the_redacted_evidence() {
+    let result = sample_result();
+    let rendered = [
+        ("JSON", render(&result, ReportFormat::Json).unwrap()),
+        ("SARIF", render(&result, ReportFormat::Sarif).unwrap()),
+        ("HTML", render(&result, ReportFormat::Html).unwrap()),
+        ("TTY", render_tty(&result, TtyStyle::Plain)),
+    ];
+
+    for (format, output) in rendered {
+        assert!(
+            output.contains(REDACTED_SECRET),
+            "{format} did not render the redacted evidence"
+        );
+    }
 }
 
 fn assert_or_update_snapshot(name: &str, actual: &str) {
@@ -80,7 +100,7 @@ fn sample_result() -> ScanResult {
             location_class: LocationClass::ServerOnly,
         }],
         evidence: Evidence::Secret {
-            redacted: "sk_liv...1234".to_owned(),
+            redacted: REDACTED_SECRET.to_owned(),
             fingerprint: SecretFingerprint("snapshot-fingerprint".to_owned()),
         },
         remediation: "Remove the secret from source and rotate it.".to_owned(),

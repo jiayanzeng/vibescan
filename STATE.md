@@ -1,8 +1,8 @@
 # vibescan State
 
-Reviewed: 2026-07-15
+Reviewed: 2026-07-18
 
-Current implementation baseline: `be9ee80` (`main`, Tier D2) plus the Tier D3
+Current implementation baseline: `ba71940` (`main`, Tier D3) plus the Tier D4
 worktree described below.
 
 Prior architecture-audit baseline: `e7e9263`.
@@ -27,18 +27,19 @@ Phase 5 now enforces default < repository config < explicit CLI precedence,
 strict repository-root path handling, named-baseline failures, and additive
 custom rules without allowing repository config alone to enable Network work.
 
-The strict completion verdict is nevertheless **partial**, not complete.
-Dependency intelligence, Tier D4 ratification, and distribution requirements
-still have remaining work.
+The strict **buildable-v1** verdict is now **complete and proven** through
+architecture §15 step 9. Registry-backed dependency intelligence, Tier 1, and
+distribution remain explicitly deferred post-v1 tracks, so the verdict for the
+entire architecture document is still partial.
 
 Use these three lenses when discussing completion:
 
 - **Runnable v1 coverage:** all eight section-15 steps exist and the Phase
   1–5 regression matrix is green.
-- **Strict buildable-v1 conformance:** the previously identified identity,
-  Network semantics, auditability, crate-DAG, CLI/config, real-repository,
-  precision/recall, and deterministic performance-counter blockers are
-  resolved; Tier D4 ratification remains.
+- **Strict buildable-v1 conformance:** complete. The previously identified
+  identity, Network semantics, auditability, crate-DAG, CLI/config,
+  real-repository, precision/recall, deterministic performance-counter, and
+  resolved-decision ratification blockers are all covered by passing gates.
 - **Entire architecture document:** partial. Online dependency intelligence,
   Tier 1, and distribution are missing or explicitly deferred.
 
@@ -55,12 +56,59 @@ checker, and adds unconditional/offline plus secret-gated/real-repository CI
 jobs. D2 adds a live-tier-only precision/recall and classification-coverage
 harness with a committed machine-readable baseline. D3 starts from the clean
 `be9ee80` Tier D2 commit and adds exact collection/dedup counters, a generated
-performance fixture, and report-time dedup ratios. LocalStatic remains the
-default. The optional real-target Tier 0 path requires the existing
+performance fixture, and report-time dedup ratios. D4 starts from the clean
+`ba71940` Tier D3 commit plus the user-provided architecture/instruction
+revisions. It pins redact-everywhere at the full scan/render boundary, asserts
+redacted presentation in all four reporters, retires stale ambiguity status
+text, and labels gated fixtures by their actual post-v1 capability. LocalStatic
+remains the default. The optional real-target Tier 0 path requires the existing
 feature/runtime opt-in plus `VIBESCAN_REAL_REPO_NETWORK=1`; no live Network
 action was run here.
 
-All Phase 1–5 regressions and both unfiltered workspace matrices remain green.
+All Phase 1–5 and Tier D regressions and both unfiltered workspace matrices
+remain green.
+
+## Tier D4 verification observed on 2026-07-18
+
+The new core integration test plants one synthetic `sb_secret_*` value in a
+temporary Git repository, runs `scan_and_render` for JSON, SARIF, HTML, and TTY,
+and proves that every format contains the redacted evidence but not the raw
+body. It separately serializes the full `ScanResult` and proves the same
+candidate-to-finding boundary. The report integration test pins presentation of
+the supplied redacted evidence in all four formats. No production behavior or
+snapshot changed.
+
+The existing
+`gitignored_env_fixture_has_exact_elevated_key_finding` test remains the §17.1
+pin: a gitignored `.env` containing an elevated new-format key produces exactly
+one `Critical` `SecretNew` finding. No duplicate assertion was added. The gated
+RLS fixtures now say `TODO(tier1)`, the hallucinated-dependency fixture says
+`TODO(registry)`, and the mocked exposed-public-key chain remains
+`TODO(network)` in default builds.
+
+The following pass is green on the current Tier D4 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo test -p vibescan-core --test redaction_boundary --locked
+cargo test -p vibescan-report --test report_snapshots --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-core --lib \
+  gitignored_env_fixture_has_exact_elevated_key_finding --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The default workspace matrix reports **132 passed, 4 intentionally ignored**;
+the `network` matrix reports **137 passed, 3 intentionally ignored**. The
+hardening aggregate reruns the default matrix and checker self-tests, confirms
+the seven-crate/transport boundary, and emits the required loud
+`real-repo leg skipped: no fixture` note. No live Network action was run.
 
 ## Tier D3 verification observed on 2026-07-15
 
@@ -429,11 +477,11 @@ After the documentation changes, the closeout pass also reran and passed:
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
 | Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. Tier 1 remains deferred. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
-| Dependency integrity | Partial | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks do not. Their proposed third-party egress conflicts with the current own-assets-only invariant and needs a spec decision first. |
-| Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. Protected actions do not affect finding statistics or gates. Current always-redacted HTML is the conservative interpretation of an ambiguous spec. |
+| Dependency integrity | v1 §11.0 complete; Registry deferred | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks remain post-v1; architecture §§11.1–11.2 now resolve their separate consent, privacy, caching, failure, mechanism, and ownership contract. |
+| Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 complete | LocalStatic precedence is defaults < repository TOML < explicitly supplied CLI values, with paired scope flags. CLI/config baseline and custom-rule paths are repository-root-relative unless absolute; named missing files exit 2; real baselines suppress findings. Repository config alone cannot enable Network work. |
 | Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. Tier D3 now records deterministic collection/dedup counters and non-gated wall time. No static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
-| Testing strategy | Strong but incomplete | Exact goldens, clean control, report snapshots, boundary checks, a mocked Tier 0 exposed-chain test, the Tier D1 scripted real-repository invariant/CI path, the Tier D2 committed live-corpus metrics baseline, and the Tier D3 deterministic performance-counter gate exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); D2 records 1.0 precision, 1.0 recall, and 0.6 classification coverage over 8 live findings; D3 gates 40 blobs, 30 unique contents, 30 units, and 25.00% dedup. Three architecture cases remain ignored/deferred. |
+| Testing strategy | v1 closeout complete | Exact goldens, clean control, report snapshots, boundary checks, a mocked Tier 0 exposed-chain test, the Tier D1 scripted real-repository invariant/CI path, the Tier D2 committed live-corpus metrics baseline, the Tier D3 deterministic performance-counter gate, and the Tier D4 end-to-end redaction pin exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); D2 records 1.0 precision, 1.0 recall, and 0.6 classification coverage over 8 live findings; D3 gates 40 blobs, 30 unique contents, 30 units, and 25.00% dedup. Three post-v1 architecture cases remain intentionally gated. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
 ## Tier C status
@@ -450,10 +498,10 @@ Tier C is implemented and covered for its named acceptance paths:
 Phases 1–2 now cover the identity/linkage cases that Tier C did not: identical
 content at different paths, commit membership stored in additional provenance,
 two historical contents at one path, and a project URL split from a client key.
-Tier D3 measured assurance is now complete for its deterministic counter gate.
-The next priority is Tier D4 resolved-ambiguity ratification. Tier D1 has one
-explicit local real-repository coverage record, Tier D2 has a committed
-live-corpus metrics baseline, and the private CI fixture remains optional and
+Tier D1 has one explicit local real-repository coverage record, Tier D2 has a
+committed live-corpus metrics baseline, Tier D3 has the deterministic counter
+gate, and Tier D4 pins the resolved architecture decisions. Architecture §15
+step 9 is therefore complete. The private CI fixture remains optional and
 secret-gated.
 
 ## Strict gaps and known risks
@@ -523,33 +571,11 @@ secret-gated.
   network-feature workspace tests, and diff checks; it must not be treated as
   the full gate.
 
-## Architecture ambiguities requiring an explicit decision
+## Resolved architecture decisions
 
-Future agents must surface these conflicts instead of silently choosing new
-behavior:
-
-1. **Elevated key severity:** section 10.1 says a gitignored server-env elevated
-   key is High, while the following mechanics say elevated keys are essentially
-   always Critical. Current code uses Critical.
-2. **Tier 0 wording:** Tier 0 demonstrates reads only, while one correlation
-   sentence says “read/modify.” Current code correctly claims read exposure
-   only.
-3. **HTML disclosure:** hosted/shareable HTML must be redacted, but another
-   sentence permits full matches in local HTML without defining a mode. Current
-   HTML is always redacted.
-4. **Finding identity:** the data-model text includes location in an ID, while
-   coalescing requires one stable identity across several locations. Current
-   coalesced secret IDs are path-independent.
-5. **External egress:** own-assets-only networking conflicts with optional
-   third-party registry/OSV lookups. Privacy, consent, caching, failure
-   semantics, and crate ownership are unspecified.
-6. **Tier 1 fixtures:** section 14 names RLS-off and permissive-policy fixtures,
-   while section 15 defers Tier 1. Treat them as post-v1 verification gaps, not
-   blockers for the current runnable build.
-
-Conservative policy until the architecture is clarified: keep elevated keys
-Critical, describe Tier 0 as read-only, redact all HTML, retain path-independent
-coalesced identity, prohibit third-party egress, and keep Tier 1 cases deferred.
+The former architecture ambiguities are resolved in architecture §17
+(2026-07-13; §17.3 finalized 2026-07-18). The implementation follows those
+decisions, including redaction in every output format.
 
 ## Detailed next-step plan
 
@@ -624,17 +650,20 @@ work was added.
 2. **Tier D3 complete:** the generated fixture gates exact paths, blobs, unique
    contents, materialized units, truncation, and the derived dedup ratio while
    recording but never gating `duration_ms`.
-3. Ratify the resolved section-17 decisions in Tier D4 now that D3 evidence is in
-   hand; do not broaden `src/api/` classification from the current D1/D2 data.
+3. **Tier D4 complete:** every output format and serialized `ScanResult` is
+   pinned to redacted evidence; §17 status debt is retired; gated fixtures name
+   their actual capability. The `src/api/` classification remains unchanged
+   pending stronger real-repository evidence.
 4. Add a canonical full-verification script or prominently document the exact
    root `AGENTS.md` matrix. Keep Tier D1's real-repository leg separate and
    explicitly fixture/Network-gated.
 5. Extend CI only with deterministic offline checks.
 
-### Deferred tracks — require a separate architecture decision
+### Deferred post-v1 tracks — require separate instruction sets
 
-- Registry existence/newcomer/OSV checks: first resolve third-party egress,
-  consent, privacy, caching, and owning-crate policy.
+- Registry existence/newcomer/OSV checks: architecture §§11.1–11.2 resolve the
+  contract and mechanism; implementation remains a post-v1 track with its own
+  crate/feature work and verification instructions.
 - Tier 1 introspection/policy analysis: post-v1 and credentialed; no writes.
 - Cross-platform static binaries, npm wrapper, Homebrew, signing, and release
   provenance: separate distribution track.

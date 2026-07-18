@@ -1,4 +1,4 @@
 {
-  "todo": "TODO(network): RLS-off requires policy/introspection fixture support beyond Tier 0 read probing.",
+  "todo": "TODO(tier1): RLS-off requires credentialed policy introspection.",
   "findings": []
 }

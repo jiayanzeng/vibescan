@@ -13,7 +13,7 @@
 2. **Own-assets-only.** The tool scans assets the user controls. It is never designed to point at arbitrary third-party URLs. This constrains the RLS/probe surface (see §7). **Scope of the invariant (resolved, §17.5):** it governs interaction with *target systems* — vibescan reads from, probes, and (never) writes to only the user's own project. It does not by itself forbid a read-only lookup of *public metadata about public artifacts* ("does npm package `foo` exist"). Such lookups are a distinct egress class with their own contract (§11.1): off by default, separately opted in, never carrying secrets or file contents. Absent that opt-in, the tool talks to nothing but the user's own project.
 3. **Never persist writes.** No `Network` code path may create, modify, or delete data in the target project in v1. Write-exposure is *inferred* (from credentialed introspection), never *demonstrated* by writing. (See §7.3.)
 4. **Don't reinvent generic detection.** The regex+entropy+allowlist substrate is commodity (gitleaks, ripsecrets, secretscan all do it well and free). Adopt a known-good pattern corpus and spend effort only on the Supabase-specific layer and correlation.
-5. **Secrets stay on the machine.** No secret value is transmitted anywhere except, in the credentialed path, directly from the user's machine to the user's own Supabase endpoint. Findings carry a redacted display form in **every serialized output** — JSON, SARIF, and HTML alike, all of which can leave the machine the moment they are written to disk. The full match is rendered only by the interactive TTY reporter, which writes to a terminal and is never persisted by the tool. There is no "local HTML" disclosure mode (resolved, §17.3; testable form in §13.3).
+5. **Secrets stay on the machine.** No secret value is transmitted anywhere except, in the credentialed path, directly from the user's machine to the user's own Supabase endpoint. A raw match exists only transiently, on the `SecretCandidate` between detection and finding construction; it is **redacted at the candidate→finding boundary and never propagates further** — not into `Evidence`, `Finding`, `ScanResult`, or any renderer. Consequently **every output form, including the interactive TTY, shows the redacted form** (resolved, §17.3). There is no full-match output mode of any kind — no "local HTML," no "local TTY." A future full-value local view would be a separate, explicitly-designed feature carrying tests that prove it cannot be exported (per the repository `AGENTS.md`); v1 has no such path.
 6. **Findings must be reproducible and actionable.** Every finding carries evidence (where, and — for correlated findings — a concrete reproduction) and a remediation. A finding a user can't verify or fix is noise.
 
 ---
@@ -318,6 +318,83 @@ satisfy this contract in full:
    the §13.3 boundary assertion and the workspace-DAG checker are updated in the
    same change. `LocalStatic` crates stay transport-free.
 
+### 11.2 — Registry mechanism (resolved 2026-07-18)
+
+§11.1 fixes the *contract*; this fixes the *mechanism*. The three §11.1 detections
+have very different signal quality and very different egress footprints, and the
+two supported ecosystems are asymmetric in what they expose. The mechanism below
+tiers the checks by confidence (consistent with §16's rule against shipping noisy
+`Review` heuristics in the first pass) and makes the privacy-safest path the
+default.
+
+**Verified source facts (2026-07-18) this decision rests on:**
+- **OSV** publishes daily per-ecosystem bulk snapshots over plain HTTPS at
+  `https://osv-vulnerabilities.storage.googleapis.com/<ECOSYSTEM>/all.zip`
+  (npm, PyPI, crates.io, …), and a live query API at `api.osv.dev`. Matching a
+  downloaded snapshot **locally leaks nothing** about which packages the user
+  depends on; the live API leaks the queried names/versions.
+- **npm** exposes package existence at `registry.npmjs.org/<pkg>` (404 ⇒ absent),
+  publish/recency in the packument `time` field, and **first-party download
+  counts** at `api.npmjs.org/downloads/point/<period>/<pkg>` — all unauthenticated.
+- **PyPI** exposes existence at `pypi.org/pypi/<pkg>/json` (404 ⇒ absent) and
+  release timestamps, but **no first-party download counts** — those require
+  BigQuery (a GCP account + client) or the third-party `pypistats.org`.
+
+**Tier 1 — Known-malicious (OSV) ⇒ Critical, `Confirmed`. The default and
+privacy-safe check.** Match dependencies against a **locally-cached OSV snapshot**
+(`<ECOSYSTEM>/all.zip`), refreshed on a 24-hour TTL (OSV's own cadence), keyed by
+ecosystem, holding no user data. Because matching is local, **no package name
+egresses for this check** — so it is enabled by the base `--registry-checks`
+opt-in without a name-disclosure caveat. The live `api.osv.dev` batch query is an
+optional supplement (ETag-cached) for freshness between snapshots; it *does* leak
+names, so it stays behind a further sub-opt-in and is disclosed in scan scope when
+used.
+
+**Tier 2 — Nonexistent package (slopsquat) ⇒ High, `Confirmed` — for public
+unscoped names only.** Resolve each declared dependency at
+`registry.npmjs.org/<pkg>` / `pypi.org/pypi/<pkg>/json`; a 404 is "not resolvable
+⇒ likely AI-hallucinated." This check **does** leak the queried names to the
+registry, so it is disclosed in scan scope (§11.1 clause 3). **Precision guard
+(mandatory):** a 404 on a **scoped npm name (`@org/pkg`)**, or on any name whose
+ecosystem is served by a configured private/alternate registry, is *not* evidence
+of nonexistence — it is very likely a private/internal package. Such names are
+**excluded** from the High "nonexistent" rule (at most a `Review` note), never
+reported as hallucinated. This is the same false-positive discipline the codebase
+keeps re-learning (the ignore layer, C1's classifier): do not let a structural
+404 masquerade as a semantic finding.
+
+**Tier 3 — Suspicious newcomer ⇒ `Review`, OFF by default, and initially
+npm-only.** Recent-publish + near-zero-downloads + small edit-distance to a
+popular name is inherently noisy, and §16 says a noisy `Review` scanner does not
+ship in the first registry pass. The ecosystem asymmetry makes it worse: the
+download signal is trivially available for npm and unavailable first-party for
+PyPI. Decision: the newcomer heuristic is **not part of the base
+`--registry-checks`**; it requires a separate `--registry-newcomer` opt-in, is
+`Review` confidence, and ships **npm-only** (using `api.npmjs.org/downloads` +
+packument recency + edit-distance to a curated top-N list). **PyPI newcomer is
+deferred** until a download-signal decision is made (BigQuery dependency vs a
+`pypistats.org` dependency vs none) — that decision is out of scope here and must
+not be made implicitly by wiring one in.
+
+**Failure taxonomy (§11.1 clause 5), made concrete.** Distinct, non-fatal
+outcomes, none of which may be conflated: `OsvSnapshotUnavailable` (bulk download
+failed — fall back to no OSV finding, never to a false clean), `RegistryUnavailable`,
+`RateLimited`, `NotFound` (the actual Tier-2 finding), `InvalidResponse`. A network
+outage must never manufacture a High "nonexistent" finding — an unreachable
+registry is `RegistryUnavailable`, categorically different from a 404.
+
+**Caching (§11.1 clause 4), made concrete.** Two caches, both under the platform
+cache dir, both holding only public data: (a) the OSV snapshot zips per ecosystem,
+24-hour TTL; (b) per-package existence/metadata responses keyed by
+`name+ecosystem`, 24-hour TTL. A cache hit issues no request. Neither cache ever
+holds a secret, a path, or a repo identifier.
+
+**Transport (§13.1).** `vibescan-registry` owns a sync, rustls-backed HTTP client
+(the same choice Tier 0 made — no OpenSSL, no C toolchain), is the nearest parent
+of that transport, and is reachable from `vibescan-core` only through an optional,
+feature-gated edge. Tests mock all egress; the default and `--registry-checks`
+test suites make zero live requests, exactly as the Supabase tiers do.
+
 ---
 
 ## 12. Correlation engine (`vibescan-core`)
@@ -348,7 +425,7 @@ Correlation rules are data, not hardcoded branches — new chains are added as r
 ### 13.3 Security & privacy invariants (restating §1 as testable requirements)
 - `LocalStatic` crates have **no** network dependency in their dependency tree — enforce by construction and assert in CI.
 - No v1 code path writes to a target project.
-- **Every serialized output format — JSON, SARIF, and HTML — uses the redacted secret form unconditionally.** There is no "local HTML" mode: an HTML artifact is shareable the instant it exists on disk, and the tool cannot police where it travels afterwards, so it never contains a full match. Full matches appear only in the interactive TTY renderer. Assert this in the report snapshot tests, per format (resolved, §17.3).
+- **Every output form — JSON, SARIF, HTML, *and* TTY — uses the redacted secret form.** The raw match is redacted at the candidate→finding boundary (§6.6) and never reaches a renderer, so no format can leak it. HTML gets no "local" exception (it is shareable the instant it exists on disk); TTY gets none either (terminals are `tee`'d, piped, logged, and screen-shared — "never persisted by the tool" is not "never persisted"). The redacted form plus the fingerprint and file:span is sufficient to verify a true positive in one's own repo. Pin this as an **integration-level** invariant — plant a known raw secret, run the full scan+render for every format, assert the raw body appears in none of them *and* is absent from the serialized `ScanResult`. A report-crate-only test cannot prove it (that crate never sees a raw candidate); the report snapshots assert the redacted form *renders* correctly, which is a separate, presentation concern (resolved, §17.3).
 - Credentialed-tier secrets are read from env, held in memory only for the request lifetime, and transmitted only to the user's own project endpoint.
 
 ### 13.4 Output & exit codes
@@ -465,12 +542,22 @@ read. Write exposure is inferred from Tier 1 introspection and never demonstrate
 security tool's credibility, so the composite now says reads, and names write
 exposure as an inference.
 
-**17.3 — All serialized output is redacted; no local-HTML mode (§1.5, §13.3).**
-The old text required redaction for anything that "could leave the machine" and
-then permitted full matches in "local TTY/HTML." HTML has no local mode in
-practice — it is a file, and files are shared. Resolved: JSON, SARIF, and HTML are
-redacted unconditionally; only the interactive TTY renderer shows a full match,
-because it writes to a terminal and is never persisted.
+**17.3 — All output is redacted, TTY included; no full-match mode exists (§1.5, §13.3).**
+The original text required redaction for anything that "could leave the machine"
+and then permitted full matches in "local TTY/HTML." A first resolution (in this
+log's initial draft) tightened HTML out but preserved a TTY full-match affordance.
+Implementation review then surfaced that the affordance conflicts with the code,
+the `vibescan-report` crate contract, and the repository `AGENTS.md` — all three
+of which already redact everywhere, because a raw match is redacted at the
+candidate→finding boundary and never reaches a renderer at all. Making TTY show a
+full match would have required *breaking* that boundary (threading raw secrets
+through `Finding` into the report layer) for marginal value, since a terminal is
+`tee`'d, piped, and screen-shared as readily as a file. **Final resolution: every
+output form is redacted, TTY included; there is no full-match path in v1.** The
+implementation was correct and the spec moved to it. A future full-value local
+view is possible only as an explicitly-designed, export-proof feature per
+`AGENTS.md`, and is out of scope for v1. This is the one decision here that
+overturned an earlier draft of the spec rather than an earlier draft of the code.
 
 **17.4 — Finding identity is path-independent (§4).** The data model said the
 finding id includes the location; coalescing (§6.6) and rule 1 (§12) require one
@@ -499,6 +586,22 @@ committed, `#[ignore]`d, and TODO-tagged with the capability they wait on, and a
 un-gated by the change that lands that capability. Precision/recall is computed
 over the live tier only, so the metric is never diluted by a fixture that cannot
 run.
+
+**17.7 — Registry-check mechanism (§11.2, resolved 2026-07-18).** §11.1 left the
+*mechanism* of the deferred registry tier open (which registries, how OSV is
+consumed, caching, and — implicitly — how much of §11.1's detection set is even
+reliably buildable). Resolved by grounding in the current source facts (OSV daily
+GCS snapshots; npm first-party existence + downloads; PyPI existence but no
+first-party downloads) and tiering by confidence: OSV known-malicious matching is
+`Confirmed`/Critical, defaults on within `--registry-checks`, and is done against
+a **local snapshot** so it leaks no package names; nonexistent-package is
+`Confirmed`/High but only for public unscoped names, with scoped/private names
+guarded out to avoid a structural-404 false positive; and the noisy newcomer
+heuristic is `Review`, off by default, npm-only, with PyPI newcomer explicitly
+deferred pending a download-signal decision (§16 governs). This keeps Track F's
+first pass to the two high-confidence checks and prevents the ecosystem asymmetry
+from being papered over. The track remains post-v1 and off by default; this
+decision unblocks writing the Track F instruction document.
 
 ### Open question (deliberately not resolved here)
 

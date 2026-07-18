@@ -1,4 +1,4 @@
 {
-  "todo": "TODO(network): permissive USING (true) assertions require policy introspection fixture support.",
+  "todo": "TODO(tier1): permissive USING (true) assertions require credentialed policy introspection.",
   "findings": []
 }
