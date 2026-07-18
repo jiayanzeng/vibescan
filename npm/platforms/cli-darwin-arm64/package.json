@@ -1,0 +1,22 @@
+{
+  "name": "@vibescan/cli-darwin-arm64",
+  "version": "0.1.0",
+  "description": "vibescan binary for macOS arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jiayanzeng/vibescan.git"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "vibescan"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

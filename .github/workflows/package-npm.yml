@@ -1,0 +1,93 @@
+name: Package and smoke-test npm release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist release plan supplied by the generated workflow.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package shipped npm binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Download all platform archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Verify source package contracts
+        run: npm --prefix npm test
+
+      - name: Pack main and platform packages
+        run: >-
+          node npm/scripts/build-packages.mjs
+          --artifacts artifacts
+          --out target/npm-packages
+
+      - name: Verify packed package contracts
+        run: >-
+          node npm/scripts/verify-packages.mjs
+          --packages target/npm-packages
+
+      - name: Upload npm packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-npm-packages
+          path: |
+            target/npm-packages/*.tgz
+            target/npm-packages/packages.json
+
+  smoke:
+    name: npm smoke (${{ matrix.target }})
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Download npm package tarballs
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts-npm-packages
+          path: target/npm-packages
+
+      - name: Install without scripts and exercise npx
+        run: >-
+          node npm/scripts/smoke-packages.mjs
+          --packages target/npm-packages
+          --target ${{ matrix.target }}

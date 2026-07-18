@@ -18,8 +18,10 @@ github-attestations = true
 # Let dist select the native/cross compiler for each target. Embedded
 # cargo-auditable metadata is outside G1 and remains disabled.
 cargo-auditable = false
-# Run only after both Linux platform archives exist; a failure blocks hosting.
-global-artifacts-jobs = ["./verify-static-linux"]
+# The built-in dist 0.32 npm installer fetches release binaries at install time,
+# so G2 deliberately packages shipped binaries in the custom job instead.
+# Both custom jobs consume the completed platform archives and block hosting.
+global-artifacts-jobs = ["./verify-static-linux", "./package-npm"]
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
