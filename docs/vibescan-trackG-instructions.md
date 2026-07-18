@@ -208,7 +208,7 @@ which the shim must handle with a clear message rather than a stack trace.
 4. If resolution fails, print an **esbuild-style actionable error** — name the likely
    cause (optional dependency skipped: cross-OS `node_modules` cache or stale
    lockfile) and the fixes (`npm ci` on a clean tree; don't share `node_modules`
-   across OSes; or use `cargo install vibescan` / the shell installer). Never fall
+   across OSes; or use `cargo install vibescan-cli` / the shell installer). Never fall
    back to a silent download.
 
 **Static-musl + the `libc` field.** Because the Linux binary is **static musl** (G1),
@@ -254,7 +254,7 @@ for these and it keeps installs reproducible).
 
 ### Problem (root-caused)
 
-`cargo install vibescan` cannot work until the workspace is published to crates.io in
+`cargo install vibescan-cli` cannot work until the workspace is published to crates.io in
 dependency order, and there is no Homebrew formula, no npm-publish provenance, and no
 written release process — so releases would be ad hoc and unverifiable.
 
@@ -271,7 +271,7 @@ written release process — so releases would be ad hoc and unverifiable.
 **crates.io publish order.** Publish bottom-up so each crate's dependencies already
 exist on the registry: `vibescan-types` → `vibescan-secrets` → `vibescan-git` →
 `vibescan-report` → `vibescan-supabase` → (`vibescan-registry`, if Track F landed) →
-`vibescan-core` → `vibescan-cli`. `cargo install vibescan` then installs the CLI. The
+`vibescan-core` → `vibescan-cli`. `cargo install vibescan-cli` then installs the CLI. (**Package-name decision, ratified:** the Cargo package is `vibescan-cli` per the exact crate DAG and boundary checker, and it installs the `vibescan` binary. The instruction's earlier literal `cargo install vibescan` is corrected to `cargo install vibescan-cli` throughout; no ninth alias crate is added and the architecture DAG is unchanged.) The
 version-bearing deps from G1 are the prerequisite. Document this order in `RELEASING.md`
 and let `dist`/`cargo` enforce it where possible.
 
@@ -293,7 +293,7 @@ Keep it short and executable.
 
 1. On a test tag, the release job publishes (or dry-run-publishes) the crates in the
    documented dependency order without an unresolved-dependency error; `cargo install
-   vibescan` from crates.io installs a working CLI (verifiable post-publish, or via a
+   vibescan-cli` from crates.io installs a working CLI (verifiable post-publish, or via a
    `--dry-run`/`cargo publish -p ... --dry-run` chain in CI).
 2. A Homebrew formula is generated and `brew install vibescan/tap/vibescan` yields a
    working `vibescan` (CI or documented manual check).
@@ -311,7 +311,7 @@ Keep it short and executable.
 
 Track G makes vibescan installable the way its audience expects: `npx vibescan` via
 per-platform packages with no install-time fetch (the security-appropriate mechanism),
-`cargo install vibescan` from a crates.io-published workspace, and `brew install` from
+`cargo install vibescan-cli` from a crates.io-published workspace, and `brew install` from
 a tap — all built from a `dist`-orchestrated, tag-triggered release that cross-compiles
 **static musl** Linux binaries alongside macOS/Windows, with unified checksums and
 GitHub Artifact Attestations, and npm publish provenance. After Track G, the pure-Rust
