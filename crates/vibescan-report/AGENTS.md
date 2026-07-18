@@ -25,6 +25,9 @@ does not permit sibling dependencies.
   that an inferred write was attempted.
 - Render every relevant location/provenance and all coverage warnings. Do not
   hide truncation or Network degradation.
+- Render Registry package-name egress disclosures and destination hosts in
+  every format. Package coordinates are public identifiers; never mix them
+  with repository paths, secrets, or file contents.
 - Escape all user/repository-derived HTML text and produce valid SARIF 2.1.0.
 - Preserve deterministic ordering supplied by core; renderer code must not
   make finding decisions or silently filter content.

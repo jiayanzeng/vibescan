@@ -35,6 +35,15 @@ jobs:
           components: clippy
       - run: cargo clippy --workspace --all-targets --features network --locked -- -D warnings
 
+  clippy-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+
   test-default:
     runs-on: ubuntu-latest
     steps:
@@ -48,6 +57,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
       - run: cargo test --workspace --features network --locked
+
+  test-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - run: cargo test --workspace --features registry --locked
 
   network-boundary:
     runs-on: ubuntu-latest

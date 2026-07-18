@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 
 use vibescan_report::{ReportFormat, TtyStyle, render, render_tty};
 use vibescan_types::{
-    Category, Confidence, Evidence, Finding, FindingId, HistoryScope, Location, LocationClass,
-    NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, NetworkScope,
-    Provenance, RepoPath, RlsExposure, ScanResult, ScanScope, ScanStats, SecretFingerprint,
-    Severity, Span, SupabaseProject,
+    Category, Confidence, Ecosystem, Evidence, Finding, FindingId, HistoryScope, Location,
+    LocationClass, NetworkActionAudit, NetworkActionIntent, NetworkActionKind,
+    NetworkActionOutcome, NetworkScope, Provenance, RegistryNameEgress, RepoPath, RlsExposure,
+    ScanResult, ScanScope, ScanStats, SecretFingerprint, Severity, Span, SupabaseProject,
 };
 
 const REDACTED_SECRET: &str = "sk_liv...1234";
@@ -67,6 +67,28 @@ fn every_format_renders_the_rls_policy_reproduction() {
         assert!(
             output.to_ascii_lowercase().contains("permissive"),
             "{format} did not render the policy exposure"
+        );
+    }
+}
+
+#[test]
+fn every_format_renders_registry_name_egress_disclosure() {
+    let result = sample_result();
+    let rendered = [
+        ("JSON", render(&result, ReportFormat::Json).unwrap()),
+        ("SARIF", render(&result, ReportFormat::Sarif).unwrap()),
+        ("HTML", render(&result, ReportFormat::Html).unwrap()),
+        ("TTY", render_tty(&result, TtyStyle::Plain)),
+    ];
+
+    for (format, output) in rendered {
+        assert!(
+            output.contains("registry.npmjs.org"),
+            "{format} omitted the registry destination"
+        );
+        assert!(
+            output.to_ascii_lowercase().contains("left-pad"),
+            "{format} omitted the audited package coordinate"
         );
     }
 }
@@ -172,12 +194,19 @@ fn sample_result() -> ScanResult {
                 enabled: true,
                 tier0_read_probe: true,
                 tier1_introspection: true,
+                registry_checks: true,
+                registry_newcomer: false,
+                registry_name_egress: vec![RegistryNameEgress {
+                    ecosystem: Ecosystem::Npm,
+                    host: "registry.npmjs.org".to_owned(),
+                }],
                 actions: vec![
                     NetworkActionAudit {
                         kind: NetworkActionKind::RootEnumeration,
                         intent: NetworkActionIntent::Get,
                         endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/".to_owned(),
                         table: None,
+                        package: None,
                         status: Some(200),
                         outcome: NetworkActionOutcome::RootEnumerated,
                         observed_row_count: None,
@@ -187,6 +216,7 @@ fn sample_result() -> ScanResult {
                         intent: NetworkActionIntent::Get,
                         endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1".to_owned(),
                         table: Some("private_profiles".to_owned()),
+                        package: None,
                         status: Some(403),
                         outcome: NetworkActionOutcome::Protected,
                         observed_row_count: None,
@@ -196,6 +226,7 @@ fn sample_result() -> ScanResult {
                         intent: NetworkActionIntent::Get,
                         endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/public_profiles?select=*&limit=1".to_owned(),
                         table: Some("public_profiles".to_owned()),
+                        package: None,
                         status: Some(200),
                         outcome: NetworkActionOutcome::Exposed,
                         observed_row_count: Some(1),
@@ -205,8 +236,19 @@ fn sample_result() -> ScanResult {
                         intent: NetworkActionIntent::Select,
                         endpoint: "db.abcdefghijklmnopqrst.supabase.co:5432".to_owned(),
                         table: Some("profiles".to_owned()),
+                        package: None,
                         status: None,
                         outcome: NetworkActionOutcome::CatalogRead,
+                        observed_row_count: None,
+                    },
+                    NetworkActionAudit {
+                        kind: NetworkActionKind::RegistryExistence,
+                        intent: NetworkActionIntent::Get,
+                        endpoint: "registry.npmjs.org".to_owned(),
+                        table: None,
+                        package: Some("left-pad@1.3.0".to_owned()),
+                        status: Some(200),
+                        outcome: NetworkActionOutcome::RegistryResolved,
                         observed_row_count: None,
                     },
                 ],

@@ -22,12 +22,13 @@ that enforce architecture or hardening gates.
 
 `check-network-boundary.sh` is a security control. It must inspect exact Cargo
 package identities and all relevant dependency kinds/features. The default
-graph must contain no transport, and enabled transport must be nearest-parented
-only by `vibescan-supabase`; LocalStatic siblings must remain transport-free.
+graph must contain no transport; Supabase transport must be nearest-parented by
+`vibescan-supabase`, Registry transport by `vibescan-registry`, and only those
+two parents are allowed. LocalStatic siblings must remain transport-free.
 
 Changes to the checker require positive and negative controls that prove it
 accepts the intended graph and rejects transport leakage or horizontal
 workspace dependencies. Do not weaken a denylist or skip a graph because a
 new dependency makes the check inconvenient.
 
-Run the changed script, both Cargo feature matrices, and `git diff --check`.
+Run the changed script, all Cargo feature matrices, and `git diff --check`.

@@ -10,6 +10,7 @@ EXPECTED_WORKSPACE = {
     "vibescan-cli",
     "vibescan-core",
     "vibescan-git",
+    "vibescan-registry",
     "vibescan-report",
     "vibescan-secrets",
     "vibescan-supabase",
@@ -19,11 +20,13 @@ EXPECTED_WORKSPACE = {
 ALLOWED_WORKSPACE_EDGES = {
     ("vibescan-cli", "vibescan-core"),
     ("vibescan-core", "vibescan-git"),
+    ("vibescan-core", "vibescan-registry"),
     ("vibescan-core", "vibescan-report"),
     ("vibescan-core", "vibescan-secrets"),
     ("vibescan-core", "vibescan-supabase"),
     ("vibescan-core", "vibescan-types"),
     ("vibescan-git", "vibescan-types"),
+    ("vibescan-registry", "vibescan-types"),
     ("vibescan-report", "vibescan-types"),
     ("vibescan-secrets", "vibescan-types"),
     ("vibescan-supabase", "vibescan-types"),
@@ -56,7 +59,7 @@ PURE_LOCALSTATIC = {
     "vibescan-report",
 }
 
-ALLOWED_NETWORK_PARENT = "vibescan-supabase"
+ALLOWED_NETWORK_PARENTS = {"vibescan-supabase", "vibescan-registry"}
 
 
 def load_metadata(path):
@@ -196,8 +199,9 @@ def nearest_workspace_parents(graph, transport_name):
     return parents
 
 
-def transport_policy_errors(default_graph, network_graph):
+def transport_policy_errors(graphs):
     errors = []
+    default_graph = graphs["default"]
     default_reachable = reachable(default_graph, default_graph["workspace_ids"])
     default_transports = transport_names_in(default_graph, default_reachable)
     if default_transports:
@@ -207,23 +211,26 @@ def transport_policy_errors(default_graph, network_graph):
             details.append(f"{transport} reached by {roots}")
         errors.append("default build contains transport crates: " + "; ".join(details))
 
-    network_reachable = reachable(network_graph, network_graph["workspace_ids"])
-    network_transports = transport_names_in(network_graph, network_reachable)
-    if not network_transports:
-        errors.append(
-            "network build did not contain any known transport crate; "
-            "expected reqwest/rustls/postgres"
-        )
-    for transport in network_transports:
-        parents = nearest_workspace_parents(network_graph, transport)
-        if parents != {ALLOWED_NETWORK_PARENT}:
+    transports_by_graph = {"default": default_transports}
+    for graph_name in ("network", "registry", "combined"):
+        graph = graphs[graph_name]
+        enabled_reachable = reachable(graph, graph["workspace_ids"])
+        transports = transport_names_in(graph, enabled_reachable)
+        transports_by_graph[graph_name] = transports
+        if not transports:
             errors.append(
-                "network feature transport parent violation for "
-                f"{transport}: nearest workspace parents were {sorted(parents)}, "
-                f"expected [{ALLOWED_NETWORK_PARENT!r}]"
+                f"{graph_name} build did not contain any known transport crate"
             )
+        for transport in transports:
+            parents = nearest_workspace_parents(graph, transport)
+            if not parents or not parents.issubset(ALLOWED_NETWORK_PARENTS):
+                errors.append(
+                    f"{graph_name} feature transport parent violation for "
+                    f"{transport}: nearest workspace parents were {sorted(parents)}, "
+                    f"allowed parents are {sorted(ALLOWED_NETWORK_PARENTS)}"
+                )
 
-    for graph_name, graph in (("default", default_graph), ("network", network_graph)):
+    for graph_name, graph in graphs.items():
         missing = PURE_LOCALSTATIC - graph["workspace_names"]
         if missing:
             errors.append(f"{graph_name} metadata missing workspace crates: {sorted(missing)}")
@@ -238,19 +245,69 @@ def transport_policy_errors(default_graph, network_graph):
 
     if "rustls" in default_transports:
         errors.append("rustls appeared in default build")
-    if "rustls" not in network_transports:
-        errors.append("rustls did not appear in network build; rustls-tls may not be enabled")
-    for required in ("postgres", "tokio-postgres", "tokio-postgres-rustls"):
-        if required not in network_transports:
-            errors.append(f"{required} did not appear in network build")
-    forbidden_tls = {"native-tls", "openssl", "openssl-sys"}.intersection(
-        network_transports
-    )
-    if forbidden_tls:
+    for graph_name in ("network", "combined"):
+        transports = transports_by_graph[graph_name]
+        if "rustls" not in transports:
+            errors.append(
+                f"rustls did not appear in {graph_name} build; rustls-tls may not be enabled"
+            )
+        for required in ("postgres", "tokio-postgres", "tokio-postgres-rustls"):
+            if required not in transports:
+                errors.append(f"{required} did not appear in {graph_name} build")
+
+    for graph_name in ("registry", "combined"):
+        transports = transports_by_graph[graph_name]
+        for required in ("reqwest", "rustls"):
+            if required not in transports:
+                errors.append(f"{required} did not appear in {graph_name} build")
+
+    registry_only = set(transports_by_graph["registry"])
+    unexpected_supabase_transport = {
+        "postgres",
+        "tokio-postgres",
+        "tokio-postgres-rustls",
+    }.intersection(registry_only)
+    if unexpected_supabase_transport:
         errors.append(
-            "network build contains forbidden non-rustls TLS crates: "
-            + ", ".join(sorted(forbidden_tls))
+            "registry-only build contains Supabase Postgres transport: "
+            + ", ".join(sorted(unexpected_supabase_transport))
         )
+
+    network_registry_transports = transport_names_in(
+        graphs["network"],
+        reachable(
+            graphs["network"],
+            [graphs["network"]["ids_by_name"]["vibescan-registry"]],
+        ),
+    )
+    if network_registry_transports:
+        errors.append(
+            "network-only build activates vibescan-registry transport: "
+            + ", ".join(network_registry_transports)
+        )
+
+    registry_supabase_transports = transport_names_in(
+        graphs["registry"],
+        reachable(
+            graphs["registry"],
+            [graphs["registry"]["ids_by_name"]["vibescan-supabase"]],
+        ),
+    )
+    if registry_supabase_transports:
+        errors.append(
+            "registry-only build activates vibescan-supabase transport: "
+            + ", ".join(registry_supabase_transports)
+        )
+
+    for graph_name in ("network", "registry", "combined"):
+        forbidden_tls = {"native-tls", "openssl", "openssl-sys"}.intersection(
+            transports_by_graph[graph_name]
+        )
+        if forbidden_tls:
+            errors.append(
+                f"{graph_name} build contains forbidden non-rustls TLS crates: "
+                + ", ".join(sorted(forbidden_tls))
+            )
     return errors
 
 
@@ -309,6 +366,15 @@ def run_self_tests():
         "(normal, optional, target=cfg(target_os = \"windows\"))",
     )
 
+    registry_to_localstatic = allowed_details + [
+        edge_detail("vibescan-registry", "vibescan-git")
+    ]
+    require_rejection(
+        "registry to LocalStatic edge",
+        workspace_policy_errors(set(EXPECTED_WORKSPACE), registry_to_localstatic),
+        "forbidden workspace edge vibescan-registry -> vibescan-git",
+    )
+
     default_graph = synthetic_graph({})
     network_graph = synthetic_graph(
         {
@@ -329,7 +395,40 @@ def run_self_tests():
             "tokio-postgres-rustls",
         },
     )
-    if transport_policy_errors(default_graph, network_graph):
+    registry_graph = synthetic_graph(
+        {
+            "vibescan-registry": ["reqwest"],
+            "reqwest": ["rustls"],
+        },
+        {"reqwest", "rustls"},
+    )
+    combined_graph = synthetic_graph(
+        {
+            "vibescan-supabase": [
+                "postgres",
+                "reqwest",
+                "tokio-postgres-rustls",
+            ],
+            "vibescan-registry": ["reqwest"],
+            "postgres": ["tokio-postgres"],
+            "reqwest": ["rustls"],
+            "tokio-postgres-rustls": ["rustls", "tokio-postgres"],
+        },
+        {
+            "postgres",
+            "reqwest",
+            "rustls",
+            "tokio-postgres",
+            "tokio-postgres-rustls",
+        },
+    )
+    graphs = {
+        "default": default_graph,
+        "network": network_graph,
+        "registry": registry_graph,
+        "combined": combined_graph,
+    }
+    if transport_policy_errors(graphs):
         raise AssertionError("allowed transport positive control was rejected")
 
     leaking_default = synthetic_graph(
@@ -338,8 +437,35 @@ def run_self_tests():
     )
     require_rejection(
         "LocalStatic transport leakage",
-        transport_policy_errors(leaking_default, network_graph),
+        transport_policy_errors({**graphs, "default": leaking_default}),
         "default build contains transport crates",
+    )
+
+    leaking_registry = synthetic_graph(
+        {
+            "vibescan-registry": ["reqwest"],
+            "vibescan-git": ["reqwest"],
+            "reqwest": ["rustls"],
+        },
+        {"reqwest", "rustls"},
+    )
+    require_rejection(
+        "registry LocalStatic transport leakage",
+        transport_policy_errors({**graphs, "registry": leaking_registry}),
+        "registry build lets vibescan-git reach transport crates",
+    )
+
+    unauthorized_parent = synthetic_graph(
+        {
+            "vibescan-core": ["reqwest"],
+            "reqwest": ["rustls"],
+        },
+        {"reqwest", "rustls"},
+    )
+    require_rejection(
+        "unauthorized transport parent",
+        transport_policy_errors({**graphs, "registry": unauthorized_parent}),
+        "registry feature transport parent violation for reqwest",
     )
 
     openssl_network = synthetic_graph(
@@ -365,28 +491,27 @@ def run_self_tests():
     )
     require_rejection(
         "OpenSSL transport",
-        transport_policy_errors(default_graph, openssl_network),
+        transport_policy_errors({**graphs, "network": openssl_network}),
         "network build contains forbidden non-rustls TLS crates",
     )
 
 
-def validate(default_path, network_path):
-    default_graph = load_metadata(default_path)
-    network_graph = load_metadata(network_path)
+def validate(default_path, network_path, registry_path, combined_path):
+    graphs = {
+        "default": load_metadata(default_path),
+        "network": load_metadata(network_path),
+        "registry": load_metadata(registry_path),
+        "combined": load_metadata(combined_path),
+    }
     errors = []
-    errors.extend(
-        f"default: {error}"
-        for error in workspace_policy_errors(
-            default_graph["workspace_names"], declared_workspace_edges(default_graph)
+    for graph_name, graph in graphs.items():
+        errors.extend(
+            f"{graph_name}: {error}"
+            for error in workspace_policy_errors(
+                graph["workspace_names"], declared_workspace_edges(graph)
+            )
         )
-    )
-    errors.extend(
-        f"network: {error}"
-        for error in workspace_policy_errors(
-            network_graph["workspace_names"], declared_workspace_edges(network_graph)
-        )
-    )
-    errors.extend(transport_policy_errors(default_graph, network_graph))
+    errors.extend(transport_policy_errors(graphs))
     return errors
 
 
@@ -395,27 +520,31 @@ def main():
         run_self_tests()
         print("network-boundary: synthetic positive and negative controls passed")
         return 0
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 5:
         print(
-            "usage: check-network-boundary.py DEFAULT_METADATA NETWORK_METADATA",
+            "usage: check-network-boundary.py DEFAULT_METADATA NETWORK_METADATA "
+            "REGISTRY_METADATA COMBINED_METADATA",
             file=sys.stderr,
         )
         return 2
 
     run_self_tests()
-    errors = validate(sys.argv[1], sys.argv[2])
+    errors = validate(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
     if errors:
         for error in errors:
             print(f"network-boundary: {error}", file=sys.stderr)
         return 1
 
-    print("network-boundary: exact seven-crate DAG holds across all dependency kinds")
+    print("network-boundary: exact eight-crate DAG holds across all dependency kinds")
     print("network-boundary: default build has no transport crates")
     print(
-        "network-boundary: rustls HTTP/Postgres transport is nearest-parented by "
-        "vibescan-supabase; OpenSSL/native-tls absent"
+        "network-boundary: rustls transports are nearest-parented only by "
+        "vibescan-supabase/vibescan-registry; OpenSSL/native-tls absent"
     )
-    print("network-boundary: pure LocalStatic crates are transport-free in default and network metadata")
+    print(
+        "network-boundary: pure LocalStatic crates are transport-free across "
+        "default, network, registry, and combined metadata"
+    )
     return 0
 
 

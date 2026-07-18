@@ -15,6 +15,8 @@ use jiff::Timestamp;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use vibescan_git::{WalkOptions, collect_repository, discover_repository_root};
+#[cfg(feature = "registry")]
+use vibescan_registry::{RegistryCheckInput, ReqwestRegistrySource, run_registry_checks};
 use vibescan_report::{ReportFormat, TtyStyle, render, render_tty};
 use vibescan_secrets::Detector;
 use vibescan_supabase::SupabaseClassifier;
@@ -25,10 +27,10 @@ use vibescan_supabase::{introspect_tier1, probe_tier0_read, project_from_db_url}
 #[cfg(feature = "network")]
 use vibescan_types::RepoPath;
 use vibescan_types::{
-    Category, Confidence, ContentId, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope,
-    Location, LocationClass, NetworkScope, Provenance, RlsExposure, ScanResult, ScanScope,
-    ScanStats, ScannableUnit, ScopeWarning, SecretCandidate, SecretFingerprint, SupabaseKeyClass,
-    SupabaseProject, UnitRef,
+    Category, Confidence, ContentId, CorrelationRuleId, Ecosystem, Evidence, Finding, FindingId,
+    HistoryScope, Location, LocationClass, NetworkActionAudit, NetworkScope, ParsedDependency,
+    Provenance, RlsExposure, ScanResult, ScanScope, ScanStats, ScannableUnit, ScopeWarning,
+    SecretCandidate, SecretFingerprint, SupabaseKeyClass, SupabaseProject, UnitRef,
 };
 
 pub use vibescan_types::Severity;
@@ -52,6 +54,8 @@ pub struct ScanConfig {
     pub custom_rules_path: Option<PathBuf>,
     pub tier0_read_probe: bool,
     pub tier1_introspection: bool,
+    pub registry_checks: bool,
+    pub registry_newcomer: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,6 +96,8 @@ impl Default for ScanConfig {
             custom_rules_path: None,
             tier0_read_probe: false,
             tier1_introspection: false,
+            registry_checks: false,
+            registry_newcomer: false,
         }
     }
 }
@@ -166,6 +172,12 @@ impl ScanConfig {
             if network.tier1_introspection == Some(false) {
                 self.tier1_introspection = false;
             }
+            if network.registry_checks == Some(false) {
+                self.registry_checks = false;
+            }
+            if network.registry_newcomer == Some(false) {
+                self.registry_newcomer = false;
+            }
         }
 
         Ok(())
@@ -231,10 +243,19 @@ struct RulesSection {
 struct NetworkSection {
     tier0_read_probe: Option<bool>,
     tier1_introspection: Option<bool>,
+    registry_checks: Option<bool>,
+    registry_newcomer: Option<bool>,
 }
 
 /// Run the offline scan pipeline.
 pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, CoreError> {
+    if config.registry_checks && !cfg!(feature = "registry") {
+        return Err(CoreError::RegistryFeatureUnavailable);
+    }
+    if config.registry_newcomer {
+        return Err(CoreError::RegistryNewcomerUnavailable);
+    }
+
     let started = Instant::now();
     let started_at = Timestamp::now().to_string();
     let target_path = target.as_ref();
@@ -287,12 +308,48 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
         .iter()
         .map(|fact| fact.finding.clone())
         .collect::<Vec<_>>();
-    #[cfg(feature = "network")]
-    let mut network_actions = Vec::new();
-    #[cfg(not(feature = "network"))]
-    let network_actions = Vec::new();
+    #[cfg(any(feature = "network", feature = "registry"))]
+    let mut network_actions = Vec::<NetworkActionAudit>::new();
+    #[cfg(not(any(feature = "network", feature = "registry")))]
+    let network_actions = Vec::<NetworkActionAudit>::new();
+    #[cfg(feature = "registry")]
+    let mut registry_name_egress = Vec::new();
+    #[cfg(not(feature = "registry"))]
+    let registry_name_egress = Vec::new();
     findings.extend(resolve_generic_candidates(&candidates));
-    findings.extend(scan_dependency_integrity(&walk.repo_root)?);
+    let dependency_scan = scan_dependency_integrity(&walk.repo_root)?;
+    #[cfg(feature = "registry")]
+    let registry_dependencies = registry_eligible_dependencies(
+        &dependency_scan.findings,
+        dependency_scan.dependencies.clone(),
+    );
+    findings.extend(dependency_scan.findings);
+
+    if config.registry_checks {
+        #[cfg(feature = "registry")]
+        {
+            let source = ReqwestRegistrySource::new().map_err(CoreError::Registry)?;
+            let mut output = run_registry_checks(
+                &source,
+                &RegistryCheckInput {
+                    dependencies: registry_dependencies,
+                    private_registry_ecosystems: private_registry_ecosystems(&walk.repo_root)?,
+                },
+            )
+            .map_err(CoreError::Registry)?;
+            findings.append(&mut output.findings);
+            network_actions.append(&mut output.actions);
+            registry_name_egress.append(&mut output.name_egress);
+            warnings.extend(
+                output
+                    .warnings
+                    .into_iter()
+                    .map(|warning| ScopeWarning::Other {
+                        message: warning.message(),
+                    }),
+            );
+        }
+    }
 
     #[cfg(feature = "network")]
     let network_associations = (config.tier0_read_probe || config.tier1_introspection).then(|| {
@@ -393,10 +450,14 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
             working_tree: config.include_working_tree,
             history: history_scope(config.include_history, config.max_commits, &walk.history),
             network: NetworkScope {
-                enabled: (config.tier0_read_probe || config.tier1_introspection)
-                    && cfg!(feature = "network"),
+                enabled: ((config.tier0_read_probe || config.tier1_introspection)
+                    && cfg!(feature = "network"))
+                    || (config.registry_checks && cfg!(feature = "registry")),
                 tier0_read_probe: config.tier0_read_probe && cfg!(feature = "network"),
                 tier1_introspection: config.tier1_introspection && cfg!(feature = "network"),
+                registry_checks: config.registry_checks && cfg!(feature = "registry"),
+                registry_newcomer: false,
+                registry_name_egress,
                 actions: network_actions,
             },
             warnings,
@@ -1059,25 +1120,171 @@ fn generic_candidate_severity(candidate: &SecretCandidate) -> (Severity, Confide
     }
 }
 
-fn scan_dependency_integrity(repo_root: &Path) -> Result<Vec<Finding>, CoreError> {
+#[derive(Debug, Default)]
+struct DependencyScanOutput {
+    findings: Vec<Finding>,
+    dependencies: Vec<ParsedDependency>,
+}
+
+/// Parse registry-shaped dependencies from manifests under the discovered
+/// repository root without performing any egress.
+pub fn parse_dependencies(target: impl AsRef<Path>) -> Result<Vec<ParsedDependency>, CoreError> {
+    let repo_root = discover_repository_root(target.as_ref()).map_err(CoreError::Git)?;
+    Ok(scan_dependency_integrity(&repo_root)?.dependencies)
+}
+
+fn scan_dependency_integrity(repo_root: &Path) -> Result<DependencyScanOutput, CoreError> {
     let mut findings = Vec::new();
+    let mut dependencies = Vec::new();
     for manifest in collect_manifest_paths(repo_root)? {
         match manifest.kind {
             DependencyManifestKind::PackageJson => {
-                scan_package_json(repo_root, &manifest.path, &mut findings)?;
+                scan_package_json(repo_root, &manifest.path, &mut findings, &mut dependencies)?;
             }
             DependencyManifestKind::PackageLock => {
-                scan_package_lock(repo_root, &manifest.path, &mut findings)?;
+                scan_package_lock(repo_root, &manifest.path, &mut findings, &mut dependencies)?;
             }
             DependencyManifestKind::Pyproject => {
-                scan_pyproject(repo_root, &manifest.path, &mut findings)?;
+                scan_pyproject(repo_root, &manifest.path, &mut findings, &mut dependencies)?;
             }
             DependencyManifestKind::RequirementsTxt => {
-                scan_requirements_txt(repo_root, &manifest.path, &mut findings)?;
+                scan_requirements_txt(repo_root, &manifest.path, &mut findings, &mut dependencies)?;
+            }
+            DependencyManifestKind::PythonLock => {
+                scan_python_lock(repo_root, &manifest.path, &mut dependencies)?;
             }
         }
     }
-    Ok(findings)
+    dependencies.sort();
+    dependencies.dedup();
+    Ok(DependencyScanOutput {
+        findings,
+        dependencies,
+    })
+}
+
+#[cfg(feature = "registry")]
+fn registry_eligible_dependencies(
+    structural_findings: &[Finding],
+    dependencies: Vec<ParsedDependency>,
+) -> Vec<ParsedDependency> {
+    let rejected = structural_findings
+        .iter()
+        .filter_map(|finding| match &finding.evidence {
+            Evidence::Dependency {
+                package,
+                manifest_path,
+                reason:
+                    vibescan_types::DependencyIntegrityReason::InvalidPackageName
+                    | vibescan_types::DependencyIntegrityReason::EmptyVersionSpecifier,
+            } => Some((package.clone(), manifest_path.clone())),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    dependencies
+        .into_iter()
+        .filter(|dependency| {
+            !rejected.contains(&(dependency.name.clone(), dependency.manifest_path.clone()))
+        })
+        .collect()
+}
+
+#[cfg(feature = "registry")]
+fn private_registry_ecosystems(repo_root: &Path) -> Result<BTreeSet<Ecosystem>, CoreError> {
+    let mut ecosystems = BTreeSet::new();
+    if std::env::var("NPM_CONFIG_REGISTRY").is_ok_and(|value| npm_registry_is_alternate(&value)) {
+        ecosystems.insert(Ecosystem::Npm);
+    }
+    if std::env::var("PIP_INDEX_URL").is_ok_and(|value| python_registry_is_alternate(&value))
+        || std::env::var("PIP_EXTRA_INDEX_URL").is_ok_and(|value| !value.trim().is_empty())
+        || std::env::var("UV_INDEX_URL").is_ok_and(|value| python_registry_is_alternate(&value))
+    {
+        ecosystems.insert(Ecosystem::PyPi);
+    }
+    let npmrc = repo_root.join(".npmrc");
+    if let Ok(content) = fs::read_to_string(&npmrc) {
+        if content.lines().any(npmrc_line_is_alternate) {
+            ecosystems.insert(Ecosystem::Npm);
+        }
+    }
+
+    let pip_conf = repo_root.join("pip.conf");
+    if fs::read_to_string(&pip_conf)
+        .is_ok_and(|content| content.lines().any(is_python_index_configuration))
+    {
+        ecosystems.insert(Ecosystem::PyPi);
+    }
+
+    for manifest in collect_manifest_paths(repo_root)? {
+        match manifest.kind {
+            DependencyManifestKind::RequirementsTxt => {
+                let content = fs::read_to_string(&manifest.path).map_err(CoreError::Io)?;
+                if content.lines().any(is_python_index_configuration) {
+                    ecosystems.insert(Ecosystem::PyPi);
+                }
+            }
+            DependencyManifestKind::Pyproject => {
+                let content = fs::read_to_string(&manifest.path).map_err(CoreError::Io)?;
+                let value = toml::from_str::<toml::Value>(&content).map_err(CoreError::Toml)?;
+                if pyproject_has_alternate_index(&value) {
+                    ecosystems.insert(Ecosystem::PyPi);
+                }
+            }
+            DependencyManifestKind::PackageJson => {
+                if let Some(parent) = manifest.path.parent() {
+                    if fs::read_to_string(parent.join(".npmrc"))
+                        .is_ok_and(|content| content.lines().any(npmrc_line_is_alternate))
+                    {
+                        ecosystems.insert(Ecosystem::Npm);
+                    }
+                }
+            }
+            DependencyManifestKind::PackageLock | DependencyManifestKind::PythonLock => {}
+        }
+    }
+    Ok(ecosystems)
+}
+
+#[cfg(feature = "registry")]
+fn npmrc_line_is_alternate(line: &str) -> bool {
+    line.trim()
+        .strip_prefix("registry=")
+        .is_some_and(npm_registry_is_alternate)
+}
+
+#[cfg(feature = "registry")]
+fn npm_registry_is_alternate(value: &str) -> bool {
+    let normalized = value.trim().trim_end_matches('/');
+    normalized != "https://registry.npmjs.org" && normalized != "http://registry.npmjs.org"
+}
+
+#[cfg(feature = "registry")]
+fn python_registry_is_alternate(value: &str) -> bool {
+    let normalized = value.trim().trim_end_matches('/');
+    normalized != "https://pypi.org/simple" && normalized != "http://pypi.org/simple"
+}
+
+#[cfg(feature = "registry")]
+fn is_python_index_configuration(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("--index-url")
+        || line.starts_with("--extra-index-url")
+        || line.starts_with("index-url")
+        || line.starts_with("extra-index-url")
+}
+
+#[cfg(feature = "registry")]
+fn pyproject_has_alternate_index(value: &toml::Value) -> bool {
+    value
+        .get("tool")
+        .and_then(|tool| tool.get("poetry"))
+        .and_then(|poetry| poetry.get("source"))
+        .is_some_and(|source| source.as_array().is_some_and(|items| !items.is_empty()))
+        || value
+            .get("tool")
+            .and_then(|tool| tool.get("uv"))
+            .and_then(|uv| uv.get("index"))
+            .is_some()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1086,6 +1293,7 @@ enum DependencyManifestKind {
     PackageLock,
     Pyproject,
     RequirementsTxt,
+    PythonLock,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1141,6 +1349,7 @@ fn dependency_manifest_kind(path: &Path) -> Option<DependencyManifestKind> {
         Some("package-lock.json") => Some(DependencyManifestKind::PackageLock),
         Some("pyproject.toml") => Some(DependencyManifestKind::Pyproject),
         Some("requirements.txt") => Some(DependencyManifestKind::RequirementsTxt),
+        Some("poetry.lock" | "uv.lock") => Some(DependencyManifestKind::PythonLock),
         _ => None,
     }
 }
@@ -1149,6 +1358,7 @@ fn scan_package_json(
     repo_root: &Path,
     manifest_path: &Path,
     findings: &mut Vec<Finding>,
+    dependencies: &mut Vec<ParsedDependency>,
 ) -> Result<(), CoreError> {
     let value = read_json_manifest(manifest_path)?;
     for section in [
@@ -1159,6 +1369,15 @@ fn scan_package_json(
     ] {
         if let Some(deps) = value.get(section).and_then(serde_json::Value::as_object) {
             for (name, version) in deps {
+                let version_req = npm_version_req(version);
+                dependencies.push(parsed_dependency(
+                    repo_root,
+                    manifest_path,
+                    name,
+                    version_req,
+                    Ecosystem::Npm,
+                    name.starts_with('@'),
+                ));
                 check_npm_dependency(repo_root, manifest_path, section, name, version, findings);
             }
         }
@@ -1170,24 +1389,36 @@ fn scan_package_lock(
     repo_root: &Path,
     manifest_path: &Path,
     findings: &mut Vec<Finding>,
+    dependencies: &mut Vec<ParsedDependency>,
 ) -> Result<(), CoreError> {
     let value = read_json_manifest(manifest_path)?;
-    if let Some(deps) = value
-        .get("dependencies")
-        .and_then(serde_json::Value::as_object)
-    {
-        for (name, metadata) in deps {
-            check_npm_dependency(
-                repo_root,
-                manifest_path,
-                "lockfile dependencies",
-                name,
-                metadata,
-                findings,
-            );
+    let packages = value.get("packages").and_then(serde_json::Value::as_object);
+    if packages.is_none() {
+        if let Some(deps) = value
+            .get("dependencies")
+            .and_then(serde_json::Value::as_object)
+        {
+            for (name, metadata) in deps {
+                check_npm_dependency(
+                    repo_root,
+                    manifest_path,
+                    "lockfile dependencies",
+                    name,
+                    metadata,
+                    findings,
+                );
+                dependencies.push(parsed_dependency(
+                    repo_root,
+                    manifest_path,
+                    name,
+                    npm_version_req(metadata),
+                    Ecosystem::Npm,
+                    name.starts_with('@'),
+                ));
+            }
         }
     }
-    if let Some(packages) = value.get("packages").and_then(serde_json::Value::as_object) {
+    if let Some(packages) = packages {
         for (path, metadata) in packages {
             let Some(name) = path.strip_prefix("node_modules/") else {
                 continue;
@@ -1203,6 +1434,42 @@ fn scan_package_lock(
                 metadata,
                 findings,
             );
+            dependencies.push(parsed_dependency(
+                repo_root,
+                manifest_path,
+                name,
+                npm_version_req(metadata),
+                Ecosystem::Npm,
+                name.starts_with('@'),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn scan_python_lock(
+    repo_root: &Path,
+    manifest_path: &Path,
+    dependencies: &mut Vec<ParsedDependency>,
+) -> Result<(), CoreError> {
+    let content = fs::read_to_string(manifest_path).map_err(CoreError::Io)?;
+    let value = toml::from_str::<toml::Value>(&content).map_err(CoreError::Toml)?;
+    if let Some(packages) = value.get("package").and_then(toml::Value::as_array) {
+        for package in packages {
+            let Some(name) = package.get("name").and_then(toml::Value::as_str) else {
+                continue;
+            };
+            let Some(version) = package.get("version").and_then(toml::Value::as_str) else {
+                continue;
+            };
+            dependencies.push(parsed_dependency(
+                repo_root,
+                manifest_path,
+                name,
+                version,
+                Ecosystem::PyPi,
+                false,
+            ));
         }
     }
     Ok(())
@@ -1212,6 +1479,7 @@ fn scan_pyproject(
     repo_root: &Path,
     manifest_path: &Path,
     findings: &mut Vec<Finding>,
+    dependencies: &mut Vec<ParsedDependency>,
 ) -> Result<(), CoreError> {
     let content = fs::read_to_string(manifest_path).map_err(CoreError::Io)?;
     let value = toml::from_str::<toml::Value>(&content).map_err(CoreError::Toml)?;
@@ -1227,6 +1495,7 @@ fn scan_pyproject(
                 "project.dependencies",
                 dep,
                 findings,
+                dependencies,
             );
         }
     }
@@ -1247,6 +1516,14 @@ fn scan_pyproject(
                 name,
                 findings,
             );
+            dependencies.push(parsed_dependency(
+                repo_root,
+                manifest_path,
+                name,
+                version.as_str().unwrap_or_default(),
+                Ecosystem::PyPi,
+                false,
+            ));
             if version.as_str().is_some_and(|spec| spec.trim().is_empty()) {
                 findings.push(dependency_finding(
                     repo_root,
@@ -1265,10 +1542,18 @@ fn scan_requirements_txt(
     repo_root: &Path,
     manifest_path: &Path,
     findings: &mut Vec<Finding>,
+    dependencies: &mut Vec<ParsedDependency>,
 ) -> Result<(), CoreError> {
     let content = fs::read_to_string(manifest_path).map_err(CoreError::Io)?;
     for line in content.lines() {
-        check_python_requirement(repo_root, manifest_path, "requirements.txt", line, findings);
+        check_python_requirement(
+            repo_root,
+            manifest_path,
+            "requirements.txt",
+            line,
+            findings,
+            dependencies,
+        );
     }
     Ok(())
 }
@@ -1335,6 +1620,7 @@ fn check_python_requirement(
     section: &str,
     requirement: &str,
     findings: &mut Vec<Finding>,
+    dependencies: &mut Vec<ParsedDependency>,
 ) {
     let requirement = requirement
         .split_once('#')
@@ -1349,6 +1635,42 @@ fn check_python_requirement(
     }
     let name = python_requirement_name(requirement);
     check_python_dependency_name(repo_root, manifest_path, section, name, findings);
+    dependencies.push(parsed_dependency(
+        repo_root,
+        manifest_path,
+        name,
+        python_version_req(requirement, name),
+        Ecosystem::PyPi,
+        false,
+    ));
+}
+
+fn npm_version_req(value: &serde_json::Value) -> &str {
+    value
+        .as_str()
+        .or_else(|| value.get("version").and_then(serde_json::Value::as_str))
+        .unwrap_or_default()
+}
+
+fn python_version_req<'a>(requirement: &'a str, name: &str) -> &'a str {
+    requirement.get(name.len()..).unwrap_or_default().trim()
+}
+
+fn parsed_dependency(
+    repo_root: &Path,
+    manifest_path: &Path,
+    name: &str,
+    version_req: &str,
+    ecosystem: Ecosystem,
+    is_scoped: bool,
+) -> ParsedDependency {
+    ParsedDependency {
+        name: name.to_owned(),
+        version_req: version_req.to_owned(),
+        ecosystem,
+        manifest_path: vibescan_types::RepoPath(repo_relative_path(repo_root, manifest_path)),
+        is_scoped,
+    }
 }
 
 fn check_python_dependency_name(
@@ -1969,7 +2291,10 @@ fn load_detector(custom_rules_path: Option<&Path>) -> Result<Detector, CoreError
 /// Core pipeline error.
 #[derive(Debug)]
 pub enum CoreError {
-    ConfiguredPathMissing { kind: &'static str, path: PathBuf },
+    ConfiguredPathMissing {
+        kind: &'static str,
+        path: PathBuf,
+    },
     Detector(vibescan_secrets::DetectorError),
     Git(vibescan_git::GitWalkError),
     Io(io::Error),
@@ -1978,6 +2303,10 @@ pub enum CoreError {
     InvalidSeverity(String),
     MissingTier1Credential,
     Tier1(vibescan_supabase::IntrospectError),
+    RegistryFeatureUnavailable,
+    RegistryNewcomerUnavailable,
+    #[cfg(feature = "registry")]
+    Registry(vibescan_registry::RegistryError),
 }
 
 impl fmt::Display for CoreError {
@@ -2003,6 +2332,14 @@ impl fmt::Display for CoreError {
                 "Tier 1 introspection requires VIBESCAN_SUPABASE_DB_URL in the local environment",
             ),
             Self::Tier1(source) => write!(formatter, "Tier 1 introspection failed: {source}"),
+            Self::RegistryFeatureUnavailable => formatter.write_str(
+                "registry checks were requested but this binary was built without registry support",
+            ),
+            Self::RegistryNewcomerUnavailable => formatter.write_str(
+                "the registry newcomer heuristic is deferred and unavailable in Track F",
+            ),
+            #[cfg(feature = "registry")]
+            Self::Registry(source) => write!(formatter, "registry checks failed: {source}"),
         }
     }
 }
@@ -3008,13 +3345,244 @@ mod tests {
         repo.git(["init"]);
         repo.write(
             "vibescan.toml",
-            "[network]\ntier0_read_probe = true\ntier1_introspection = true\n",
+            "[network]\ntier0_read_probe = true\ntier1_introspection = true\nregistry_checks = true\nregistry_newcomer = true\n",
         );
 
         let config = ScanConfig::load(repo.path()).expect("config loads");
 
         assert!(!config.tier0_read_probe);
         assert!(!config.tier1_introspection);
+        assert!(!config.registry_checks);
+        assert!(!config.registry_newcomer);
+    }
+
+    #[test]
+    fn parsed_dependencies_are_deterministic_and_registry_shaped() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package.json",
+            r#"{"dependencies":{"@acme/private":"^2.0.0","left-pad":"1.3.0"}}"#,
+        );
+        repo.write(
+            "pyproject.toml",
+            "[project]\ndependencies = [\"requests>=2.31\"]\n",
+        );
+
+        let first = parse_dependencies(repo.path()).expect("dependencies parse");
+        let second = parse_dependencies(repo.path()).expect("dependencies parse twice");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first,
+            vec![
+                ParsedDependency {
+                    name: "@acme/private".to_owned(),
+                    version_req: "^2.0.0".to_owned(),
+                    ecosystem: Ecosystem::Npm,
+                    manifest_path: vibescan_types::RepoPath("package.json".to_owned()),
+                    is_scoped: true,
+                },
+                ParsedDependency {
+                    name: "left-pad".to_owned(),
+                    version_req: "1.3.0".to_owned(),
+                    ecosystem: Ecosystem::Npm,
+                    manifest_path: vibescan_types::RepoPath("package.json".to_owned()),
+                    is_scoped: false,
+                },
+                ParsedDependency {
+                    name: "requests".to_owned(),
+                    version_req: ">=2.31".to_owned(),
+                    ecosystem: Ecosystem::PyPi,
+                    manifest_path: vibescan_types::RepoPath("pyproject.toml".to_owned()),
+                    is_scoped: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parsed_dependencies_include_exact_npm_and_python_lock_versions() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package-lock.json",
+            r#"{"lockfileVersion":3,"packages":{"":{"name":"fixture"},"node_modules/left-pad":{"version":"1.3.0"}}}"#,
+        );
+        repo.write(
+            "poetry.lock",
+            "[[package]]\nname = \"requests\"\nversion = \"2.32.0\"\n",
+        );
+
+        let dependencies = parse_dependencies(repo.path()).expect("lockfiles parse");
+
+        assert_eq!(
+            dependencies,
+            vec![
+                ParsedDependency {
+                    name: "left-pad".to_owned(),
+                    version_req: "1.3.0".to_owned(),
+                    ecosystem: Ecosystem::Npm,
+                    manifest_path: vibescan_types::RepoPath("package-lock.json".to_owned()),
+                    is_scoped: false,
+                },
+                ParsedDependency {
+                    name: "requests".to_owned(),
+                    version_req: "2.32.0".to_owned(),
+                    ecosystem: Ecosystem::PyPi,
+                    manifest_path: vibescan_types::RepoPath("poetry.lock".to_owned()),
+                    is_scoped: false,
+                },
+            ]
+        );
+    }
+
+    #[cfg(feature = "registry")]
+    #[test]
+    fn structurally_invalid_dependencies_are_excluded_from_registry_inputs() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package.json",
+            r#"{"dependencies":{"INVALID PACKAGE":"1.0.0","empty-version":"","valid-package":"1.0.0"}}"#,
+        );
+
+        let scan = scan_dependency_integrity(repo.path()).expect("dependency scan runs");
+        let eligible = registry_eligible_dependencies(&scan.findings, scan.dependencies);
+
+        assert_eq!(scan.findings.len(), 2);
+        assert!(scan.findings.iter().all(|finding| matches!(
+            finding.evidence,
+            Evidence::Dependency {
+                reason: vibescan_types::DependencyIntegrityReason::InvalidPackageName
+                    | vibescan_types::DependencyIntegrityReason::EmptyVersionSpecifier,
+                ..
+            }
+        )));
+        assert_eq!(eligible.len(), 1);
+        assert_eq!(eligible[0].name, "valid-package");
+    }
+
+    #[cfg(feature = "registry")]
+    #[test]
+    fn invalid_package_is_never_sent_and_remains_one_localstatic_finding() {
+        use std::cell::Cell;
+
+        struct CountingRegistry {
+            calls: Cell<u64>,
+        }
+
+        impl vibescan_registry::RegistrySource for CountingRegistry {
+            fn resolves(
+                &self,
+                _dependency: &ParsedDependency,
+            ) -> Result<vibescan_registry::RegistryResolution, vibescan_registry::RegistryError>
+            {
+                self.calls.set(self.calls.get() + 1);
+                Ok(vibescan_registry::RegistryResolution {
+                    exists: false,
+                    request_made: true,
+                })
+            }
+
+            fn advisories_for(
+                &self,
+                ecosystem: Ecosystem,
+            ) -> Result<vibescan_registry::AdvisorySet, vibescan_registry::RegistryError>
+            {
+                self.calls.set(self.calls.get() + 1);
+                Ok(vibescan_registry::AdvisorySet::empty(ecosystem))
+            }
+        }
+
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(
+            "package.json",
+            r#"{"dependencies":{"INVALID PACKAGE":"1.0.0"}}"#,
+        );
+        let scan = scan_dependency_integrity(repo.path()).expect("dependency scan runs");
+        let eligible = registry_eligible_dependencies(&scan.findings, scan.dependencies);
+        let source = CountingRegistry {
+            calls: Cell::new(0),
+        };
+        let registry_output = run_registry_checks(
+            &source,
+            &RegistryCheckInput {
+                dependencies: eligible,
+                private_registry_ecosystems: BTreeSet::new(),
+            },
+        )
+        .expect("empty registry input runs");
+
+        assert_eq!(source.calls.get(), 0);
+        assert_eq!(scan.findings.len(), 1);
+        assert!(registry_output.findings.is_empty());
+        assert!(registry_output.actions.is_empty());
+    }
+
+    #[cfg(feature = "registry")]
+    #[test]
+    fn repository_alternate_registry_configuration_activates_precision_guard() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        repo.write(".npmrc", "registry=https://npm.internal.example/\n");
+        repo.write(
+            "pyproject.toml",
+            "[project]\ndependencies = [\"internal-python==1.0.0\"]\n[[tool.poetry.source]]\nname = \"private\"\nurl = \"https://python.internal.example/simple\"\n",
+        );
+
+        let ecosystems =
+            private_registry_ecosystems(repo.path()).expect("private registries parse");
+
+        assert_eq!(
+            ecosystems,
+            BTreeSet::from([Ecosystem::Npm, Ecosystem::PyPi])
+        );
+    }
+
+    #[cfg(not(feature = "registry"))]
+    #[test]
+    fn registry_request_without_feature_is_a_clear_operational_error() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+
+        let error = scan(
+            repo.path(),
+            ScanConfig {
+                registry_checks: true,
+                ..ScanConfig::default()
+            },
+        )
+        .expect_err("feature-off registry request rejected");
+
+        assert!(matches!(error, CoreError::RegistryFeatureUnavailable));
+        assert!(error.to_string().contains("without registry support"));
+    }
+
+    #[cfg(feature = "registry")]
+    #[test]
+    fn registry_runtime_opt_in_is_auditable_and_does_not_enable_rls() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                registry_checks: true,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("F1 registry plumbing runs without live egress");
+
+        assert!(result.scope.network.enabled);
+        assert!(result.scope.network.registry_checks);
+        assert!(!result.scope.network.registry_newcomer);
+        assert!(!result.scope.network.tier0_read_probe);
+        assert!(!result.scope.network.tier1_introspection);
+        assert!(result.scope.network.actions.is_empty());
+        assert!(result.scope.network.registry_name_egress.is_empty());
     }
 
     #[test]
@@ -3696,7 +4264,7 @@ mod tests {
 
     #[test]
     fn localstatic_dependency_boundary_excludes_network_crates() {
-        if cfg!(feature = "network") {
+        if cfg!(feature = "network") || cfg!(feature = "registry") {
             return;
         }
 
@@ -4055,6 +4623,9 @@ mod tests {
                     enabled: false,
                     tier0_read_probe: false,
                     tier1_introspection: false,
+                    registry_checks: false,
+                    registry_newcomer: false,
+                    registry_name_egress: Vec::new(),
                     actions: Vec::new(),
                 },
                 warnings: Vec::new(),

@@ -73,7 +73,9 @@ deferred, and contradictory items separately.
   policy predicates. Neither may contain returned application-row data.
 - Every finding must have stable identity, reproducible evidence, accurate
   scope/provenance, confidence, and concrete remediation.
-- Keep the seven-crate DAG. Do not add an eighth crate in v1.
+- Keep the architecture-approved crate DAG. Buildable v1 has seven crates;
+  post-v1 Track F adds `vibescan-registry` as the eighth. Do not add a ninth
+  crate or any edge beyond the architecture-approved set.
 - Use pure-Rust components: gitoxide/gix APIs, Rust `regex`, and rustls-backed
   transport. Do not introduce libgit2, C regex engines, OpenSSL-linked clients,
   or another C toolchain dependency.
@@ -88,11 +90,13 @@ Allowed workspace edges are:
 ```text
 vibescan-cli -> vibescan-core
 vibescan-core -> vibescan-git
+vibescan-core -> vibescan-registry (optional, `registry` feature)
 vibescan-core -> vibescan-secrets
 vibescan-core -> vibescan-supabase
 vibescan-core -> vibescan-report
 vibescan-core -> vibescan-types
 vibescan-git -> vibescan-types
+vibescan-registry -> vibescan-types
 vibescan-secrets -> vibescan-types
 vibescan-supabase -> vibescan-types
 vibescan-report -> vibescan-types
@@ -106,9 +110,11 @@ another architecture-approved top-level harness.
 - `vibescan-types`: shared data vocabulary and light traits only.
 - `vibescan-git`: LocalStatic repository discovery, working-tree/history
   collection, content handling, location classification, and provenance.
+- `vibescan-registry`: the optional Registry egress class and the nearest
+  parent of its rustls HTTP transport; no repository scanning or orchestration.
 - `vibescan-secrets`: generic matching substrate only.
-- `vibescan-supabase`: Supabase key semantics and the only optional transport
-  boundary.
+- `vibescan-supabase`: Supabase key semantics and the optional Supabase-target
+  transport boundary.
 - `vibescan-core`: configuration, orchestration, dependency checks,
   coalescing, correlation, baselines, and severity-gate policy.
 - `vibescan-report`: deterministic rendering only.
@@ -169,9 +175,11 @@ deliberately; do not silently replace Supabase rules or safety allowlists.
 
 ## Network and external-service policy
 
-The `network` feature may expose transport only through
-`vibescan-supabase`. Both the feature and an explicit user action are required
-to execute a request.
+The `network` feature may expose Supabase transport only through
+`vibescan-supabase`. The independent `registry` feature may expose public
+package-registry transport only through `vibescan-registry`. Each requires its
+own explicit user action to execute a request; enabling one must not enable the
+other.
 
 For Tier 0:
 
@@ -190,11 +198,11 @@ Use mocks for automated Network tests. Do not run live probes, real registry
 queries, or credentialed tests unless the user explicitly authorizes that
 specific external action and target. Never use shared infrastructure.
 
-Architecture sections 1–2 limit network actions to the user's Supabase assets,
-while section 11 proposes optional registry/OSV lookups. Do not implement
-third-party egress until the architecture explicitly resolves that conflict or
-the user authorizes a specification update. Preserve the offline dependency
-path in every case.
+Architecture §§11.1–11.2 and §17.5 authorize the post-v1 Registry egress class:
+package names/version requirements only, disclosed in scope, cached, failure-
+distinguishable, and off by default. Never send secrets, paths, contents,
+repository identity, or remote URLs. Preserve the offline dependency path in
+every case and keep F1/F2/F3 scope separated.
 
 Tier 1 is a staged post-v1 track and may advance only under the explicit Tier E
 instruction set; do not pull later E tasks forward merely because the catalog
@@ -210,8 +218,12 @@ architecture, milestone, dependency, feature, or release change complete, run:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
 cargo test --workspace --locked
 cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
 bash scripts/check-network-boundary.sh
 git diff --check
 ```
@@ -227,6 +239,8 @@ For focused changes also run the owning tests:
 - detection/rules: `cargo test -p vibescan-secrets --locked`
 - Supabase/network: default plus
   `cargo test -p vibescan-supabase --features network --locked`
+- Registry: `cargo test -p vibescan-registry --locked` plus
+  `cargo test -p vibescan-registry --features transport --locked`
 - orchestration/correlation: `cargo test -p vibescan-core --locked` plus the
   network-feature variant when relevant
 - renderers: `cargo test -p vibescan-report --locked` and report snapshots

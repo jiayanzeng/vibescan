@@ -6,8 +6,10 @@ cd "$repo_root"
 
 default_metadata="$(mktemp)"
 network_metadata="$(mktemp)"
+registry_metadata="$(mktemp)"
+combined_metadata="$(mktemp)"
 metadata_error="$(mktemp)"
-trap 'rm -f "$default_metadata" "$network_metadata" "$metadata_error"' EXIT
+trap 'rm -f "$default_metadata" "$network_metadata" "$registry_metadata" "$combined_metadata" "$metadata_error"' EXIT
 
 host="$(rustc -vV | sed -n 's/^host: //p')"
 
@@ -31,6 +33,12 @@ metadata() {
 
 metadata "$default_metadata"
 metadata "$network_metadata" --features network
+metadata "$registry_metadata" --features registry
+metadata "$combined_metadata" --features network,registry
 
 python3 scripts/check-network-boundary.py --self-test
-python3 scripts/check-network-boundary.py "$default_metadata" "$network_metadata"
+python3 scripts/check-network-boundary.py \
+  "$default_metadata" \
+  "$network_metadata" \
+  "$registry_metadata" \
+  "$combined_metadata"

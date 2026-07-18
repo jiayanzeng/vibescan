@@ -95,7 +95,7 @@ fn repository_network_config_alone_never_enables_a_request() {
     let repo = TestRepo::new();
     repo.write(
         "vibescan.toml",
-        "[scan]\nhistory = false\n[network]\ntier0_read_probe = true\ntier1_introspection = true\n",
+        "[scan]\nhistory = false\n[network]\ntier0_read_probe = true\ntier1_introspection = true\nregistry_checks = true\nregistry_newcomer = true\n",
     );
 
     let output = vibescan(repo.path(), &[]);
@@ -106,6 +106,34 @@ fn repository_network_config_alone_never_enables_a_request() {
         "stdout was: {}",
         String::from_utf8_lossy(&output.stdout)
     );
+}
+
+#[cfg(feature = "registry")]
+#[test]
+fn registry_flag_does_not_enable_either_rls_tier() {
+    let repo = TestRepo::new();
+    let output = vibescan(
+        repo.path(),
+        &["--format", "json", "--registry-checks", "--no-history"],
+    );
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"registry_checks\": true"));
+    assert!(stdout.contains("\"tier0_read_probe\": false"));
+    assert!(stdout.contains("\"tier1_introspection\": false"));
+    assert!(stdout.contains("\"registry_name_egress\": []"));
+}
+
+#[cfg(not(feature = "registry"))]
+#[test]
+fn registry_flag_without_feature_is_a_clear_operational_error() {
+    let repo = TestRepo::new();
+    let output = vibescan(repo.path(), &["--registry-checks"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unexpected argument '--registry-checks'"));
 }
 
 #[cfg(feature = "network")]
@@ -138,6 +166,7 @@ fn tier0_flag_does_not_require_or_enable_tier1() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"tier0_read_probe\": true"));
     assert!(stdout.contains("\"tier1_introspection\": false"));
+    assert!(stdout.contains("\"registry_checks\": false"));
 }
 
 #[test]

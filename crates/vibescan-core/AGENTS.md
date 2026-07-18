@@ -58,16 +58,17 @@ explicit and tested.
 
 ## Dependency integrity
 
-Offline structural parsing must remain LocalStatic and deterministic. Registry
-existence, newcomer metadata, and advisory lookup are currently incomplete and
-would add third-party egress. Do not implement them until the architecture
-clarifies that egress, feature ownership, cache/privacy rules, and failure
-semantics. Network failure must never remove offline findings.
+Offline structural parsing must remain LocalStatic and deterministic. Track F1
+may expose parsed dependencies and orchestrate the optional
+`vibescan-registry` edge, but transport stays in that crate. F2 owns registry
+existence/advisory detections, caching, precision guards, and failure semantics;
+the newcomer heuristic remains deferred. Registry failure must never remove
+offline findings.
 
 ## Verification
 
 Use unit cases for rule predicates, cross-project negatives, stable IDs,
 coalescing, config precedence, baseline behavior, degraded scope, and exit
-codes. Use the golden corpus for end-to-end behavior. Run core tests in default
-and network modes, both workspace matrices, report snapshots when result shapes
-change, and the boundary script.
+codes. Use the golden corpus for end-to-end behavior. Run core tests in default,
+network, and registry modes, all workspace matrices, report snapshots when
+result shapes change, and the boundary script.

@@ -14,7 +14,7 @@ use vibescan_core::{
     name = "vibescan",
     version,
     about = "Scan local Supabase + Next.js apps for correlated secret and RLS risk.",
-    long_about = "vibescan runs local-first scans by default: working tree/history collection, secret detection, Supabase key classification, offline correlation, and local reporting. Tier 0 RLS reads and Tier 1 credentialed catalog introspection are available only in builds compiled with the network feature; each requires its own explicit opt-in flag."
+    long_about = "vibescan runs local-first scans by default: working tree/history collection, secret detection, Supabase key classification, offline correlation, and local reporting. Tier 0 RLS reads and Tier 1 credentialed catalog introspection require the network feature and separate opt-ins. Public package-registry checks require the independent registry feature and --registry-checks."
 )]
 struct Cli {
     /// Target repository path.
@@ -74,6 +74,11 @@ struct Cli {
     #[cfg(feature = "network")]
     #[arg(long)]
     rls_tier1_introspect: bool,
+
+    /// Opt in to public package-registry checks. Package names may leave the machine and are disclosed in scan scope.
+    #[cfg(feature = "registry")]
+    #[arg(long)]
+    registry_checks: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -154,6 +159,8 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     }
     config.tier0_read_probe = false;
     config.tier1_introspection = false;
+    config.registry_checks = false;
+    config.registry_newcomer = false;
     #[cfg(feature = "network")]
     {
         apply_network_runtime_options(
@@ -164,6 +171,8 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         )
         .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
     }
+    #[cfg(feature = "registry")]
+    apply_registry_runtime_options(&mut config, cli.registry_checks);
     if let Some(severity_gate) = cli.severity_gate {
         config.severity_gate = severity_gate.into();
     }
@@ -181,6 +190,12 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     print!("{output}");
 
     Ok(code as u8)
+}
+
+#[cfg(feature = "registry")]
+fn apply_registry_runtime_options(config: &mut ScanConfig, registry_checks: bool) {
+    config.registry_checks = registry_checks;
+    config.registry_newcomer = false;
 }
 
 #[cfg(feature = "network")]
@@ -211,12 +226,14 @@ mod tests {
             .expect("Tier 0 does not require a DB credential");
         assert!(tier0.tier0_read_probe);
         assert!(!tier0.tier1_introspection);
+        assert!(!tier0.registry_checks);
 
         let mut tier1 = ScanConfig::default();
         apply_network_runtime_options(&mut tier1, false, true, true)
             .expect("Tier 1 option applies");
         assert!(!tier1.tier0_read_probe);
         assert!(tier1.tier1_introspection);
+        assert!(!tier1.registry_checks);
     }
 
     #[test]
@@ -225,5 +242,22 @@ mod tests {
             .expect_err("missing credential rejected");
 
         assert!(error.contains(TIER1_DB_URL_ENV));
+    }
+}
+
+#[cfg(all(test, feature = "registry"))]
+mod registry_tests {
+    use super::*;
+
+    #[test]
+    fn registry_runtime_opt_in_is_independent_of_both_rls_tiers() {
+        let mut config = ScanConfig::default();
+
+        apply_registry_runtime_options(&mut config, true);
+
+        assert!(config.registry_checks);
+        assert!(!config.registry_newcomer);
+        assert!(!config.tier0_read_probe);
+        assert!(!config.tier1_introspection);
     }
 }

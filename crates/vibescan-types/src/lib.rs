@@ -266,6 +266,24 @@ pub enum DependencyIntegrityReason {
     KnownMalicious,
 }
 
+/// Registry ecosystem for a parsed manifest dependency.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ecosystem {
+    Npm,
+    PyPi,
+}
+
+/// One registry-shaped dependency declaration harvested from a manifest.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct ParsedDependency {
+    pub name: String,
+    pub version_req: String,
+    pub ecosystem: Ecosystem,
+    pub manifest_path: RepoPath,
+    pub is_scoped: bool,
+}
+
 /// Identifier for declarative correlation rules.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct CorrelationRuleId(pub String);
@@ -323,7 +341,20 @@ pub struct NetworkScope {
     pub tier0_read_probe: bool,
     pub tier1_introspection: bool,
     #[serde(default)]
+    pub registry_checks: bool,
+    #[serde(default)]
+    pub registry_newcomer: bool,
+    #[serde(default)]
+    pub registry_name_egress: Vec<RegistryNameEgress>,
+    #[serde(default)]
     pub actions: Vec<NetworkActionAudit>,
+}
+
+/// Disclosure of package-name egress grouped by ecosystem and destination.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct RegistryNameEgress {
+    pub ecosystem: Ecosystem,
+    pub host: String,
 }
 
 /// Redacted, shareable evidence for one attempted Network request.
@@ -333,6 +364,8 @@ pub struct NetworkActionAudit {
     pub intent: NetworkActionIntent,
     pub endpoint: String,
     pub table: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
     pub status: Option<u16>,
     pub outcome: NetworkActionOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -346,6 +379,8 @@ pub enum NetworkActionKind {
     RootEnumeration,
     TableRead,
     CatalogIntrospection,
+    RegistryExistence,
+    RegistryAdvisory,
 }
 
 /// Read-only request intent recorded without headers or credentials.
@@ -370,6 +405,8 @@ pub enum NetworkActionOutcome {
     InvalidResponse,
     TransportError,
     CatalogRead,
+    RegistryResolved,
+    AdvisoryFetched,
 }
 
 /// Reportable limitation in scan coverage.
@@ -497,7 +534,56 @@ mod tests {
         let decoded: NetworkScope =
             serde_json::from_str(encoded).expect("older network scope deserializes");
 
+        assert!(!decoded.registry_checks);
+        assert!(!decoded.registry_newcomer);
+        assert!(decoded.registry_name_egress.is_empty());
         assert!(decoded.actions.is_empty());
+    }
+
+    #[test]
+    fn parsed_dependency_and_registry_scope_round_trip() {
+        let dependency = ParsedDependency {
+            name: "@vibescan/example".to_owned(),
+            version_req: "^1.2.3".to_owned(),
+            ecosystem: Ecosystem::Npm,
+            manifest_path: RepoPath("apps/web/package.json".to_owned()),
+            is_scoped: true,
+        };
+        let scope = NetworkScope {
+            enabled: true,
+            tier0_read_probe: false,
+            tier1_introspection: false,
+            registry_checks: true,
+            registry_newcomer: false,
+            registry_name_egress: vec![RegistryNameEgress {
+                ecosystem: Ecosystem::Npm,
+                host: "registry.npmjs.org".to_owned(),
+            }],
+            actions: vec![NetworkActionAudit {
+                kind: NetworkActionKind::RegistryExistence,
+                intent: NetworkActionIntent::Get,
+                endpoint: "registry.npmjs.org".to_owned(),
+                table: None,
+                package: Some("@vibescan/example@^1.2.3".to_owned()),
+                status: Some(200),
+                outcome: NetworkActionOutcome::RegistryResolved,
+                observed_row_count: None,
+            }],
+        };
+
+        let dependency_json =
+            serde_json::to_string(&dependency).expect("parsed dependency serializes");
+        let scope_json = serde_json::to_string(&scope).expect("registry scope serializes");
+
+        assert_eq!(
+            serde_json::from_str::<ParsedDependency>(&dependency_json)
+                .expect("parsed dependency deserializes"),
+            dependency
+        );
+        assert_eq!(
+            serde_json::from_str::<NetworkScope>(&scope_json).expect("registry scope deserializes"),
+            scope
+        );
     }
 
     #[test]
@@ -531,6 +617,7 @@ mod tests {
             intent: NetworkActionIntent::Select,
             endpoint: "db.abcdefghijklmnopqrst.supabase.co:5432".to_owned(),
             table: Some("profiles".to_owned()),
+            package: None,
             status: None,
             outcome: NetworkActionOutcome::CatalogRead,
             observed_row_count: None,

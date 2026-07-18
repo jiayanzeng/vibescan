@@ -79,11 +79,13 @@ The CI boundary gate is:
 bash scripts/check-network-boundary.sh
 ```
 
-It validates the exact seven-crate workspace DAG across normal, build, dev,
-target, optional, and feature-activated dependencies. Separate assertions keep
-default builds transport-free and allow `--features network` transport only
-through `vibescan-supabase`; synthetic negative controls exercise forbidden
-workspace edges and LocalStatic transport leakage on every run.
+It validates the exact eight-crate post-v1 workspace DAG across normal, build,
+dev, target, optional, and feature-activated dependencies. Separate assertions
+keep default builds transport-free, allow `--features network` transport only
+through `vibescan-supabase`, and allow the independent `--features registry`
+transport only through `vibescan-registry`. Synthetic negative controls exercise
+forbidden workspace edges, unauthorized transport parents, feature isolation,
+and LocalStatic transport leakage on every run.
 
 ## Usage
 
@@ -154,6 +156,28 @@ goldens run through an injected catalog under `--features network` and never
 contact a live database. Architecture §17.8 defers the noisy user-writable-
 metadata policy heuristic; this pass does not infer it by substring matching.
 
+Build with the independent Registry-class plumbing and explicitly opt in:
+
+```sh
+cargo run -p vibescan-cli --features registry -- /path/to/repo --registry-checks
+```
+
+Track F1 establishes the parsed-dependency flow, rustls transport boundary,
+scope disclosure, and mockable registry source. Track F2 adds two confirmed
+checks: exact resolved versions are matched locally against a 24-hour cached
+OSV ecosystem snapshot (Critical, no package-name egress), and public unscoped
+names are resolved against npm or PyPI (High on a real 404, with name egress
+recorded in scan scope). Existence results are cached for 24 hours. Scoped npm
+names and ecosystems configured for alternate/private registries are excluded
+from the public-404 rule. Outages, rate limits, and invalid responses produce
+coverage warnings, never nonexistent-package findings. The flag never enables
+either Supabase RLS tier.
+
+For confirmed OSV matching, vibescan uses exact versions from npm and supported
+Python lockfiles, plus exact manifest pins. A loose version range is not called
+known-malicious without a resolved version. The optional live OSV API and the
+noisy newcomer heuristic remain disabled/deferred.
+
 The process exit code is controlled by `--severity-gate`, which defaults to
 `high`.
 
@@ -181,6 +205,8 @@ path = "config/custom-rules.toml"
 [network]
 tier0_read_probe = false
 tier1_introspection = false
+registry_checks = false
+registry_newcomer = false
 ```
 
 Config ignore paths are fed through the same override layer as git ignores. They
@@ -193,10 +219,11 @@ preserved. Custom rule files are additive: embedded rules and safety allowlists
 remain active, custom rules and allowlists append, and duplicate rule IDs are
 rejected instead of replacing a shipped rule.
 
-Repository configuration cannot enable Network work by itself. Even if either
-network setting is `true`, the current process remains LocalStatic unless a
-`network`-enabled binary is invoked with the corresponding explicit
-`--rls-tier0-read-probe` or `--rls-tier1-introspect` flag.
+Repository configuration cannot enable egress by itself. Even if a network
+setting is `true`, the current process remains LocalStatic unless a feature-
+enabled binary is invoked with the corresponding explicit
+`--rls-tier0-read-probe`, `--rls-tier1-introspect`, or `--registry-checks` flag.
+The newcomer setting remains inert because that heuristic is deferred.
 
 ## Repository Notes
 

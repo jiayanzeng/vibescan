@@ -3,6 +3,7 @@ members = [
     "crates/vibescan-cli",
     "crates/vibescan-core",
     "crates/vibescan-git",
+    "crates/vibescan-registry",
     "crates/vibescan-report",
     "crates/vibescan-secrets",
     "crates/vibescan-supabase",
@@ -35,6 +36,7 @@ sha2 = "0.10.9"
 toml = "0.9.12"
 vibescan-core = { path = "crates/vibescan-core" }
 vibescan-git = { path = "crates/vibescan-git" }
+vibescan-registry = { path = "crates/vibescan-registry" }
 vibescan-report = { path = "crates/vibescan-report" }
 vibescan-secrets = { path = "crates/vibescan-secrets" }
 vibescan-supabase = { path = "crates/vibescan-supabase" }

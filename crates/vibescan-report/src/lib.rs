@@ -5,9 +5,9 @@
 
 use serde_json::{Value, json};
 use vibescan_types::{
-    Category, Confidence, Evidence, Finding, HistoryScope, Location, NetworkActionAudit,
-    NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, Provenance, ScanResult,
-    ScanStats, ScopeWarning, Severity,
+    Category, Confidence, Ecosystem, Evidence, Finding, HistoryScope, Location, NetworkActionAudit,
+    NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, Provenance, RegistryNameEgress,
+    ScanResult, ScanStats, ScopeWarning, Severity,
 };
 
 /// Output format supported by the report crate.
@@ -92,6 +92,17 @@ pub fn render_tty(result: &ScanResult, style: TtyStyle) -> String {
             push_line(
                 &mut output,
                 &format!("  - {}", network_action_summary(action)),
+            );
+        }
+    }
+
+    if !result.scope.network.registry_name_egress.is_empty() {
+        push_line(&mut output, "");
+        push_line(&mut output, "registry package-name egress:");
+        for disclosure in &result.scope.network.registry_name_egress {
+            push_line(
+                &mut output,
+                &format!("  - {}", registry_egress_summary(disclosure)),
             );
         }
     }
@@ -210,6 +221,17 @@ pub fn render_html(result: &ScanResult) -> String {
             html.push_str(&format!(
                 "<li class=\"mono\">{}</li>",
                 escape_html(&network_action_summary(action))
+            ));
+        }
+        html.push_str("</ul></section>");
+    }
+
+    if !result.scope.network.registry_name_egress.is_empty() {
+        html.push_str("<section><h2>Registry package-name egress</h2><ul>");
+        for disclosure in &result.scope.network.registry_name_egress {
+            html.push_str(&format!(
+                "<li class=\"mono\">{}</li>",
+                escape_html(&registry_egress_summary(disclosure))
             ));
         }
         html.push_str("</ul></section>");
@@ -352,6 +374,9 @@ fn sarif_value(result: &ScanResult) -> Value {
                     "history": history_summary(&result.scope.history),
                     "networkEnabled": result.scope.network.enabled,
                     "networkActions": &result.scope.network.actions,
+                    "registryChecks": result.scope.network.registry_checks,
+                    "registryNewcomer": result.scope.network.registry_newcomer,
+                    "registryNameEgress": &result.scope.network.registry_name_egress,
                     "scanStats": scan_stats_value(&result.stats),
                     "warnings": result.scope.warnings.iter().map(warning_summary).collect::<Vec<_>>(),
                 }
@@ -560,11 +585,18 @@ fn network_action_summary(action: &NetworkActionAudit) -> String {
         NetworkActionKind::RootEnumeration => "root enumeration",
         NetworkActionKind::TableRead => "table read",
         NetworkActionKind::CatalogIntrospection => "catalog introspection",
+        NetworkActionKind::RegistryExistence => "registry existence",
+        NetworkActionKind::RegistryAdvisory => "registry advisory",
     };
     let table = action
         .table
         .as_deref()
         .map(|table| format!(" for table {table}"))
+        .unwrap_or_default();
+    let package = action
+        .package
+        .as_deref()
+        .map(|package| format!(" for package {package}"))
         .unwrap_or_default();
     let status = action
         .status
@@ -575,7 +607,7 @@ fn network_action_summary(action: &NetworkActionAudit) -> String {
         .map(|count| format!("; observed {count} row(s)"))
         .unwrap_or_default();
     format!(
-        "{intent} {kind}{table} at {} -> {}{status}{rows}",
+        "{intent} {kind}{table}{package} at {} -> {}{status}{rows}",
         action.endpoint,
         network_action_outcome_name(action.outcome)
     )
@@ -593,7 +625,17 @@ fn network_action_outcome_name(outcome: NetworkActionOutcome) -> &'static str {
         NetworkActionOutcome::InvalidResponse => "invalid response",
         NetworkActionOutcome::TransportError => "transport error",
         NetworkActionOutcome::CatalogRead => "catalog read",
+        NetworkActionOutcome::RegistryResolved => "registry resolved",
+        NetworkActionOutcome::AdvisoryFetched => "advisory fetched",
     }
+}
+
+fn registry_egress_summary(disclosure: &RegistryNameEgress) -> String {
+    let ecosystem = match disclosure.ecosystem {
+        Ecosystem::Npm => "npm",
+        Ecosystem::PyPi => "PyPI",
+    };
+    format!("{ecosystem} package names sent to {}", disclosure.host)
 }
 
 fn history_summary(history: &HistoryScope) -> String {
@@ -805,6 +847,29 @@ mod tests {
         assert_eq!(exit_code(&only_scope_evidence, Severity::Info), 0);
     }
 
+    #[test]
+    fn dependency_evidence_names_both_f2_reasons() {
+        for (reason, expected) in [
+            (
+                vibescan_types::DependencyIntegrityReason::KnownMalicious,
+                "KnownMalicious",
+            ),
+            (
+                vibescan_types::DependencyIntegrityReason::NonexistentPackage,
+                "NonexistentPackage",
+            ),
+        ] {
+            let summary = evidence_summary(&Evidence::Dependency {
+                package: "fixture@1.0.0".to_owned(),
+                manifest_path: RepoPath("package.json".to_owned()),
+                reason,
+            });
+
+            assert!(summary.contains(expected));
+            assert!(summary.contains("package.json"));
+        }
+    }
+
     fn sample_network_action() -> NetworkActionAudit {
         NetworkActionAudit {
             kind: NetworkActionKind::TableRead,
@@ -812,6 +877,7 @@ mod tests {
             endpoint: "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1"
                 .to_owned(),
             table: Some("profiles".to_owned()),
+            package: None,
             status: Some(403),
             outcome: NetworkActionOutcome::Protected,
             observed_row_count: None,
@@ -869,6 +935,9 @@ mod tests {
                     enabled: false,
                     tier0_read_probe: false,
                     tier1_introspection: false,
+                    registry_checks: false,
+                    registry_newcomer: false,
+                    registry_name_egress: Vec::new(),
                     actions: Vec::new(),
                 },
                 warnings: vec![ScopeWarning::Other {
@@ -893,6 +962,9 @@ mod tests {
                     enabled: false,
                     tier0_read_probe: false,
                     tier1_introspection: false,
+                    registry_checks: false,
+                    registry_newcomer: false,
+                    registry_name_egress: Vec::new(),
                     actions: Vec::new(),
                 },
                 warnings: Vec::new(),

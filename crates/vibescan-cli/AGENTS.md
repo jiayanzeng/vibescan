@@ -17,8 +17,9 @@ Supabase keys, correlate findings, render format internals, or implement HTTP.
   must not erase TOML choices.
 - Resolve relative config paths in core against the repository root; do not
   reinterpret them against the caller's current directory.
-- Keep Network arguments compiled behind `network` and visibly opt-in. No
-  config or CLI default may silently enable a request.
+- Keep Supabase Network arguments compiled behind `network` and Registry
+  arguments behind the independent `registry` feature. Every egress class is
+  visibly and separately opt-in; no config or CLI default may enable a request.
 - Help text must distinguish default LocalStatic behavior from optional
   Network behavior and must not overclaim write exposure.
 - Keep output clean: report on stdout, diagnostics on stderr. Never print raw
@@ -27,5 +28,5 @@ Supabase keys, correlate findings, render format internals, or implement HTTP.
   and 2 for operational/configuration failure.
 
 Add CLI-level tests for precedence and feature-gated flag availability when
-changing arguments. Run package/default/network workspace tests and the
-boundary check.
+changing arguments. Run package/default/network/registry workspace tests and
+the boundary check.
