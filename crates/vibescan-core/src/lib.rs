@@ -19,9 +19,11 @@ use vibescan_report::{ReportFormat, TtyStyle, render, render_tty};
 use vibescan_secrets::Detector;
 use vibescan_supabase::SupabaseClassifier;
 #[cfg(feature = "network")]
-use vibescan_supabase::Tier0RlsProbeInput;
+use vibescan_supabase::{Tier0RlsProbeInput, Tier1IntrospectInput};
 #[cfg(feature = "network")]
-use vibescan_supabase::probe_tier0_read;
+use vibescan_supabase::{introspect_tier1, probe_tier0_read, project_from_db_url};
+#[cfg(feature = "network")]
+use vibescan_types::RepoPath;
 use vibescan_types::{
     Category, Confidence, ContentId, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope,
     Location, LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats,
@@ -33,6 +35,9 @@ pub use vibescan_types::Severity;
 
 /// Current crate version used in scan results.
 pub const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Env-only source for the Tier 1 database connection string.
+pub const TIER1_DB_URL_ENV: &str = "VIBESCAN_SUPABASE_DB_URL";
 
 /// Runtime scan configuration.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -46,6 +51,7 @@ pub struct ScanConfig {
     pub baseline_path: Option<PathBuf>,
     pub custom_rules_path: Option<PathBuf>,
     pub tier0_read_probe: bool,
+    pub tier1_introspection: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,6 +91,7 @@ impl Default for ScanConfig {
             baseline_path: None,
             custom_rules_path: None,
             tier0_read_probe: false,
+            tier1_introspection: false,
         }
     }
 }
@@ -152,11 +159,13 @@ impl ScanConfig {
         // Repository config may disable Network work, but only an explicit
         // runtime action may enable it. A configured `true` is intentionally
         // inert until the CLI or another caller confirms the action.
-        if parsed
-            .network
-            .is_some_and(|network| network.tier0_read_probe == Some(false))
-        {
-            self.tier0_read_probe = false;
+        if let Some(network) = parsed.network {
+            if network.tier0_read_probe == Some(false) {
+                self.tier0_read_probe = false;
+            }
+            if network.tier1_introspection == Some(false) {
+                self.tier1_introspection = false;
+            }
         }
 
         Ok(())
@@ -221,6 +230,7 @@ struct RulesSection {
 #[derive(Debug, Deserialize)]
 struct NetworkSection {
     tier0_read_probe: Option<bool>,
+    tier1_introspection: Option<bool>,
 }
 
 /// Run the offline scan pipeline.
@@ -229,7 +239,6 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     let started_at = Timestamp::now().to_string();
     let target_path = target.as_ref();
     let baseline = Baseline::load(config.baseline_path.as_deref())?;
-
     let walk = collect_repository(
         target_path,
         WalkOptions {
@@ -285,12 +294,19 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
     findings.extend(resolve_generic_candidates(&candidates));
     findings.extend(scan_dependency_integrity(&walk.repo_root)?);
 
+    #[cfg(feature = "network")]
+    let network_associations = (config.tier0_read_probe || config.tier1_introspection).then(|| {
+        let api_references = harvest_api_references(&units);
+        associate_api_references(&api_references, &classified_keys)
+    });
+
     if config.tier0_read_probe {
         #[cfg(feature = "network")]
         {
-            let api_references = harvest_api_references(&units);
-            let associations = associate_api_references(&api_references, &classified_keys);
-            warnings.extend(associations.warnings);
+            let associations = network_associations
+                .as_ref()
+                .expect("network associations computed for Tier 0");
+            warnings.extend(associations.warnings.iter().cloned());
             for input in tier0_probe_inputs(&classified_keys, &associations.tables_by_project) {
                 match probe_tier0_read(&input) {
                     Ok(mut output) => {
@@ -317,6 +333,44 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
         });
     }
 
+    if config.tier1_introspection {
+        #[cfg(feature = "network")]
+        {
+            let db_url =
+                std::env::var(TIER1_DB_URL_ENV).map_err(|_| CoreError::MissingTier1Credential)?;
+            let project = project_from_db_url(&db_url).map_err(CoreError::Tier1)?;
+            let associations = network_associations
+                .as_ref()
+                .expect("network associations computed for Tier 1");
+            let normalized_project = normalized_project_url(&project.url);
+            let input = Tier1IntrospectInput {
+                credential_location: tier1_credential_location(),
+                candidate_tables: associations
+                    .tables_by_project
+                    .get(&normalized_project)
+                    .cloned()
+                    .unwrap_or_default(),
+                project,
+                db_url,
+            };
+            let mut output = introspect_tier1(&input).map_err(CoreError::Tier1)?;
+            findings.append(&mut output.findings);
+            network_actions.append(&mut output.actions);
+            warnings.extend(
+                output
+                    .warnings
+                    .into_iter()
+                    .map(|warning| ScopeWarning::Other {
+                        message: warning.message(),
+                    }),
+            );
+        }
+        #[cfg(not(feature = "network"))]
+        warnings.push(ScopeWarning::Other {
+            message: "Tier 1 RLS introspection requested but this binary was built without the network feature".to_owned(),
+        });
+    }
+
     let mut findings = coalesce_findings(findings);
     findings.extend(correlate_findings(&findings));
 
@@ -339,9 +393,10 @@ pub fn scan(target: impl AsRef<Path>, config: ScanConfig) -> Result<ScanResult, 
             working_tree: config.include_working_tree,
             history: history_scope(config.include_history, config.max_commits, &walk.history),
             network: NetworkScope {
-                enabled: config.tier0_read_probe && cfg!(feature = "network"),
+                enabled: (config.tier0_read_probe || config.tier1_introspection)
+                    && cfg!(feature = "network"),
                 tier0_read_probe: config.tier0_read_probe && cfg!(feature = "network"),
-                tier1_introspection: false,
+                tier1_introspection: config.tier1_introspection && cfg!(feature = "network"),
                 actions: network_actions,
             },
             warnings,
@@ -716,6 +771,17 @@ fn best_key_location(locations: &[Location]) -> Option<&Location> {
             .then_with(|| right.path.cmp(&left.path))
             .then_with(|| span_key(&right.span).cmp(&span_key(&left.span)))
     })
+}
+
+#[cfg(feature = "network")]
+fn tier1_credential_location() -> Location {
+    Location {
+        path: RepoPath("<environment:VIBESCAN_SUPABASE_DB_URL>".to_owned()),
+        span: None,
+        provenance: Provenance::WorkingTree,
+        additional_provenance: Vec::new(),
+        location_class: LocationClass::ServerOnly,
+    }
 }
 
 #[cfg_attr(not(feature = "network"), allow(dead_code))]
@@ -1865,6 +1931,8 @@ pub enum CoreError {
     Json(serde_json::Error),
     Toml(toml::de::Error),
     InvalidSeverity(String),
+    MissingTier1Credential,
+    Tier1(vibescan_supabase::IntrospectError),
 }
 
 impl fmt::Display for CoreError {
@@ -1886,6 +1954,10 @@ impl fmt::Display for CoreError {
                 formatter,
                 "invalid configured severity {value:?}; expected critical, high, medium, low, or info"
             ),
+            Self::MissingTier1Credential => formatter.write_str(
+                "Tier 1 introspection requires VIBESCAN_SUPABASE_DB_URL in the local environment",
+            ),
+            Self::Tier1(source) => write!(formatter, "Tier 1 introspection failed: {source}"),
         }
     }
 }
@@ -2433,6 +2505,19 @@ mod tests {
 
     #[cfg(feature = "network")]
     #[test]
+    fn tier1_credential_location_is_the_env_source() {
+        let location = tier1_credential_location();
+
+        assert_eq!(
+            location.path,
+            RepoPath("<environment:VIBESCAN_SUPABASE_DB_URL>".to_owned())
+        );
+        assert_eq!(location.provenance, Provenance::WorkingTree);
+        assert_eq!(location.location_class, LocationClass::ServerOnly);
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
     fn tier0_probe_inputs_dedup_same_project_and_prefer_client_location() {
         let server_candidate =
             publishable_candidate("apps/web/.env.local", LocationClass::ServerOnly);
@@ -2876,11 +2961,15 @@ mod tests {
     fn repository_config_cannot_enable_network_without_runtime_confirmation() {
         let repo = TestRepo::new();
         repo.git(["init"]);
-        repo.write("vibescan.toml", "[network]\ntier0_read_probe = true\n");
+        repo.write(
+            "vibescan.toml",
+            "[network]\ntier0_read_probe = true\ntier1_introspection = true\n",
+        );
 
         let config = ScanConfig::load(repo.path()).expect("config loads");
 
         assert!(!config.tier0_read_probe);
+        assert!(!config.tier1_introspection);
     }
 
     #[test]

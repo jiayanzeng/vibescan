@@ -335,6 +335,7 @@ pub struct NetworkActionAudit {
 pub enum NetworkActionKind {
     RootEnumeration,
     TableRead,
+    CatalogIntrospection,
 }
 
 /// Read-only request intent recorded without headers or credentials.
@@ -342,6 +343,7 @@ pub enum NetworkActionKind {
 #[serde(rename_all = "snake_case")]
 pub enum NetworkActionIntent {
     Get,
+    Select,
 }
 
 /// Redacted result of an attempted Network request.
@@ -357,6 +359,7 @@ pub enum NetworkActionOutcome {
     KeyRejected,
     InvalidResponse,
     TransportError,
+    CatalogRead,
 }
 
 /// Reportable limitation in scan coverage.

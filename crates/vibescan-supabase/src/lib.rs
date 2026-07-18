@@ -7,12 +7,15 @@
 use std::collections::BTreeSet;
 use std::fmt;
 #[cfg(feature = "network")]
+use std::sync::Mutex;
+#[cfg(feature = "network")]
 use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use url::Url;
 use vibescan_types::{
     CandidateKind, Category, Confidence, Evidence, Finding, FindingId, Location,
     NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome,
@@ -81,6 +84,368 @@ pub struct Tier0RlsProbeOutput {
     pub findings: Vec<Finding>,
     pub warnings: Vec<Tier0RlsProbeWarning>,
     pub actions: Vec<NetworkActionAudit>,
+}
+
+/// Inputs for opt-in, credentialed Tier 1 catalog introspection.
+#[derive(Clone, Eq, PartialEq)]
+pub struct Tier1IntrospectInput {
+    pub project: SupabaseProject,
+    pub db_url: String,
+    pub credential_location: Location,
+    pub candidate_tables: BTreeSet<String>,
+}
+
+impl fmt::Debug for Tier1IntrospectInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Tier1IntrospectInput")
+            .field("project", &self.project)
+            .field("db_url", &"***redacted***")
+            .field("credential_location", &self.credential_location)
+            .field("candidate_tables", &self.candidate_tables)
+            .finish()
+    }
+}
+
+/// Read-only facts returned by the table catalog query.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TableRls {
+    pub schema: String,
+    pub table: String,
+    pub rowsecurity: bool,
+}
+
+/// Read-only facts returned by `pg_catalog.pg_policies`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyRow {
+    pub schema: String,
+    pub table: String,
+    pub policy: String,
+    pub command: String,
+    pub permissive: bool,
+    pub roles: Vec<String>,
+    pub using_expr: Option<String>,
+    pub check_expr: Option<String>,
+}
+
+/// Read-only facts returned by `information_schema.role_table_grants`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GrantRow {
+    pub schema: String,
+    pub table: String,
+    pub grantee: String,
+    pub privilege: String,
+}
+
+/// Catalog query category used in warnings and sanitized errors.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CatalogQueryKind {
+    TablesWithRowSecurity,
+    Policies,
+    Grants,
+}
+
+impl fmt::Display for CatalogQueryKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TablesWithRowSecurity => formatter.write_str("table RLS state"),
+            Self::Policies => formatter.write_str("table policies"),
+            Self::Grants => formatter.write_str("table grants"),
+        }
+    }
+}
+
+/// Injectable seam for Tier 1 tests. Implementations return catalog metadata,
+/// never application table contents.
+pub trait PgCatalogSource {
+    fn tables_with_rowsecurity(&self) -> Result<Vec<TableRls>, IntrospectError>;
+    fn policies_for(&self, table: &str) -> Result<Vec<PolicyRow>, IntrospectError>;
+    fn grants_for(&self, table: &str) -> Result<Vec<GrantRow>, IntrospectError>;
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Tier1IntrospectOutput {
+    pub findings: Vec<Finding>,
+    pub warnings: Vec<Tier1IntrospectWarning>,
+    pub actions: Vec<NetworkActionAudit>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Tier1IntrospectWarning {
+    CatalogQueryUnavailable {
+        host: String,
+        query: CatalogQueryKind,
+        table: Option<String>,
+    },
+}
+
+impl Tier1IntrospectWarning {
+    pub fn message(&self) -> String {
+        match self {
+            Self::CatalogQueryUnavailable { host, query, table } => {
+                let table = table
+                    .as_deref()
+                    .map(|table| format!(" for table {table}"))
+                    .unwrap_or_default();
+                format!("Tier 1 catalog {query} query failed at {host}{table}")
+            }
+        }
+    }
+}
+
+/// Sanitized Tier 1 failure. Connection strings and database error bodies are
+/// deliberately excluded because they may contain credentials or schema data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IntrospectError {
+    InvalidDatabaseUrl {
+        reason: &'static str,
+    },
+    ProjectMismatch {
+        expected: String,
+        actual: String,
+    },
+    ConnectionFailed {
+        host: String,
+    },
+    CatalogQueryFailed {
+        query: CatalogQueryKind,
+        table: Option<String>,
+    },
+}
+
+impl fmt::Display for IntrospectError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidDatabaseUrl { reason } => {
+                write!(formatter, "Tier 1 refused database URL: {reason}")
+            }
+            Self::ProjectMismatch { expected, actual } => write!(
+                formatter,
+                "Tier 1 database project mismatch: expected {expected}, got {actual}"
+            ),
+            Self::ConnectionFailed { host } => {
+                write!(formatter, "Tier 1 database connection failed for {host}")
+            }
+            Self::CatalogQueryFailed { query, table } => {
+                let table = table
+                    .as_deref()
+                    .map(|table| format!(" for table {table}"))
+                    .unwrap_or_default();
+                write!(formatter, "Tier 1 catalog {query} query failed{table}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IntrospectError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SupabaseDbTarget {
+    host: String,
+    port: u16,
+    project_ref: String,
+}
+
+impl SupabaseDbTarget {
+    fn endpoint(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+}
+
+/// Derive the owning Supabase project from a validated database URL.
+pub fn project_from_db_url(db_url: &str) -> Result<SupabaseProject, IntrospectError> {
+    let target = validate_supabase_db_url(db_url, None)?;
+    Ok(SupabaseProject {
+        ref_id: Some(target.project_ref.clone()),
+        url: format!("https://{}{}", target.project_ref, SUPABASE_URL_SUFFIX),
+    })
+}
+
+/// Run Tier 1 catalog reads through an injected source.
+///
+/// E1 establishes the transport, audit, and failure seams. The returned rows
+/// are intentionally not retained yet; E2 consumes them to emit findings.
+pub fn introspect_tier1_with_source(
+    source: &impl PgCatalogSource,
+    input: &Tier1IntrospectInput,
+) -> Result<Tier1IntrospectOutput, IntrospectError> {
+    let target = validate_supabase_db_url(&input.db_url, Some(&input.project))?;
+    let endpoint = target.endpoint();
+    let mut output = Tier1IntrospectOutput::default();
+
+    record_catalog_result(
+        &mut output,
+        &endpoint,
+        CatalogQueryKind::TablesWithRowSecurity,
+        None,
+        source.tables_with_rowsecurity(),
+    );
+
+    for table in &input.candidate_tables {
+        record_catalog_result(
+            &mut output,
+            &endpoint,
+            CatalogQueryKind::Policies,
+            Some(table),
+            source.policies_for(table),
+        );
+        record_catalog_result(
+            &mut output,
+            &endpoint,
+            CatalogQueryKind::Grants,
+            Some(table),
+            source.grants_for(table),
+        );
+    }
+
+    Ok(output)
+}
+
+fn record_catalog_result<T>(
+    output: &mut Tier1IntrospectOutput,
+    endpoint: &str,
+    query: CatalogQueryKind,
+    table: Option<&str>,
+    result: Result<Vec<T>, IntrospectError>,
+) {
+    let outcome = if result.is_ok() {
+        NetworkActionOutcome::CatalogRead
+    } else {
+        output
+            .warnings
+            .push(Tier1IntrospectWarning::CatalogQueryUnavailable {
+                host: endpoint.to_owned(),
+                query,
+                table: table.map(str::to_owned),
+            });
+        NetworkActionOutcome::TransportError
+    };
+    output.actions.push(NetworkActionAudit {
+        kind: NetworkActionKind::CatalogIntrospection,
+        intent: NetworkActionIntent::Select,
+        endpoint: endpoint.to_owned(),
+        table: table.map(str::to_owned),
+        status: None,
+        outcome,
+        observed_row_count: None,
+    });
+}
+
+fn validate_supabase_db_url(
+    db_url: &str,
+    expected_project: Option<&SupabaseProject>,
+) -> Result<SupabaseDbTarget, IntrospectError> {
+    let parsed = Url::parse(db_url).map_err(|_| IntrospectError::InvalidDatabaseUrl {
+        reason: "expected a postgres:// or postgresql:// connection URL",
+    })?;
+    if !matches!(parsed.scheme(), "postgres" | "postgresql") {
+        return Err(IntrospectError::InvalidDatabaseUrl {
+            reason: "scheme must be postgres or postgresql",
+        });
+    }
+    if parsed.fragment().is_some() {
+        return Err(IntrospectError::InvalidDatabaseUrl {
+            reason: "fragments are not allowed",
+        });
+    }
+    for (key, value) in parsed.query_pairs() {
+        if matches!(key.as_ref(), "host" | "hostaddr" | "port") {
+            return Err(IntrospectError::InvalidDatabaseUrl {
+                reason: "host and port overrides are not allowed",
+            });
+        }
+        if key == "sslmode" && !matches!(value.as_ref(), "require" | "verify-ca" | "verify-full") {
+            return Err(IntrospectError::InvalidDatabaseUrl {
+                reason: "TLS cannot be disabled or downgraded",
+            });
+        }
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or(IntrospectError::InvalidDatabaseUrl {
+            reason: "database host is required",
+        })?
+        .to_ascii_lowercase();
+    let port = parsed.port().unwrap_or(5432);
+    if !matches!(port, 5432 | 6543) {
+        return Err(IntrospectError::InvalidDatabaseUrl {
+            reason: "only Supabase database ports 5432 and 6543 are allowed",
+        });
+    }
+
+    let project_ref = if let Some(rest) = host.strip_prefix("db.") {
+        let Some(project_ref) = rest.strip_suffix(SUPABASE_URL_SUFFIX) else {
+            return Err(IntrospectError::InvalidDatabaseUrl {
+                reason: "host is not a Supabase database host",
+            });
+        };
+        if !is_valid_project_ref(project_ref) {
+            return Err(IntrospectError::InvalidDatabaseUrl {
+                reason: "database host has an invalid project reference",
+            });
+        }
+        project_ref.to_owned()
+    } else if host.ends_with(".pooler.supabase.com") && valid_pooler_host(&host) {
+        let username = parsed.username();
+        let Some((_, project_ref)) = username.rsplit_once('.') else {
+            return Err(IntrospectError::InvalidDatabaseUrl {
+                reason: "Supabase pooler username must include the project reference",
+            });
+        };
+        if !is_valid_project_ref(project_ref) {
+            return Err(IntrospectError::InvalidDatabaseUrl {
+                reason: "Supabase pooler username has an invalid project reference",
+            });
+        }
+        project_ref.to_owned()
+    } else {
+        return Err(IntrospectError::InvalidDatabaseUrl {
+            reason: "host is not a Supabase database or pooler host",
+        });
+    };
+
+    if let Some(expected) = expected_project {
+        let expected_ref = expected
+            .ref_id
+            .as_deref()
+            .or_else(|| project_ref_from_project_url(&expected.url))
+            .ok_or(IntrospectError::InvalidDatabaseUrl {
+                reason: "expected project has no valid Supabase reference",
+            })?;
+        if expected_ref != project_ref {
+            return Err(IntrospectError::ProjectMismatch {
+                expected: expected_ref.to_owned(),
+                actual: project_ref,
+            });
+        }
+    }
+
+    Ok(SupabaseDbTarget {
+        host,
+        port,
+        project_ref,
+    })
+}
+
+fn valid_pooler_host(host: &str) -> bool {
+    let prefix = host
+        .strip_suffix(".pooler.supabase.com")
+        .unwrap_or_default();
+    !prefix.is_empty()
+        && prefix.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        })
+}
+
+fn project_ref_from_project_url(url: &str) -> Option<&str> {
+    url.trim_end_matches('/')
+        .strip_prefix("https://")?
+        .strip_suffix(SUPABASE_URL_SUFFIX)
+        .filter(|project_ref| is_valid_project_ref(project_ref))
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -492,6 +857,259 @@ impl RlsHttpClient for ReqwestRlsHttpClient {
 pub fn probe_tier0_read(input: &Tier0RlsProbeInput) -> Result<Tier0RlsProbeOutput, RlsProbeError> {
     let client = ReqwestRlsHttpClient::new()?;
     probe_tier0_read_with_client(&client, input)
+}
+
+#[cfg(feature = "network")]
+const TABLE_RLS_QUERY: &str = r#"
+SELECT
+    n.nspname::text AS schema_name,
+    c.relname::text AS table_name,
+    c.relrowsecurity::text AS rowsecurity
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p')
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY n.nspname, c.relname
+"#;
+
+/// The sole production Tier 1 catalog source. Construction validates the
+/// destination before opening a socket and configures rustls certificate
+/// verification with the public WebPKI root set.
+#[cfg(feature = "network")]
+pub struct PostgresPgCatalogSource {
+    client: Mutex<postgres::Client>,
+}
+
+#[cfg(feature = "network")]
+impl fmt::Debug for PostgresPgCatalogSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PostgresPgCatalogSource")
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "network")]
+impl PostgresPgCatalogSource {
+    pub fn connect(input: &Tier1IntrospectInput) -> Result<Self, IntrospectError> {
+        let target = validate_supabase_db_url(&input.db_url, Some(&input.project))?;
+        let mut config = input.db_url.parse::<postgres::Config>().map_err(|_| {
+            IntrospectError::InvalidDatabaseUrl {
+                reason: "connection URL is not valid PostgreSQL configuration",
+            }
+        })?;
+        config
+            .ssl_mode(postgres::config::SslMode::Require)
+            .connect_timeout(Duration::from_secs(10));
+
+        let roots =
+            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let tls_config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
+        let client = config
+            .connect(tls)
+            .map_err(|_| IntrospectError::ConnectionFailed {
+                host: target.endpoint(),
+            })?;
+        Ok(Self {
+            client: Mutex::new(client),
+        })
+    }
+
+    fn simple_query(
+        &self,
+        query: &str,
+        kind: CatalogQueryKind,
+        table: Option<&str>,
+    ) -> Result<Vec<postgres::SimpleQueryMessage>, IntrospectError> {
+        if !catalog_query_is_read_only(query) {
+            return Err(IntrospectError::CatalogQueryFailed {
+                query: kind,
+                table: table.map(str::to_owned),
+            });
+        }
+        let mut client = self
+            .client
+            .lock()
+            .map_err(|_| IntrospectError::CatalogQueryFailed {
+                query: kind,
+                table: table.map(str::to_owned),
+            })?;
+        client
+            .simple_query(query)
+            .map_err(|_| IntrospectError::CatalogQueryFailed {
+                query: kind,
+                table: table.map(str::to_owned),
+            })
+    }
+}
+
+#[cfg(feature = "network")]
+impl PgCatalogSource for PostgresPgCatalogSource {
+    fn tables_with_rowsecurity(&self) -> Result<Vec<TableRls>, IntrospectError> {
+        let messages = self.simple_query(
+            TABLE_RLS_QUERY,
+            CatalogQueryKind::TablesWithRowSecurity,
+            None,
+        )?;
+        Ok(messages
+            .iter()
+            .filter_map(|message| {
+                let postgres::SimpleQueryMessage::Row(row) = message else {
+                    return None;
+                };
+                Some(TableRls {
+                    schema: row.get("schema_name")?.to_owned(),
+                    table: row.get("table_name")?.to_owned(),
+                    rowsecurity: matches!(row.get("rowsecurity"), Some("t" | "true")),
+                })
+            })
+            .collect())
+    }
+
+    fn policies_for(&self, table: &str) -> Result<Vec<PolicyRow>, IntrospectError> {
+        let query = policies_query(table);
+        let messages = self.simple_query(&query, CatalogQueryKind::Policies, Some(table))?;
+        Ok(messages
+            .iter()
+            .filter_map(|message| {
+                let postgres::SimpleQueryMessage::Row(row) = message else {
+                    return None;
+                };
+                Some(PolicyRow {
+                    schema: row.get("schema_name")?.to_owned(),
+                    table: row.get("table_name")?.to_owned(),
+                    policy: row.get("policy_name")?.to_owned(),
+                    command: row.get("command")?.to_owned(),
+                    permissive: matches!(
+                        row.get("permissive"),
+                        Some("PERMISSIVE" | "YES" | "t" | "true")
+                    ),
+                    roles: parse_pg_text_array(row.get("roles").unwrap_or_default()),
+                    using_expr: row.get("using_expr").map(str::to_owned),
+                    check_expr: row.get("check_expr").map(str::to_owned),
+                })
+            })
+            .collect())
+    }
+
+    fn grants_for(&self, table: &str) -> Result<Vec<GrantRow>, IntrospectError> {
+        let query = grants_query(table);
+        let messages = self.simple_query(&query, CatalogQueryKind::Grants, Some(table))?;
+        Ok(messages
+            .iter()
+            .filter_map(|message| {
+                let postgres::SimpleQueryMessage::Row(row) = message else {
+                    return None;
+                };
+                Some(GrantRow {
+                    schema: row.get("schema_name")?.to_owned(),
+                    table: row.get("table_name")?.to_owned(),
+                    grantee: row.get("grantee")?.to_owned(),
+                    privilege: row.get("privilege")?.to_owned(),
+                })
+            })
+            .collect())
+    }
+}
+
+#[cfg(feature = "network")]
+pub fn introspect_tier1(
+    input: &Tier1IntrospectInput,
+) -> Result<Tier1IntrospectOutput, IntrospectError> {
+    let source = PostgresPgCatalogSource::connect(input)?;
+    introspect_tier1_with_source(&source, input)
+}
+
+#[cfg(feature = "network")]
+fn split_table_name(table: &str) -> (Option<&str>, &str) {
+    table
+        .split_once('.')
+        .map_or((None, table), |(schema, table)| (Some(schema), table))
+}
+
+#[cfg(feature = "network")]
+fn policies_query(table: &str) -> String {
+    let (schema, table_name) = split_table_name(table);
+    let filter = catalog_table_filter(schema, table_name, "schemaname", "tablename");
+    format!(
+        r#"
+SELECT
+    schemaname::text AS schema_name,
+    tablename::text AS table_name,
+    policyname::text AS policy_name,
+    permissive::text AS permissive,
+    roles::text AS roles,
+    cmd::text AS command,
+    qual::text AS using_expr,
+    with_check::text AS check_expr
+FROM pg_catalog.pg_policies
+WHERE {filter}
+ORDER BY schemaname, tablename, policyname
+"#
+    )
+}
+
+#[cfg(feature = "network")]
+fn grants_query(table: &str) -> String {
+    let (schema, table_name) = split_table_name(table);
+    let filter = catalog_table_filter(schema, table_name, "table_schema", "table_name");
+    format!(
+        r#"
+SELECT
+    table_schema::text AS schema_name,
+    table_name::text AS table_name,
+    grantee::text AS grantee,
+    privilege_type::text AS privilege
+FROM information_schema.role_table_grants
+WHERE {filter}
+ORDER BY table_schema, table_name, grantee, privilege_type
+"#
+    )
+}
+
+#[cfg(feature = "network")]
+fn catalog_query_is_read_only(query: &str) -> bool {
+    let normalized = query.trim_start().to_ascii_uppercase();
+    normalized.starts_with("SELECT")
+        && !["INSERT ", "UPDATE ", "DELETE ", "ALTER ", "DROP ", "SET "]
+            .iter()
+            .any(|forbidden| normalized.contains(forbidden))
+}
+
+#[cfg(feature = "network")]
+fn catalog_table_filter(
+    schema: Option<&str>,
+    table: &str,
+    schema_column: &str,
+    table_column: &str,
+) -> String {
+    let table = escape_sql_literal(table);
+    match schema {
+        Some(schema) => format!(
+            "{table_column} = '{table}' AND {schema_column} = '{}'",
+            escape_sql_literal(schema)
+        ),
+        None => format!("{table_column} = '{table}'"),
+    }
+}
+
+#[cfg(feature = "network")]
+fn escape_sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+#[cfg(feature = "network")]
+fn parse_pg_text_array(value: &str) -> Vec<String> {
+    value
+        .trim_matches(|ch| matches!(ch, '{' | '}'))
+        .split(',')
+        .map(|role| role.trim_matches('"').trim())
+        .filter(|role| !role.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1438,6 +2056,138 @@ mod tests {
         assert!(matches!(error, RlsProbeError::InvalidProjectUrl(_)));
     }
 
+    #[test]
+    fn tier1_mock_catalog_is_read_only_auditable_and_redacted() {
+        let source = FakePgCatalog::default();
+        let input = tier1_input(
+            "postgresql://postgres:raw-db-password@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",
+        );
+        assert!(!format!("{input:?}").contains("raw-db-password"));
+
+        let output =
+            introspect_tier1_with_source(&source, &input).expect("mock introspection succeeds");
+
+        assert!(output.findings.is_empty(), "E1 does not emit E2 detections");
+        assert!(output.warnings.is_empty());
+        assert_eq!(
+            source.calls.borrow().as_slice(),
+            [
+                (CatalogQueryKind::TablesWithRowSecurity, None),
+                (CatalogQueryKind::Policies, Some("profiles".to_owned())),
+                (CatalogQueryKind::Grants, Some("profiles".to_owned())),
+            ]
+        );
+        assert_eq!(output.actions.len(), 3);
+        assert!(output.actions.iter().all(|action| {
+            action.kind == NetworkActionKind::CatalogIntrospection
+                && action.intent == NetworkActionIntent::Select
+                && action.endpoint == "db.abcdefghijklmnopqrst.supabase.co:5432"
+                && action.outcome == NetworkActionOutcome::CatalogRead
+                && action.status.is_none()
+                && action.observed_row_count.is_none()
+        }));
+
+        let serialized = serde_json::to_string(&output.actions).expect("actions serialize");
+        for forbidden in [
+            "raw-db-password",
+            "credential-row-marker",
+            "owner_id = auth.uid()",
+        ] {
+            assert!(
+                !serialized.contains(forbidden),
+                "actions leaked {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn tier1_catalog_failure_is_nonfatal_and_sanitized() {
+        let source = FakePgCatalog {
+            fail: Some(CatalogQueryKind::Policies),
+            ..FakePgCatalog::default()
+        };
+        let input = tier1_input(
+            "postgres://postgres:raw-db-password@db.abcdefghijklmnopqrst.supabase.co/postgres",
+        );
+
+        let output = introspect_tier1_with_source(&source, &input).expect("query failure degrades");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].message().contains("table policies"));
+        assert_eq!(
+            output.actions[1].outcome,
+            NetworkActionOutcome::TransportError
+        );
+        let serialized = serde_json::to_string(&output.actions).expect("actions serialize");
+        assert!(!serialized.contains("raw-db-password"));
+    }
+
+    #[test]
+    fn tier1_refuses_non_supabase_hosts_schemes_ports_and_overrides_before_queries() {
+        for db_url in [
+            "postgres://postgres:pw@example.com:5432/postgres",
+            "https://postgres:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",
+            "postgres://postgres:pw@db.abcdefghijklmnopqrst.supabase.co:7777/postgres",
+            "postgres://postgres:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres?host=example.com",
+            "postgres://postgres:pw@db.abcdefghijklmnopqrst.supabase.co:5432/postgres?sslmode=disable",
+            "postgres://postgres:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres",
+        ] {
+            let source = FakePgCatalog::default();
+            let input = tier1_input(db_url);
+
+            let error = introspect_tier1_with_source(&source, &input)
+                .expect_err("unsafe destination must be rejected");
+
+            assert!(matches!(error, IntrospectError::InvalidDatabaseUrl { .. }));
+            assert!(
+                source.calls.borrow().is_empty(),
+                "source was queried for {db_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn tier1_accepts_supabase_direct_and_pooler_hosts_for_the_same_project() {
+        let direct = project_from_db_url(
+            "postgresql://postgres:pw@db.abcdefghijklmnopqrst.supabase.co:6543/postgres",
+        )
+        .expect("dedicated pooler accepted");
+        let shared = project_from_db_url(
+            "postgres://postgres.abcdefghijklmnopqrst:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres",
+        )
+        .expect("shared pooler accepted");
+
+        assert_eq!(direct, shared);
+        assert_eq!(direct.ref_id.as_deref(), Some("abcdefghijklmnopqrst"));
+    }
+
+    #[test]
+    fn tier1_rejects_database_project_mismatch_before_queries() {
+        let source = FakePgCatalog::default();
+        let input =
+            tier1_input("postgres://postgres:pw@db.zyxwvutsrqponmlkjihg.supabase.co:5432/postgres");
+
+        let error = introspect_tier1_with_source(&source, &input)
+            .expect_err("known-different project rejected");
+
+        assert!(matches!(error, IntrospectError::ProjectMismatch { .. }));
+        assert!(source.calls.borrow().is_empty());
+    }
+
+    #[cfg(feature = "network")]
+    #[test]
+    fn production_catalog_queries_are_select_only() {
+        for query in [
+            TABLE_RLS_QUERY.to_owned(),
+            policies_query("public.profiles"),
+            grants_query("public.profiles"),
+        ] {
+            assert!(catalog_query_is_read_only(&query), "unsafe query: {query}");
+        }
+        assert!(!catalog_query_is_read_only("SET ROLE postgres"));
+        assert!(!catalog_query_is_read_only("DELETE FROM profiles"));
+    }
+
     fn jwt_with_payload(payload: &str) -> String {
         let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
         let payload = URL_SAFE_NO_PAD.encode(payload.as_bytes());
@@ -1464,6 +2214,84 @@ mod tests {
                 location_class: LocationClass::ClientReachable,
             },
             candidate_tables: tables.into_iter().map(str::to_owned).collect(),
+        }
+    }
+
+    fn tier1_input(db_url: &str) -> Tier1IntrospectInput {
+        Tier1IntrospectInput {
+            project: SupabaseProject {
+                ref_id: Some("abcdefghijklmnopqrst".to_owned()),
+                url: "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+            },
+            db_url: db_url.to_owned(),
+            credential_location: Location {
+                path: RepoPath("<environment>".to_owned()),
+                span: None,
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ServerOnly,
+            },
+            candidate_tables: BTreeSet::from(["profiles".to_owned()]),
+        }
+    }
+
+    #[derive(Default)]
+    struct FakePgCatalog {
+        calls: RefCell<Vec<(CatalogQueryKind, Option<String>)>>,
+        fail: Option<CatalogQueryKind>,
+    }
+
+    impl FakePgCatalog {
+        fn record(
+            &self,
+            query: CatalogQueryKind,
+            table: Option<&str>,
+        ) -> Result<(), IntrospectError> {
+            self.calls
+                .borrow_mut()
+                .push((query, table.map(str::to_owned)));
+            if self.fail == Some(query) {
+                return Err(IntrospectError::CatalogQueryFailed {
+                    query,
+                    table: table.map(str::to_owned),
+                });
+            }
+            Ok(())
+        }
+    }
+
+    impl PgCatalogSource for FakePgCatalog {
+        fn tables_with_rowsecurity(&self) -> Result<Vec<TableRls>, IntrospectError> {
+            self.record(CatalogQueryKind::TablesWithRowSecurity, None)?;
+            Ok(vec![TableRls {
+                schema: "public".to_owned(),
+                table: "profiles".to_owned(),
+                rowsecurity: true,
+            }])
+        }
+
+        fn policies_for(&self, table: &str) -> Result<Vec<PolicyRow>, IntrospectError> {
+            self.record(CatalogQueryKind::Policies, Some(table))?;
+            Ok(vec![PolicyRow {
+                schema: "public".to_owned(),
+                table: table.to_owned(),
+                policy: "credential-row-marker".to_owned(),
+                command: "SELECT".to_owned(),
+                permissive: true,
+                roles: vec!["anon".to_owned()],
+                using_expr: Some("owner_id = auth.uid()".to_owned()),
+                check_expr: None,
+            }])
+        }
+
+        fn grants_for(&self, table: &str) -> Result<Vec<GrantRow>, IntrospectError> {
+            self.record(CatalogQueryKind::Grants, Some(table))?;
+            Ok(vec![GrantRow {
+                schema: "public".to_owned(),
+                table: table.to_owned(),
+                grantee: "anon".to_owned(),
+                privilege: "SELECT".to_owned(),
+            }])
         }
     }
 

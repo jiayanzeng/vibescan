@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{ArgAction, Parser, ValueEnum};
+#[cfg(feature = "network")]
+use vibescan_core::TIER1_DB_URL_ENV;
 use vibescan_core::{
     OutputFormat as CoreOutputFormat, OutputStyle, ScanConfig, Severity, resolve_repository_path,
     scan_and_render,
@@ -12,7 +14,7 @@ use vibescan_core::{
     name = "vibescan",
     version,
     about = "Scan local Supabase + Next.js apps for correlated secret and RLS risk.",
-    long_about = "vibescan runs local-first scans by default: working tree/history collection, secret detection, Supabase key classification, offline correlation, and local reporting. Tier 0 RLS read probes are available only in builds compiled with the network feature and require an explicit opt-in flag."
+    long_about = "vibescan runs local-first scans by default: working tree/history collection, secret detection, Supabase key classification, offline correlation, and local reporting. Tier 0 RLS reads and Tier 1 credentialed catalog introspection are available only in builds compiled with the network feature; each requires its own explicit opt-in flag."
 )]
 struct Cli {
     /// Target repository path.
@@ -67,6 +69,11 @@ struct Cli {
     #[cfg(feature = "network")]
     #[arg(long)]
     rls_tier0_read_probe: bool,
+
+    /// Opt in to read-only Supabase Tier 1 catalog introspection. The database URL is read from VIBESCAN_SUPABASE_DB_URL.
+    #[cfg(feature = "network")]
+    #[arg(long)]
+    rls_tier1_introspect: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -146,9 +153,16 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
         config.baseline_path = Some(resolve_repository_path(&cli.target, baseline)?);
     }
     config.tier0_read_probe = false;
+    config.tier1_introspection = false;
     #[cfg(feature = "network")]
     {
-        config.tier0_read_probe = cli.rls_tier0_read_probe;
+        apply_network_runtime_options(
+            &mut config,
+            cli.rls_tier0_read_probe,
+            cli.rls_tier1_introspect,
+            std::env::var_os(TIER1_DB_URL_ENV).is_some(),
+        )
+        .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
     }
     if let Some(severity_gate) = cli.severity_gate {
         config.severity_gate = severity_gate.into();
@@ -167,4 +181,49 @@ fn run() -> Result<u8, Box<dyn std::error::Error>> {
     print!("{output}");
 
     Ok(code as u8)
+}
+
+#[cfg(feature = "network")]
+fn apply_network_runtime_options(
+    config: &mut ScanConfig,
+    tier0_read_probe: bool,
+    tier1_introspection: bool,
+    tier1_credential_present: bool,
+) -> Result<(), &'static str> {
+    if tier1_introspection && !tier1_credential_present {
+        return Err(
+            "--rls-tier1-introspect requires VIBESCAN_SUPABASE_DB_URL in the local environment",
+        );
+    }
+    config.tier0_read_probe = tier0_read_probe;
+    config.tier1_introspection = tier1_introspection;
+    Ok(())
+}
+
+#[cfg(all(test, feature = "network"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tier0_and_tier1_runtime_opt_ins_are_independent() {
+        let mut tier0 = ScanConfig::default();
+        apply_network_runtime_options(&mut tier0, true, false, false)
+            .expect("Tier 0 does not require a DB credential");
+        assert!(tier0.tier0_read_probe);
+        assert!(!tier0.tier1_introspection);
+
+        let mut tier1 = ScanConfig::default();
+        apply_network_runtime_options(&mut tier1, false, true, true)
+            .expect("Tier 1 option applies");
+        assert!(!tier1.tier0_read_probe);
+        assert!(tier1.tier1_introspection);
+    }
+
+    #[test]
+    fn tier1_runtime_opt_in_requires_env_credential_value() {
+        let error = apply_network_runtime_options(&mut ScanConfig::default(), false, true, false)
+            .expect_err("missing credential rejected");
+
+        assert!(error.contains(TIER1_DB_URL_ENV));
+    }
 }

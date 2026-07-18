@@ -22,6 +22,11 @@ feature and the user explicitly opts in.
 - Every attempted Tier 0 GET is recorded as redacted scan-scope evidence in
   JSON, SARIF, TTY, and HTML. Records omit keys, headers, response bodies, and
   rows; protected outcomes do not become findings or affect the exit gate.
+- Tier 1 catalog introspection has a separate runtime opt-in and reads its
+  database URL only from `VIBESCAN_SUPABASE_DB_URL`. It rejects non-Supabase
+  database/pooler hosts and nonstandard ports before connecting, uses rustls,
+  and issues only catalog `SELECT`s. Audit records omit credentials, policy
+  bodies, database errors, and row data.
 - Generic secret rules use an attributed Gitleaks-compatible subset; Supabase
   key semantics and correlation remain vibescan-specific.
 
@@ -128,6 +133,17 @@ Build with Tier 0 network probing support and opt in to read-only RLS probes:
 cargo run -p vibescan-cli --features network -- /path/to/repo --rls-tier0-read-probe
 ```
 
+To exercise the E1 Tier 1 transport plumbing, set
+`VIBESCAN_SUPABASE_DB_URL` locally (for example through a secret manager) and
+use the distinct opt-in:
+
+```sh
+cargo run -p vibescan-cli --features network -- /path/to/repo --rls-tier1-introspect
+```
+
+E1 establishes validated, audited catalog reads; Tier 1 policy findings are
+added by the dependency-ordered E2 task.
+
 The process exit code is controlled by `--severity-gate`, which defaults to
 `high`.
 
@@ -154,6 +170,7 @@ path = "config/custom-rules.toml"
 
 [network]
 tier0_read_probe = false
+tier1_introspection = false
 ```
 
 Config ignore paths are fed through the same override layer as git ignores. They
@@ -166,10 +183,10 @@ preserved. Custom rule files are additive: embedded rules and safety allowlists
 remain active, custom rules and allowlists append, and duplicate rule IDs are
 rejected instead of replacing a shipped rule.
 
-Repository configuration cannot enable Network work by itself. Even if
-`tier0_read_probe = true` is present, the current process remains LocalStatic
-unless a `network`-enabled binary is invoked with the explicit
-`--rls-tier0-read-probe` flag.
+Repository configuration cannot enable Network work by itself. Even if either
+network setting is `true`, the current process remains LocalStatic unless a
+`network`-enabled binary is invoked with the corresponding explicit
+`--rls-tier0-read-probe` or `--rls-tier1-introspect` flag.
 
 ## Repository Notes
 

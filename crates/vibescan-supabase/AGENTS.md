@@ -6,9 +6,9 @@ highest-risk crate; architecture sections 7 and 10 are mandatory reading.
 ## Ownership
 
 The default build owns LocalStatic Supabase key classification and linkable
-domain facts. Optional `network` code owns Tier 0 read probing. Generic secret
-matching belongs in `vibescan-secrets`; final correlation belongs in
-`vibescan-core`.
+domain facts. Optional `network` code owns Tier 0 read probing and explicitly
+credentialed Tier 1 catalog introspection. Generic secret matching belongs in
+`vibescan-secrets`; final correlation belongs in `vibescan-core`.
 
 Do not depend on a sibling library, including through dev-dependencies. Put
 cross-crate classification fixtures in the core integration harness.
@@ -51,6 +51,25 @@ this crate.
 - Log/record each attempted read outcome without keys or row data so Network
   activity is auditable even when no finding is emitted.
 
+## Tier 1 safety contract
+
+Tier 1 exists only with the Cargo `network` feature and the distinct explicit
+`--rls-tier1-introspect` runtime opt-in. Its database connection string is read
+from `VIBESCAN_SUPABASE_DB_URL`, never accepted as an argv value, and must be
+held only for the request lifetime.
+
+- Reject non-Postgres schemes, non-Supabase database/pooler hosts, arbitrary
+  ports, host overrides, TLS downgrades, and known-different project refs before
+  opening a socket.
+- The real source may issue only read-only `SELECT` queries against
+  `pg_catalog` and `information_schema`. Never issue DDL, DML, `SET`, table-data
+  reads, counts over application rows, or any mutation.
+- Audit every catalog query with a normalized host, table when applicable, and
+  sanitized outcome. Never record the connection string, password, policy body,
+  database error body, or application row data in scope evidence.
+- Use the injectable `PgCatalogSource` for automated tests. No test may connect
+  to a live database without explicit authorization for that exact target.
+
 ## Tests and future tiers
 
 Use an injected/mock HTTP client and assert method-equivalent behavior, exact
@@ -58,9 +77,10 @@ Use an injected/mock HTTP client and assert method-equivalent behavior, exact
 continued offline findings after Network failure. Default tests must make zero
 requests. Do not run a live target without explicit user authorization.
 
-Tier 1 introspection and all active probes are deferred. No ownership proof can
-make writes acceptable in v1. Do not add external registry/OSV egress here
-until the architecture resolves its own-assets-only conflict.
+Tier 1 policy detections and correlation build on the E1 catalog seam in their
+dependency-ordered tasks. Active probes and writes remain deferred; no
+ownership proof makes them part of Tier 1. Registry/OSV egress belongs only in
+the architecture-owned `vibescan-registry` track, never in this crate.
 
 Run package tests in both feature modes, the network golden corpus, all
 workspace gates, and `scripts/check-network-boundary.sh` for every change here.

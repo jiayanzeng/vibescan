@@ -9,12 +9,23 @@ description = "Supabase domain intelligence for vibescan."
 
 [features]
 default = []
-network = ["dep:reqwest"]
+network = [
+    "dep:postgres",
+    "dep:reqwest",
+    "dep:rustls",
+    "dep:tokio-postgres-rustls",
+    "dep:webpki-roots",
+]
 
 [dependencies]
 base64.workspace = true
 hex.workspace = true
+postgres = { version = "0.19.14", default-features = false, optional = true }
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+rustls = { version = "0.23.41", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 serde_json.workspace = true
 sha2.workspace = true
+tokio-postgres-rustls = { version = "0.14.0", default-features = false, features = ["ring"], optional = true }
+url = "2.5.7"
 vibescan-types.workspace = true
+webpki-roots = { version = "1.0.6", optional = true }

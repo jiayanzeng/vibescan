@@ -44,6 +44,9 @@ TRANSPORT_DENYLIST = {
     "native-tls",
     "openssl",
     "openssl-sys",
+    "postgres",
+    "tokio-postgres",
+    "tokio-postgres-rustls",
 }
 
 PURE_LOCALSTATIC = {
@@ -207,7 +210,10 @@ def transport_policy_errors(default_graph, network_graph):
     network_reachable = reachable(network_graph, network_graph["workspace_ids"])
     network_transports = transport_names_in(network_graph, network_reachable)
     if not network_transports:
-        errors.append("network build did not contain any known transport crate; expected reqwest/rustls")
+        errors.append(
+            "network build did not contain any known transport crate; "
+            "expected reqwest/rustls/postgres"
+        )
     for transport in network_transports:
         parents = nearest_workspace_parents(network_graph, transport)
         if parents != {ALLOWED_NETWORK_PARENT}:
@@ -234,6 +240,17 @@ def transport_policy_errors(default_graph, network_graph):
         errors.append("rustls appeared in default build")
     if "rustls" not in network_transports:
         errors.append("rustls did not appear in network build; rustls-tls may not be enabled")
+    for required in ("postgres", "tokio-postgres", "tokio-postgres-rustls"):
+        if required not in network_transports:
+            errors.append(f"{required} did not appear in network build")
+    forbidden_tls = {"native-tls", "openssl", "openssl-sys"}.intersection(
+        network_transports
+    )
+    if forbidden_tls:
+        errors.append(
+            "network build contains forbidden non-rustls TLS crates: "
+            + ", ".join(sorted(forbidden_tls))
+        )
     return errors
 
 
@@ -295,10 +312,22 @@ def run_self_tests():
     default_graph = synthetic_graph({})
     network_graph = synthetic_graph(
         {
-            "vibescan-supabase": ["reqwest"],
+            "vibescan-supabase": [
+                "postgres",
+                "reqwest",
+                "tokio-postgres-rustls",
+            ],
+            "postgres": ["tokio-postgres"],
             "reqwest": ["rustls"],
+            "tokio-postgres-rustls": ["rustls", "tokio-postgres"],
         },
-        {"reqwest", "rustls"},
+        {
+            "postgres",
+            "reqwest",
+            "rustls",
+            "tokio-postgres",
+            "tokio-postgres-rustls",
+        },
     )
     if transport_policy_errors(default_graph, network_graph):
         raise AssertionError("allowed transport positive control was rejected")
@@ -311,6 +340,33 @@ def run_self_tests():
         "LocalStatic transport leakage",
         transport_policy_errors(leaking_default, network_graph),
         "default build contains transport crates",
+    )
+
+    openssl_network = synthetic_graph(
+        {
+            "vibescan-supabase": [
+                "openssl",
+                "postgres",
+                "reqwest",
+                "tokio-postgres-rustls",
+            ],
+            "postgres": ["tokio-postgres"],
+            "reqwest": ["rustls"],
+            "tokio-postgres-rustls": ["rustls", "tokio-postgres"],
+        },
+        {
+            "openssl",
+            "postgres",
+            "reqwest",
+            "rustls",
+            "tokio-postgres",
+            "tokio-postgres-rustls",
+        },
+    )
+    require_rejection(
+        "OpenSSL transport",
+        transport_policy_errors(default_graph, openssl_network),
+        "network build contains forbidden non-rustls TLS crates",
     )
 
 
@@ -355,7 +411,10 @@ def main():
 
     print("network-boundary: exact seven-crate DAG holds across all dependency kinds")
     print("network-boundary: default build has no transport crates")
-    print("network-boundary: network build transport is nearest-parented by vibescan-supabase")
+    print(
+        "network-boundary: rustls HTTP/Postgres transport is nearest-parented by "
+        "vibescan-supabase; OpenSSL/native-tls absent"
+    )
     print("network-boundary: pure LocalStatic crates are transport-free in default and network metadata")
     return 0
 

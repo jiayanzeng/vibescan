@@ -537,10 +537,12 @@ fn warning_summary(warning: &ScopeWarning) -> String {
 fn network_action_summary(action: &NetworkActionAudit) -> String {
     let intent = match action.intent {
         NetworkActionIntent::Get => "GET",
+        NetworkActionIntent::Select => "SELECT",
     };
     let kind = match action.kind {
         NetworkActionKind::RootEnumeration => "root enumeration",
         NetworkActionKind::TableRead => "table read",
+        NetworkActionKind::CatalogIntrospection => "catalog introspection",
     };
     let table = action
         .table
@@ -573,6 +575,7 @@ fn network_action_outcome_name(outcome: NetworkActionOutcome) -> &'static str {
         NetworkActionOutcome::KeyRejected => "key rejected",
         NetworkActionOutcome::InvalidResponse => "invalid response",
         NetworkActionOutcome::TransportError => "transport error",
+        NetworkActionOutcome::CatalogRead => "catalog read",
     }
 }
 

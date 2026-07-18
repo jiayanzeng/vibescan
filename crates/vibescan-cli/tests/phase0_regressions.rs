@@ -95,7 +95,7 @@ fn repository_network_config_alone_never_enables_a_request() {
     let repo = TestRepo::new();
     repo.write(
         "vibescan.toml",
-        "[scan]\nhistory = false\n[network]\ntier0_read_probe = true\n",
+        "[scan]\nhistory = false\n[network]\ntier0_read_probe = true\ntier1_introspection = true\n",
     );
 
     let output = vibescan(repo.path(), &[]);
@@ -106,6 +106,38 @@ fn repository_network_config_alone_never_enables_a_request() {
         "stdout was: {}",
         String::from_utf8_lossy(&output.stdout)
     );
+}
+
+#[cfg(feature = "network")]
+#[test]
+fn tier1_flag_without_env_credential_is_an_operational_error() {
+    let repo = TestRepo::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_vibescan"))
+        .arg(repo.path())
+        .arg("--rls-tier1-introspect")
+        .env_remove("VIBESCAN_SUPABASE_DB_URL")
+        .output()
+        .expect("vibescan binary runs");
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("VIBESCAN_SUPABASE_DB_URL"));
+}
+
+#[cfg(feature = "network")]
+#[test]
+fn tier0_flag_does_not_require_or_enable_tier1() {
+    let repo = TestRepo::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_vibescan"))
+        .arg(repo.path())
+        .args(["--format", "json", "--rls-tier0-read-probe"])
+        .env_remove("VIBESCAN_SUPABASE_DB_URL")
+        .output()
+        .expect("vibescan binary runs");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"tier0_read_probe\": true"));
+    assert!(stdout.contains("\"tier1_introspection\": false"));
 }
 
 #[test]
