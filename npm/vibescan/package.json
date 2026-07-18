@@ -17,6 +17,10 @@
   "engines": {
     "node": ">=18"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "optionalDependencies": {
     "@vibescan/cli-darwin-arm64": "0.1.0",
     "@vibescan/cli-darwin-x64": "0.1.0",

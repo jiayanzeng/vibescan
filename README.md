@@ -60,9 +60,11 @@ a `libc` restriction, so npm can install them on both glibc and musl hosts.
 
 Release CI locally packs and tests all five platform combinations with
 `--ignore-scripts`, exercises `npx vibescan --version`, and proves that clean and
-severity-gated scans preserve the Rust CLI's exit codes. npm registry publication
-and provenance remain the separate G3 task, so this repository does not yet claim
-that the packages are publicly available.
+severity-gated scans preserve the Rust CLI's exit codes. Stable tags are wired to
+publish the five platform packages first and the main package last with npm
+provenance. Public availability still depends on the one-time registry ownership
+and trusted-publisher setup in [RELEASING.md](RELEASING.md); this repository does
+not claim publication until a tagged run proves it.
 
 Run the source package and shim contract tests locally with:
 
@@ -72,8 +74,16 @@ npm --prefix npm test
 
 If npm skips the matching optional package, the shim reports the usual cross-OS
 `node_modules` cache or stale-lockfile causes and recommends a clean `npm ci`,
-`cargo install vibescan`, or the shell installer. It never silently downloads a
-replacement.
+`cargo install vibescan-cli`, or the shell installer. The Cargo package installs
+the `vibescan` binary. The shim never silently downloads a replacement.
+
+## Secondary distribution channels
+
+The release plan generates a prebuilt-binary Homebrew formula for
+`jiayanzeng/tap/vibescan` and publishes the Cargo workspace bottom-up so
+`cargo install vibescan-cli` installs the `vibescan` command. The exact publisher
+order, bootstrap credentials, trusted-publisher setup, checksum and attestation
+commands, and release gates are documented in [RELEASING.md](RELEASING.md).
 
 ## Test
 

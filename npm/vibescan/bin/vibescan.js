@@ -39,7 +39,7 @@ function missingOptionalDependency(packageName, cause) {
       `vibescan could not find its platform package ${packageName}${detail}.`,
       "The optional dependency was probably skipped because node_modules was cached across operating systems, optional dependencies were disabled, or the lockfile is stale.",
       "Run `npm ci` on a clean tree and do not share node_modules across operating systems.",
-      "If optional packages are intentionally disabled, use `cargo install vibescan` or the shell installer from the GitHub release instead.",
+      "If optional packages are intentionally disabled, use `cargo install vibescan-cli` or the shell installer from the GitHub release instead.",
       "vibescan will not download or execute a replacement binary automatically.",
     ].join("\n"),
   );
@@ -55,7 +55,7 @@ function resolveBinary() {
   const platformPackage = PLATFORM_PACKAGES[platformKey];
   if (!platformPackage) {
     fail(
-      `vibescan does not provide a prebuilt binary for ${process.platform}/${process.arch}. Use \`cargo install vibescan\` or the shell installer instead.`,
+      `vibescan does not provide a prebuilt binary for ${process.platform}/${process.arch}. Use \`cargo install vibescan-cli\` or the shell installer instead.`,
     );
   }
 

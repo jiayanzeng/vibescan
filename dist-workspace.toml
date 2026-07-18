@@ -7,8 +7,10 @@ members = ["cargo:."]
 cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
-# The installers to generate for each app
-installers = ["shell", "powershell"]
+# The installers to generate for each app. npm stays hand-rolled because the
+# built-in dist installer fetches binaries; Homebrew consumes the hosted
+# prebuilt archives.
+installers = ["shell", "powershell", "homebrew"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 # Generate per-artifact SHA-256 files and the unified sha256.sum manifest.
@@ -22,6 +24,14 @@ cargo-auditable = false
 # so G2 deliberately packages shipped binaries in the custom job instead.
 # Both custom jobs consume the completed platform archives and block hosting.
 global-artifacts-jobs = ["./verify-static-linux", "./package-npm"]
+# Publish only after GitHub hosting succeeds. npm and crates.io use custom jobs
+# so their ordering and provenance contracts remain explicit and testable.
+publish-jobs = ["homebrew", "./publish-crates", "./publish-npm"]
+# dist's Homebrew publisher writes the generated formula to this tap.
+tap = "jiayanzeng/homebrew-tap"
+# The Cargo package is architecture-named `vibescan-cli`, but users invoke the
+# binary as `vibescan`; keep the Homebrew formula aligned with the binary.
+formula = "vibescan"
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
 # Whether to install an updater program
