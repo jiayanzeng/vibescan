@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `fba689c` (`main`, Task G1 release commit;
-tag `v0.1.0`).
+Current implementation baseline: `e0092ab` (Task G2 implementation commit on
+`codex/track-g2-npm-channel`; pull request #3).
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -44,9 +44,12 @@ complete: the workspace is publish-ready, `dist` plans exactly the
 architecture's five targets with musl-only Linux, the tagged `v0.1.0` release
 run produced all five archives plus checksums, the blocking custom job proved
 both Linux binaries are static, and all five GitHub Artifact Attestations
-verified against the release workflow and merge commit. Track G remains partial
-only because Tasks G2/G3 have not started and the npm and secondary publication
-channels do not yet exist.
+verified against the release workflow and merge commit. Task G2 is complete:
+the unscoped `vibescan` npm package selects one of five exact-version optional
+platform packages, executes only the shipped binary, preserves its exit status,
+and has passed the hosted five-platform `npx` smoke matrix. Track G remains
+partial only because Task G3 has not started and npm publication/provenance plus
+the secondary Homebrew channel do not yet exist.
 Architecture §17.8 explicitly defers the noisy user-writable-metadata
 heuristic, so its absence is not an E2 gap. The verdict for the entire
 architecture document is therefore partial.
@@ -60,9 +63,9 @@ Use these three lenses when discussing completion:
   real-repository, precision/recall, deterministic performance-counter, and
   resolved-decision ratification blockers are all covered by passing gates.
 - **Entire architecture document:** partial. Tier E's E1–E3 implementation,
-  Track F's registry intelligence/corpus activation, and Track G1's binary
-  distribution are complete, while G2/G3 and other deferred tracks remain
-  incomplete.
+  Track F's registry intelligence/corpus activation, and Track G1/G2's binary
+  and npm distribution plumbing are complete, while G3 and other deferred
+  tracks remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
 returned row data after counting. Tier E1's Postgres transport accepts only
@@ -80,6 +83,15 @@ implementation (`1225975`) and its test-fixture portability correction
 hosted branch-push run; no production collection behavior changed. The
 annotated `v0.1.0` tag points to that merge. No pre-existing user change was
 present or modified.
+
+Task G2 began from a clean `main` at `ac3757a`, after pull request #2 had landed
+the G1 close-out record. The G2 implementation commit is `e0092ab` on
+`codex/track-g2-npm-channel`; pull request
+[#3](https://github.com/jiayanzeng/vibescan/pull/3) carries the review. No
+pre-existing user change was present or modified. G2 changes only packaging,
+release workflow integration, tests, and documentation; it does not change a
+crate, dependency edge, scanner phase, target-project access, or Network
+capability.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -130,9 +142,9 @@ The checksum-verified official `dist` 0.32.0 binary initialized
 contains exactly `aarch64-apple-darwin`, `x86_64-apple-darwin`,
 `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, and
 `x86_64-pc-windows-msvc`; no GNU/Linux artifact is planned. Shell and PowerShell
-installers are enabled, while npm and Homebrew remain G2/G3 work. SHA-256 emits
-the unified `sha256.sum`, and GitHub Artifact Attestations are enabled in the
-generated platform build jobs.
+installers are enabled. At G1 closeout, npm and Homebrew remained G2/G3 work.
+SHA-256 emits the unified `sha256.sum`, and GitHub Artifact Attestations are
+enabled in the generated platform build jobs.
 
 The generated workflow reaches a configured global-artifact job only after all
 platform archives exist. That reusable job requires exactly two Linux musl
@@ -235,10 +247,107 @@ tag push, and GitHub-hosted release in the project's own repository. No live
 target, credential, registry query, crates.io/npm/Homebrew publication, or
 target-project write was used.
 
-G1 is complete. G2/G3 are not started.
+G1 is complete. G2 is complete. G3 is not started.
 The Track G review must also flag architecture §13.1's `ships/downloads` wording
-for the architecture owner to narrow to ships-only; G1 does not edit the
+for the architecture owner to narrow to ships-only; neither G1 nor G2 edits the
 architecture.
+
+## Track G2 verification observed on 2026-07-18
+
+G2 implements the npm distribution channel under architecture §§13.1 and
+13.4. The official `dist` 0.32 npm installer was evaluated and rejected for
+this task because its generated install path fetches a release binary. That
+contradicts Track G's ships-only invariant. The implementation therefore uses
+the instruction-set fallback: a small hand-rolled CommonJS shim in the
+unscoped `vibescan` package plus five platform packages, integrated into the
+existing `dist` release as a custom global-artifact job. The built-in `dist`
+npm installer remains disabled.
+
+The main `vibescan@0.1.0` manifest exposes `bin.vibescan` and names all five
+platform packages as exact `0.1.0` `optionalDependencies`; no version range is
+used. Each platform manifest declares its supported `os` and `cpu`, contains
+only the corresponding release binary, and has no lifecycle script. The two
+Linux packages deliberately omit npm's `libc` restriction because their musl
+binaries are static and must install on glibc hosts as well as musl hosts.
+
+At execution time the shim maps `process.platform` plus `process.arch` to the
+matching installed package, resolves that package locally, and synchronously
+spawns its binary with unchanged arguments and inherited standard streams. It
+exits with the child's status. It contains no fetch implementation and has no
+postinstall hook. When optional dependencies were skipped, it exits 1 without a
+stack trace and explains cross-OS `node_modules` caches, stale lockfiles,
+`npm ci`, `cargo install vibescan`, and the shell-installer alternative while
+stating that no replacement binary will be downloaded or executed
+automatically.
+
+The release workspace now lists `./package-npm` as a custom global artifact
+job. The generated release workflow invokes the reusable npm packaging workflow
+only after the five platform archives exist; hosting depends on the npm job as
+well as the pre-existing static-Linux gate. The npm job extracts the five
+release binaries, creates the unscoped package and all five platform tarballs,
+verifies their packed contents, uploads them as release artifacts, and runs the
+same five-platform smoke matrix used on pull requests. This is packaging only:
+G2 did not publish to npm or query the live npm registry.
+
+The source contract tests verify the exact platform set and versions, `os` /
+`cpu` selectors, absence of lifecycle scripts and fetch primitives, shim exit
+status propagation, and the missing-optional-package failure. A full local
+six-tarball build used the five downloaded `v0.1.0` G1 archives. Packed-package
+verification passed, and the macOS arm64 smoke installed the local tarballs
+with `--ignore-scripts --offline`, ran `npx --no-install vibescan --version`,
+proved scan exit 0 on the clean fixture and exit 1 on a High-trigger fixture,
+then proved the actionable no-download error after `--omit=optional`.
+
+The following local commands passed on the G2 worktree:
+
+```sh
+npm --prefix npm test
+node npm/scripts/build-packages.mjs \
+  --artifacts /private/tmp/vibescan-gh.N3e4g9 \
+  --out /private/tmp/vibescan-g2-all-packages.7gtU3a
+node npm/scripts/verify-packages.mjs \
+  --packages /private/tmp/vibescan-g2-all-packages.7gtU3a
+node npm/scripts/smoke-packages.mjs \
+  --packages /private/tmp/vibescan-g2-all-packages.7gtU3a \
+  --target aarch64-apple-darwin
+dist generate
+dist plan
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-report --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+`dist plan` retained exactly the five G1 targets. Regenerating
+`.github/workflows/release.yml` from `dist-workspace.toml` was clean, all three
+affected workflow files parsed as YAML, and every JavaScript file passed
+`node --check`. The hardening aggregate reported its optional real-repository
+leg as skipped; no user repository was supplied.
+
+Pull request #3's implementation revision `e0092ab` passed 27 applicable GitHub
+Actions checks with six expected release-only skips. Its npm jobs passed the
+source contract and native smoke tests on macOS arm64, macOS x64, static-musl
+Linux arm64, static-musl Linux x64 on a glibc runner, and Windows x64. Each
+native smoke built the target binary, packed only the local main/platform
+tarballs, installed them offline with lifecycle scripts disabled, verified
+`npx vibescan --version`, verified scan exit statuses 0 and 1, and exercised the
+skipped-optional-dependency error.
+
+No live target, credential, registry query, npm/crates.io/Homebrew publication,
+or target-project write was used. G2 is complete. G3 remains unstarted and owns
+npm publication/provenance plus the Homebrew formula. Architecture §13.1 still
+needs the review-time one-line clarification from `ships/downloads` to `ships`;
+G2 deliberately does not edit the architecture.
 
 ## Track F verification and close-out re-audit observed on 2026-07-18
 
@@ -849,7 +958,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial; G1 complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. The npm wrapper and Homebrew formula remain G2/G3 work. |
+| Security/nonfunctional | Partial; G1/G2 complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. npm publication/provenance and the Homebrew formula remain G3 work. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -926,10 +1035,12 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1 complete:** the release workspace, exact five-target `cargo-dist`
-  matrix, musl Linux cross-builds, checksums, attestations, and blocking
-  static-link verification are locally validated and proven by the successful
-  hosted `v0.1.0` release. G2 and G3 have not started.
+- **Track G1/G2 complete:** the release workspace, exact five-target
+  `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
+  blocking static-link verification are locally validated and proven by the
+  successful hosted `v0.1.0` release. The ships-only npm shim, five exact
+  optional platform packages, release packaging job, and five-platform `npx`
+  smoke matrix are also verified. G3 has not started.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
   the two confirmed checks and bounded privacy-aware caching; F3 activates the
@@ -1053,8 +1164,10 @@ Tier 0 behavior.
   confirmed set.
 - Distribution: G1's five-target static-binary matrix, checksums, attestations,
   static-link gate, and release workflow are complete and proven by the hosted
-  `v0.1.0` release. The npm wrapper (G2) and Homebrew formula (G3) remain
-  separate, unstarted tasks.
+  `v0.1.0` release. G2's ships-only npm shim, five exact optional platform
+  packages, release packaging integration, and cross-platform smoke matrix are
+  complete. G3 remains separate and unstarted; it owns npm publication,
+  provenance, and the Homebrew formula.
 - Active DAST/write probes: prohibited in v1, not merely postponed.
 
 ## Closeout gate for future milestone claims
