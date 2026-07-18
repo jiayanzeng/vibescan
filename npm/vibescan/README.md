@@ -15,4 +15,5 @@ npx vibescan --version
 
 If npm omitted the platform package, reinstall on a clean tree with `npm ci` and
 do not reuse `node_modules` across operating systems. The launcher also names the
-`cargo install vibescan` and GitHub release installer alternatives.
+`cargo install vibescan-cli` (which installs the `vibescan` binary) and GitHub
+release installer alternatives.

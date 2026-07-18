@@ -141,7 +141,7 @@ try {
   assert.match(missingOutput, /cached across operating systems/i);
   assert.match(missingOutput, /lockfile is stale/i);
   assert.match(missingOutput, /npm ci/i);
-  assert.match(missingOutput, /cargo install vibescan/i);
+  assert.match(missingOutput, /cargo install vibescan-cli/i);
   assert.match(missingOutput, /will not download or execute/i);
   assert.doesNotMatch(missingOutput, /\n\s+at\s/);
 

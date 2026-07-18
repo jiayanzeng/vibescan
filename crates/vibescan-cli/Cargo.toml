@@ -2,10 +2,12 @@
 name = "vibescan-cli"
 version = "0.1.0"
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
+readme = "../../README.md"
 repository.workspace = true
 rust-version.workspace = true
-description = "Command-line interface for vibescan."
+description = "Command-line interface for vibescan"
 
 [[bin]]
 name = "vibescan"

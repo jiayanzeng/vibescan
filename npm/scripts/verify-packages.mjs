@@ -28,6 +28,7 @@ function verifySource() {
   assert.equal(main.name, "vibescan");
   assert.equal(main.version, version);
   assert.deepEqual(main.bin, { vibescan: "bin/vibescan.js" });
+  assert.deepEqual(main.publishConfig, { access: "public", provenance: true });
   assertNoInstallFetch(main, shim);
 
   const expectedDependencies = Object.fromEntries(
@@ -58,7 +59,7 @@ function verifySource() {
     assert.deepEqual(manifest.cpu, [platform.cpu]);
     assert.equal(manifest.libc, undefined, `${platform.packageName} must not restrict libc`);
     assert.deepEqual(manifest.files, [platform.binary]);
-    assert.deepEqual(manifest.publishConfig, { access: "public" });
+    assert.deepEqual(manifest.publishConfig, { access: "public", provenance: true });
     assertNoInstallFetch(manifest);
   }
 }

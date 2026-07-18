@@ -1,0 +1,51 @@
+name: Publish npm packages with provenance
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist release plan supplied by the generated workflow.
+        required: true
+        type: string
+    secrets:
+      NPM_TOKEN:
+        description: Optional bootstrap token; remove after trusted publishing is configured.
+        required: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish shipped npm packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Download packed npm artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts-npm-packages
+          path: target/npm-packages
+
+      - name: Re-verify packed package contracts
+        run: >-
+          node npm/scripts/verify-packages.mjs
+          --packages target/npm-packages
+
+      - name: Publish platform packages, then the main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: >-
+          node npm/scripts/publish-packages.mjs
+          --packages target/npm-packages
+          --publish

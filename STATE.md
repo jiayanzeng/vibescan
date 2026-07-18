@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `1dbe6f2` (`main`, Task G2 merge commit;
-pull request #3).
+Current implementation baseline: `0ebca9b` (`main`, Task G2 close-out merge;
+pull request #4).
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -47,9 +47,14 @@ both Linux binaries are static, and all five GitHub Artifact Attestations
 verified against the release workflow and merge commit. Task G2 is complete:
 the unscoped `vibescan` npm package selects one of five exact-version optional
 platform packages, executes only the shipped binary, preserves its exit status,
-and has passed the hosted five-platform `npx` smoke matrix. Track G remains
-partial only because Task G3 has not started and npm publication/provenance plus
-the secondary Homebrew channel do not yet exist.
+and has passed the hosted five-platform `npx` smoke matrix. Task G3's local
+implementation now wires bottom-up crates.io publication, platform-first npm
+publication with OIDC provenance, and cargo-dist's prebuilt Homebrew formula
+publisher, and provides an executable release runbook. Track G's operational
+rollout remains partial because no crates.io/npm package or public Homebrew tap
+has been created or published from this worktree, and the literal instruction
+`cargo install vibescan` conflicts with the architecture-named
+`vibescan-cli` package (which installs the `vibescan` binary).
 Architecture §17.8 explicitly defers the noisy user-writable-metadata
 heuristic, so its absence is not an E2 gap. The verdict for the entire
 architecture document is therefore partial.
@@ -92,6 +97,14 @@ No pre-existing user change was present or modified. G2 changes only packaging,
 release workflow integration, tests, and documentation; it does not change a
 crate, dependency edge, scanner phase, target-project access, or Network
 capability.
+
+Task G3 began from a clean `main` at `0ebca9b`, after pull request #4 landed the
+G2 close-out record. Work is on `codex/track-g3-release-publishing`; no
+pre-existing user change was present or modified. Before the G3 commit, the
+worktree intentionally contains only release metadata, generated workflow,
+publisher scripts/tests, npm manifest provenance, documentation, and this
+status update. It does not change Rust scanner behavior, dependencies, the
+eight-crate DAG, target-project access, or any runtime Network capability.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -276,7 +289,7 @@ spawns its binary with unchanged arguments and inherited standard streams. It
 exits with the child's status. It contains no fetch implementation and has no
 postinstall hook. When optional dependencies were skipped, it exits 1 without a
 stack trace and explains cross-OS `node_modules` caches, stale lockfiles,
-`npm ci`, `cargo install vibescan`, and the shell-installer alternative while
+`npm ci`, `cargo install vibescan-cli`, and the shell-installer alternative while
 stating that no replacement binary will be downloaded or executed
 automatically.
 
@@ -344,10 +357,139 @@ tarballs, installed them offline with lifecycle scripts disabled, verified
 skipped-optional-dependency error.
 
 No live target, credential, registry query, npm/crates.io/Homebrew publication,
-or target-project write was used. G2 is complete. G3 remains unstarted and owns
-npm publication/provenance plus the Homebrew formula. Architecture §13.1 still
-needs the review-time one-line clarification from `ships/downloads` to `ships`;
+or target-project write was used. G2 is complete. At G2 closeout, G3 remained
+unstarted and owned npm publication/provenance plus the Homebrew formula.
+Architecture §13.1 still needs the review-time one-line clarification from
+`ships/downloads` to `ships`;
 G2 deliberately does not edit the architecture.
+
+## Track G3 implementation verification observed on 2026-07-18
+
+G3 is deferred distribution work under architecture §13.1. It does not alter
+the scanner pipeline, LocalStatic default, runtime Network consent, Registry
+egress, secret handling, or target-project safety. The exact eight-crate DAG is
+unchanged.
+
+All eight Cargo packages now inherit the public homepage and package the root
+README. `scripts/publish-crates.sh` encodes the documented dependency order:
+types, secrets, git, report, supabase, registry, core, then CLI. Its default is
+fail-closed: callers must choose `--dry-run` for deterministic local packaging
+contract checks or `--publish` for a live registry mutation. The generated
+release workflow invokes the live mode only after GitHub hosting succeeds. It
+uses an optional first-release `CARGO_REGISTRY_TOKEN`, otherwise the official
+crates.io trusted-publishing action supplies a short-lived token through OIDC;
+the token remains in the environment and is not placed on a process command
+line.
+
+The Cargo package name remains `vibescan-cli`, as required by the exact package
+DAG and boundary checker, while its binary remains `vibescan`. An offline local
+`cargo install --path crates/vibescan-cli` installed and ran `vibescan 0.1.0`.
+The Track G instruction's literal `cargo install vibescan` cannot resolve this
+package name. Renaming the CLI package or adding a ninth alias crate would
+contradict the current architecture and requires an explicit specification
+decision; G3 does neither. The truthful registry command is
+`cargo install vibescan-cli`, which installs the `vibescan` executable.
+
+All six npm manifests request public provenance publication. The custom
+publisher validates the packed manifest, publishes the five exact platform
+packages first, then publishes unscoped `vibescan` last, and passes
+`--provenance` explicitly. Like the Cargo publisher, it refuses an invocation
+that does not choose exactly one of `--print-plan`, `--dry-run`, or `--publish`.
+The reusable workflow uses Node 24, `id-token: write`, an optional bootstrap
+`NPM_TOKEN`, and the packed artifacts already built and smoke-tested by G2. It
+does not introduce an install-time fetch or enable cargo-dist's fetch-based npm
+installer.
+
+`dist` 0.32.0 now generates `vibescan.rb` and publishes it to the configured
+`jiayanzeng/homebrew-tap` only after hosting. The formula selects four macOS /
+Linux prebuilt archives, carries their SHA-256 values, and installs the shipped
+`vibescan` binary without a Rust toolchain. The prior successful `v0.1.0` CI
+platform artifacts were downloaded from GitHub Actions through the signed-in
+project session; every artifact zip matched the digest reported by GitHub.
+Replaying the global cargo-dist build with those four platform manifests
+produced a checksum-bearing formula. A temporary local tap installed it,
+`/opt/homebrew/bin/vibescan --version` returned `vibescan 0.1.0`, and the test
+installation and tap were removed afterward.
+
+Homebrew auto-updated itself while performing the functional check and installed
+its audit gem bundle. The audit command also enabled Homebrew developer mode;
+that mode was explicitly returned to off after the test. No `vibescan` formula
+or `vibescan-test/tap` entry remains installed.
+
+Current Homebrew rejects formula file paths for both audit and install, which
+is why the functional check used a temporary tap. `brew audit --strict` ran by
+tap name and reported cargo-dist-generated strict/style findings (including no
+`test do` block and formatting rules). The generated publisher itself runs
+`brew style --fix` with cargo-dist's documented exclusions before committing;
+the stronger functional install still passed. No generated formula is checked
+into this repository.
+
+`RELEASING.md` documents immutable versioning, all eight Cargo and six npm
+publisher identities, bootstrap tokens, trusted-publisher migration, the exact
+publication orders, tap setup, tag behavior, checksums, GitHub attestation
+verification, npm signature/provenance checks, and per-channel install checks.
+README and npm fallback text now use the architecture-correct
+`cargo install vibescan-cli` command and do not claim that registry packages or
+the tap already exist.
+
+The following G3-specific checks passed:
+
+```sh
+npm --prefix npm test
+python3 scripts/verify-release-publishing.py
+bash scripts/publish-crates.sh --dry-run
+node npm/scripts/build-packages.mjs \
+  --artifacts target/distrib --out target/npm-packages
+node npm/scripts/verify-packages.mjs --packages target/npm-packages
+node npm/scripts/publish-packages.mjs \
+  --packages target/npm-packages --print-plan
+dist generate --check
+dist plan --output-format=json
+dist build --tag=v0.1.0 --artifacts=global --allow-dirty
+ruby -c target/distrib/vibescan.rb
+cargo install --offline --locked --path crates/vibescan-cli \
+  --root /private/tmp/vibescan-g3-install.zbayG1
+/private/tmp/vibescan-g3-install.zbayG1/bin/vibescan --version
+brew install vibescan-test/tap/vibescan
+/opt/homebrew/bin/vibescan --version
+```
+
+All GitHub workflow files parsed as YAML. The full architecture gate also
+passed on this worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The hardening aggregate's optional real-repository leg was skipped because no
+fixture was supplied. No golden or report snapshot changed. No live npm or
+crates.io query/publication was run, no public tap was created by this work, no credential
+was handled, and no tag was pushed. A trial offline `cargo package --no-verify`
+of a parent crate correctly failed because its versioned workspace dependencies
+do not yet exist in the crates.io index; the deterministic `--dry-run` contract
+therefore uses `cargo package --list` for every crate, while the hosted live job
+will prove registry resolution after the one-time bootstrap.
+
+G3's repository implementation is locally verified, but its external
+acceptance remains partial until the release owner creates/controls the eight
+crates.io names, six npm identities and `@vibescan` scope, creates
+`jiayanzeng/homebrew-tap`, configures bootstrap secrets and then trusted
+publishers, and cuts a new immutable version tag. Those are explicit external
+mutations and were not inferred from approval to implement G3. After that tag,
+the owner must verify all package pages show the intended provenance and all
+three public install commands succeed. The `cargo install vibescan` naming
+conflict remains an architecture-owner decision.
 
 ## Track F verification and close-out re-audit observed on 2026-07-18
 
@@ -1035,12 +1177,16 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1/G2 complete:** the release workspace, exact five-target
+- **Track G1/G2 complete; G3 implementation verified, rollout pending:** the release workspace, exact five-target
   `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
   blocking static-link verification are locally validated and proven by the
   successful hosted `v0.1.0` release. The ships-only npm shim, five exact
   optional platform packages, release packaging job, and five-platform `npx`
-  smoke matrix are also verified. G3 has not started.
+  smoke matrix are also verified. G3 now has fail-closed Cargo/npm publishers,
+  OIDC provenance wiring, a functional prebuilt Homebrew formula, and a release
+  runbook. Live crates.io/npm/tap bootstrap, publication, and post-publish
+  provenance/install checks remain outstanding, as does the CLI Cargo package
+  naming decision.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
   the two confirmed checks and bounded privacy-aware caching; F3 activates the
@@ -1166,8 +1312,12 @@ Tier 0 behavior.
   static-link gate, and release workflow are complete and proven by the hosted
   `v0.1.0` release. G2's ships-only npm shim, five exact optional platform
   packages, release packaging integration, and cross-platform smoke matrix are
-  complete. G3 remains separate and unstarted; it owns npm publication,
-  provenance, and the Homebrew formula.
+  complete. G3's local publishers, npm provenance contract, Homebrew formula,
+  and runbook are implemented and verified. The next step is an explicitly
+  authorized external bootstrap and a new-version release tag; afterward verify
+  registry provenance and all three public installs. Do not add a ninth crate
+  or rename `vibescan-cli` merely to satisfy the instruction's literal Cargo
+  command without first amending the architecture.
 - Active DAST/write probes: prohibited in v1, not merely postponed.
 
 ## Closeout gate for future milestone claims
