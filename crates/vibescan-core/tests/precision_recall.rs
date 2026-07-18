@@ -48,6 +48,11 @@ enum ExpectedEvidence {
         project_url: String,
         table: String,
     },
+    RlsPolicy {
+        project_url: String,
+        table: String,
+        command: String,
+    },
     Dependency {
         package: String,
     },
@@ -263,6 +268,14 @@ fn expected_identity(finding: &ExpectedFinding) -> StableIdentity {
         ExpectedEvidence::RlsProbe { project_url, table } => {
             (format!("rls:{table}"), normalized_project_url(project_url))
         }
+        ExpectedEvidence::RlsPolicy {
+            project_url,
+            table,
+            command,
+        } => (
+            format!("rls:{table}:{command}"),
+            normalized_project_url(project_url),
+        ),
         ExpectedEvidence::Dependency { package } => {
             (format!("dependency:{package}"), String::new())
         }
@@ -296,6 +309,15 @@ fn observed_identity(finding: &Finding) -> StableIdentity {
         Evidence::RlsProbe { project, table, .. } => {
             (format!("rls:{table}"), normalized_project_url(&project.url))
         }
+        Evidence::RlsPolicy {
+            project,
+            table,
+            command,
+            ..
+        } => (
+            format!("rls:{table}:{command}"),
+            normalized_project_url(&project.url),
+        ),
         Evidence::Dependency { package, .. } => (format!("dependency:{package}"), String::new()),
         Evidence::Correlation {
             rule_id,
@@ -317,6 +339,7 @@ fn finding_rule_id(finding: &Finding) -> String {
             format!("supabase-key:{}", enum_string(class))
         }
         Evidence::RlsProbe { exposure, .. } => format!("rls:{}", enum_string(exposure)),
+        Evidence::RlsPolicy { exposure, .. } => format!("rls:{}", enum_string(exposure)),
         Evidence::Dependency { reason, .. } => format!("dependency:{}", enum_string(reason)),
         Evidence::Correlation { rule_id, .. } => rule_id.0.clone(),
         Evidence::Note { .. } => "note".to_owned(),

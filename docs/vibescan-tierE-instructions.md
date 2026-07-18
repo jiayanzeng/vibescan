@@ -203,8 +203,8 @@ the audit, or any row data.
 ### Spec basis
 
 - **§7.2 / §10.2:** Tier 1 emits **distinct, `Confirmed`** findings for: RLS
-  disabled; RLS enabled with permissive `USING (true)`; missing-operation policy
-  leaving an operation open; and inferred write-exposure. (The fifth §10.2 item,
+  disabled; RLS enabled with permissive `USING (true)`; a missing-operation
+  policy advisory; and inferred write-exposure. (The fifth §10.2 item,
   "policy keyed on user-writable metadata," is scoped out below.)
 - **§7.3:** write-exposure is **inferred** from grants + absent restricting policy
   — **never demonstrated** by a write.
@@ -256,27 +256,34 @@ evidence. A dedicated variant is required.
 `PgCatalogSource` seam):
 
 1. **RLS disabled** (`RlsExposure::RlsDisabled`): a table with `relrowsecurity =
-   false` that is an API-exposed candidate. Severity per §10.2 (Critical in the
-   correlation, but as a standalone Tier 1 finding follow §10.2's severity — do
-   not overclaim; the *chain* is what's Critical, via E3).
+   false` that is an API-exposed candidate ⇒ **Critical** (§10.2/§17.8). It is
+   read-equivalent to a Tier 0 `Exposed` result and strictly more definitive, so it
+   carries the same severity **standalone** — correlation (E3) adds context, it does
+   not create the Critical.
 2. **Permissive `USING (true)`** (`RlsExposure::PermissivePolicy`): RLS enabled but
-   a policy whose `USING` predicate is a literal-true (`true`, `(true)`). Match the
-   **normalized literal**, not a substring — `using (true)` and `USING (TRUE)` yes;
-   `using (is_true(x))` no. This is the same segment/whole-token discipline the
-   codebase already learned the hard way (C1, the ignore layer) — a substring
-   match on `true` is a defect.
+   a policy whose `USING` predicate is a literal-true (`true`, `(true)`) ⇒
+   **Critical** (§10.2/§17.8) — read-equivalent to RLS-off. Match the **normalized
+   literal**, not a substring — `using (true)` and `USING (TRUE)` yes; `using
+   (is_true(x))` no. This is the same segment/whole-token discipline the codebase
+   already learned the hard way (C1, the ignore layer) — a substring match on `true`
+   is a defect.
 3. **Missing-operation policy** (`RlsExposure::MissingOperationPolicy`): RLS enabled
    with at least one policy, but a command (`SELECT`/`INSERT`/`UPDATE`/`DELETE`)
-   has **no** policy covering it — under Postgres RLS, an operation with no
-   permissive policy is denied, *except* the table owner / `BYPASSRLS` roles; the
-   finding is "operation X has no policy; verify intended access," Confirmed on the
-   catalog fact.
+   has **no** policy covering it ⇒ **Medium**, as an **advisory** (§10.2/§17.8).
+   Under Postgres default-deny an uncovered operation is *denied* for non-owner
+   roles (the table owner / `BYPASSRLS` excepted) — the **secure** direction — so
+   the finding is "operation X has no policy; denied by default for `anon`/
+   `authenticated`, verify this is intended," Confirmed on the catalog fact. Frame
+   it as a possibly-incomplete policy set, **never** as an open/exposed operation (a
+   missing policy closes the op, it does not open it).
 4. **Inferred write-exposure** (`RlsExposure::InferredWriteExposure`): a role grant
    (`information_schema.role_table_grants`) permitting `INSERT`/`UPDATE`/`DELETE`
    to `anon`/`authenticated` **combined with** the absence of a restricting policy
-   for that operation ⇒ inferred openness. **Inferred only** — no write is
-   attempted (§7.3). Detail must say "inferred from grants + absent policy," never
-   claim a demonstrated write.
+   for that operation ⇒ inferred openness ⇒ **High** (§10.2/§17.8). **Inferred
+   only** — no write is attempted (§7.3); the confidence discount for "inferred, not
+   demonstrated" is why it sits below the confirmed read cases rather than at
+   Critical. Detail must say "inferred from grants + absent policy," never claim a
+   demonstrated write.
 
 **Evidence.** Every emitted finding uses `Evidence::RlsPolicy { project, table,
 command, using_expr, check_expr, rowsecurity }`. No row data, ever — catalog
@@ -375,23 +382,35 @@ policy finding.
 not by `RlsProbe` alone, so an exposed elevated key correctly moots Tier 1 findings
 too.
 
+**Severity note (§17.8) — the chain annotates, it does not escalate.** The Tier 1
+`RlsDisabled`/`PermissivePolicy` finding is **already Critical** standalone (E2). So
+rule 1 must correlate the exposed key with it and emit the composite for *context
+and priority* — it must **not** be the thing that raises the constituent to
+Critical, and it must not double-count severity. Assert the composite is produced
+and links the two findings; assert the RLS constituent was Critical before
+correlation ran.
+
 **Fixtures.** `network_rls_off_table_fixture`: construct a `Tier1IntrospectInput`
 for the fixture's project, drive `introspect_tier1_with_source(&MockPgCatalog{…}, …)`
-returning a `relrowsecurity=false` candidate, assert one `Confirmed` `RlsDisabled`
-finding, then `correlate_findings(&[key, rls_off])` and assert the Critical chain
-fires **from the introspection finding** (this is the test that proves the rule-1
-extension). `network_permissive_using_true_policy_fixture`: same, with an RLS-on +
-`USING (true)` catalog, asserting `PermissivePolicy` and (if a client-reachable key
-is present in the fixture) the chain. Both keep a `cfg(not(network))` `#[ignore]`d
-stub, matching the Tier 0 fixture's structure.
+returning a `relrowsecurity=false` candidate, assert one **Critical** `RlsDisabled`
+finding, then `correlate_findings(&[key, rls_off])` and assert the composite is
+emitted and correlates the key with the (already-Critical) introspection finding
+(this is the test that proves the rule-1 extension). `network_permissive_using_true_policy_fixture`:
+same, with an RLS-on + `USING (true)` catalog, asserting a **Critical**
+`PermissivePolicy` and (if a client-reachable key is present in the fixture) the
+composite. Both keep a `cfg(not(network))` `#[ignore]`d stub, matching the Tier 0
+fixture's structure.
 
 ### Acceptance criteria (self-verifiable)
 
 1. **Chain fires from introspection:** a unit/integration test proves
-   `correlate_findings` emits the Critical composite when given a
-   `ClientReachable`/committed publishable key **and** a Tier 1 `RlsDisabled`
-   finding on the same project — with **no** `Evidence::RlsProbe` present.
-2. **Same for permissive:** the chain fires from a `PermissivePolicy` finding.
+   `correlate_findings` emits the composite when given a `ClientReachable`/committed
+   publishable key **and** a Tier 1 `RlsDisabled` finding on the same project — with
+   **no** `Evidence::RlsProbe` present. Assert the constituent `RlsDisabled` finding
+   is **Critical before correlation** (§17.8) and the composite correlates the two
+   without re-deriving or double-counting severity.
+2. **Same for permissive:** the composite fires from an (already-Critical)
+   `PermissivePolicy` finding.
 3. **Negative controls:** a `MissingOperationPolicy`-only or
    `InferredWriteExposure`-only finding does **not** by itself fire rule 1; a Tier 1
    finding on a *different* normalized project does not correlate with the key.

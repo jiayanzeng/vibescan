@@ -26,7 +26,9 @@ feature and the user explicitly opts in.
   database URL only from `VIBESCAN_SUPABASE_DB_URL`. It rejects non-Supabase
   database/pooler hosts and nonstandard ports before connecting, uses rustls,
   and issues only catalog `SELECT`s. Audit records omit credentials, policy
-  bodies, database errors, and row data.
+  bodies, database errors, row data, and counts. Tier 1 findings reproduce the
+  relevant `USING`/`WITH CHECK` policy predicate without retaining application
+  rows.
 - Generic secret rules use an attributed Gitleaks-compatible subset; Supabase
   key semantics and correlation remain vibescan-specific.
 
@@ -133,7 +135,7 @@ Build with Tier 0 network probing support and opt in to read-only RLS probes:
 cargo run -p vibescan-cli --features network -- /path/to/repo --rls-tier0-read-probe
 ```
 
-To exercise the E1 Tier 1 transport plumbing, set
+To run Tier 1 introspection, set
 `VIBESCAN_SUPABASE_DB_URL` locally (for example through a secret manager) and
 use the distinct opt-in:
 
@@ -141,8 +143,13 @@ use the distinct opt-in:
 cargo run -p vibescan-cli --features network -- /path/to/repo --rls-tier1-introspect
 ```
 
-E1 establishes validated, audited catalog reads; Tier 1 policy findings are
-added by the dependency-ordered E2 task.
+The current Tier 1 pass emits `Confirmed` findings for Critical RLS-disabled and
+literal-true permissive policies, a Medium default-deny missing-operation
+advisory, and High write exposure inferred from role grants plus an absent
+operation policy. It never attempts a write. Correlation and the gated Tier 1
+fixtures remain assigned to E3. Architecture §17.8 defers the noisy
+user-writable-metadata policy heuristic; this pass does not infer it by
+substring matching.
 
 The process exit code is controlled by `--severity-gate`, which defaults to
 `high`.

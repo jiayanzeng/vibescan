@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,7 +7,8 @@ use vibescan_report::{ReportFormat, TtyStyle, render, render_tty};
 use vibescan_types::{
     Category, Confidence, Evidence, Finding, FindingId, HistoryScope, Location, LocationClass,
     NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, NetworkScope,
-    Provenance, RepoPath, ScanResult, ScanScope, ScanStats, SecretFingerprint, Severity, Span,
+    Provenance, RepoPath, RlsExposure, ScanResult, ScanScope, ScanStats, SecretFingerprint,
+    Severity, Span, SupabaseProject,
 };
 
 const REDACTED_SECRET: &str = "sk_liv...1234";
@@ -47,6 +49,28 @@ fn every_format_renders_the_redacted_evidence() {
     }
 }
 
+#[test]
+fn every_format_renders_the_rls_policy_reproduction() {
+    let result = sample_result();
+    let rendered = [
+        ("JSON", render(&result, ReportFormat::Json).unwrap()),
+        ("SARIF", render(&result, ReportFormat::Sarif).unwrap()),
+        ("HTML", render(&result, ReportFormat::Html).unwrap()),
+        ("TTY", render_tty(&result, TtyStyle::Plain)),
+    ];
+
+    for (format, output) in rendered {
+        assert!(
+            output.contains("(true)"),
+            "{format} did not render the policy predicate"
+        );
+        assert!(
+            output.to_ascii_lowercase().contains("permissive"),
+            "{format} did not render the policy exposure"
+        );
+    }
+}
+
 fn assert_or_update_snapshot(name: &str, actual: &str) {
     let path = snapshot_dir().join(name);
     let update = env::var_os("UPDATE_GOLDEN").is_some_and(|value| value == "1");
@@ -82,7 +106,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn sample_result() -> ScanResult {
-    let finding = Finding {
+    let secret_finding = Finding {
         id: FindingId("snapshot-secret".to_owned()),
         category: Category::SecretExposure,
         severity: Severity::High,
@@ -107,9 +131,39 @@ fn sample_result() -> ScanResult {
         related: Vec::new(),
         confidence: Confidence::Likely,
     };
+    let rls_finding = Finding {
+        id: FindingId("snapshot-rls-policy".to_owned()),
+        category: Category::Rls,
+        severity: Severity::Critical,
+        title: "Supabase table profiles has a literal-true SELECT policy".to_owned(),
+        detail: "Credentialed Tier 1 catalog introspection confirmed a permissive policy whose USING predicate is the literal true.".to_owned(),
+        locations: vec![Location {
+            path: RepoPath("supabase/policies.sql".to_owned()),
+            span: None,
+            provenance: Provenance::WorkingTree,
+            additional_provenance: Vec::new(),
+            location_class: LocationClass::ServerOnly,
+        }],
+        evidence: Evidence::RlsPolicy {
+            project: SupabaseProject {
+                ref_id: Some("abcdefghijklmnopqrst".to_owned()),
+                url: "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+            },
+            table: "profiles".to_owned(),
+            command: "SELECT".to_owned(),
+            using_expr: Some("(true)".to_owned()),
+            check_expr: None,
+            rowsecurity: true,
+            exposure: RlsExposure::PermissivePolicy,
+        },
+        remediation: "Replace the literal-true predicate with a least-privilege condition."
+            .to_owned(),
+        related: Vec::new(),
+        confidence: Confidence::Confirmed,
+    };
 
     ScanResult {
-        findings: vec![finding],
+        findings: vec![secret_finding, rls_finding],
         scope: ScanScope {
             target: "fixtures/report-format-snapshots".to_owned(),
             working_tree: true,
@@ -117,7 +171,7 @@ fn sample_result() -> ScanResult {
             network: NetworkScope {
                 enabled: true,
                 tier0_read_probe: true,
-                tier1_introspection: false,
+                tier1_introspection: true,
                 actions: vec![
                     NetworkActionAudit {
                         kind: NetworkActionKind::RootEnumeration,
@@ -146,6 +200,15 @@ fn sample_result() -> ScanResult {
                         outcome: NetworkActionOutcome::Exposed,
                         observed_row_count: Some(1),
                     },
+                    NetworkActionAudit {
+                        kind: NetworkActionKind::CatalogIntrospection,
+                        intent: NetworkActionIntent::Select,
+                        endpoint: "db.abcdefghijklmnopqrst.supabase.co:5432".to_owned(),
+                        table: Some("profiles".to_owned()),
+                        status: None,
+                        outcome: NetworkActionOutcome::CatalogRead,
+                        observed_row_count: None,
+                    },
                 ],
             },
             warnings: Vec::new(),
@@ -154,6 +217,11 @@ fn sample_result() -> ScanResult {
         started_at: "2026-01-01T00:00:00Z".to_owned(),
         duration_ms: 42,
         stats: ScanStats {
+            by_severity: BTreeMap::from([(Severity::Critical, 1), (Severity::High, 1)]),
+            by_category: BTreeMap::from([
+                (Category::SecretExposure, 1),
+                (Category::Rls, 1),
+            ]),
             paths_walked: 40,
             blobs_read: 40,
             unique_contents: 30,

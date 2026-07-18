@@ -12,7 +12,6 @@
                 "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
                 "intent": "get",
                 "kind": "root_enumeration",
-                "observed_row_count": null,
                 "outcome": "root_enumerated",
                 "status": 200,
                 "table": null
@@ -21,7 +20,6 @@
                 "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1",
                 "intent": "get",
                 "kind": "table_read",
-                "observed_row_count": null,
                 "outcome": "protected",
                 "status": 403,
                 "table": "private_profiles"
@@ -34,6 +32,14 @@
                 "outcome": "exposed",
                 "status": 200,
                 "table": "public_profiles"
+              },
+              {
+                "endpoint": "db.abcdefghijklmnopqrst.supabase.co:5432",
+                "intent": "select",
+                "kind": "catalog_introspection",
+                "outcome": "catalog_read",
+                "status": null,
+                "table": "profiles"
               }
             ],
             "networkEnabled": true,
@@ -82,6 +88,33 @@
             "severity": "high"
           },
           "ruleId": "snapshot-secret"
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "supabase/policies.sql"
+                },
+                "region": {}
+              },
+              "properties": {
+                "locationClass": "ServerOnly",
+                "provenance": "working tree"
+              }
+            }
+          ],
+          "message": {
+            "text": "Supabase table profiles has a literal-true SELECT policy: PermissivePolicy table profiles on https://abcdefghijklmnopqrst.supabase.co; command SELECT; rowsecurity enabled; USING (true); WITH CHECK <none>"
+          },
+          "properties": {
+            "category": "rls",
+            "confidence": "confirmed",
+            "related": [],
+            "severity": "critical"
+          },
+          "ruleId": "snapshot-rls-policy"
         }
       ],
       "tool": {
@@ -105,6 +138,24 @@
               },
               "shortDescription": {
                 "text": "Secret candidate matched stripe-secret-key"
+              }
+            },
+            {
+              "fullDescription": {
+                "text": "Credentialed Tier 1 catalog introspection confirmed a permissive policy whose USING predicate is the literal true."
+              },
+              "help": {
+                "text": "Replace the literal-true predicate with a least-privilege condition."
+              },
+              "id": "snapshot-rls-policy",
+              "name": "Supabase table profiles has a literal-true SELECT policy",
+              "properties": {
+                "category": "rls",
+                "confidence": "confirmed",
+                "security-severity": "9.5"
+              },
+              "shortDescription": {
+                "text": "Supabase table profiles has a literal-true SELECT policy"
               }
             }
           ],

@@ -68,6 +68,12 @@ enum CanonicalEvidence {
         table: String,
         exposure: String,
     },
+    RlsPolicy {
+        project_url: String,
+        table: String,
+        command: String,
+        exposure: String,
+    },
     Dependency {
         package: String,
         manifest_path: String,
@@ -406,6 +412,18 @@ fn canonical_evidence(evidence: &Evidence) -> CanonicalEvidence {
             table: table.clone(),
             exposure: enum_string(exposure),
         },
+        Evidence::RlsPolicy {
+            project,
+            table,
+            command,
+            exposure,
+            ..
+        } => CanonicalEvidence::RlsPolicy {
+            project_url: project.url.clone(),
+            table: table.clone(),
+            command: command.clone(),
+            exposure: enum_string(exposure),
+        },
         Evidence::Dependency {
             package,
             manifest_path,
@@ -429,6 +447,7 @@ fn rule_id(finding: &Finding) -> String {
         Evidence::Secret { .. } => "generic-secret".to_owned(),
         Evidence::SupabaseKey { class, .. } => format!("supabase-key:{}", enum_string(class)),
         Evidence::RlsProbe { exposure, .. } => format!("rls:{}", enum_string(exposure)),
+        Evidence::RlsPolicy { exposure, .. } => format!("rls:{}", enum_string(exposure)),
         Evidence::Dependency { reason, .. } => format!("dependency:{}", enum_string(reason)),
         Evidence::Correlation { rule_id, .. } => rule_id.0.clone(),
         Evidence::Note { .. } => "note".to_owned(),

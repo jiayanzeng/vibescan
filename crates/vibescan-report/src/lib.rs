@@ -431,6 +431,23 @@ fn evidence_summary(evidence: &Evidence) -> String {
             "{exposure:?} table {table} on {} via {endpoint}; observed {observed_row_count} row(s)",
             project.url
         ),
+        Evidence::RlsPolicy {
+            project,
+            table,
+            command,
+            using_expr,
+            check_expr,
+            rowsecurity,
+            exposure,
+        } => {
+            let rowsecurity = if *rowsecurity { "enabled" } else { "disabled" };
+            let using_expr = using_expr.as_deref().unwrap_or("<none>");
+            let check_expr = check_expr.as_deref().unwrap_or("<none>");
+            format!(
+                "{exposure:?} table {table} on {}; command {command}; rowsecurity {rowsecurity}; USING {using_expr}; WITH CHECK {check_expr}",
+                project.url
+            )
+        }
         Evidence::Dependency {
             package,
             manifest_path,

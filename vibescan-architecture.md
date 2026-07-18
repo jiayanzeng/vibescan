@@ -258,7 +258,13 @@ This is the logic that makes vibescan smarter than a generic scanner, which woul
 Implements the three tiers of §7. Contracts:
 - **Table enumeration:** derive candidate API-exposed tables from a LocalStatic harvest of the client bundle/source (`.from()`, `.rpc()`, `/rest/v1/<table>` references). The live PostgREST OpenAPI root is not a reliable enumeration source with a public key under the current Supabase key model (admin-key-gated; 403 for anon/publishable), so it is at most a best-effort supplement.
 - **Tier 0 (read probe):** per candidate table, a read-only anon `GET /rest/v1/<table>?select=*&limit=1` with the public key in the `apikey` header; classify each as `Protected` (no rows / filtered / not found) or `Exposed` (rows returned). Attach reproduction metadata (endpoint, observed row count), never row contents. Emit Critical `Rls` findings for `Exposed`. Warnings must distinguish key-rejected (401), root-enumeration-forbidden (403, fall back to harvested list), and no-candidate-tables (nothing to probe) — never conflate them into a single opaque failure.
-- **Tier 1 (introspection, opt-in):** per table `rowsecurity`; per policy operation + `USING`/`WITH CHECK`. Detect and emit distinct findings for: RLS disabled; RLS enabled with permissive `USING (true)`; policy keyed on user-writable metadata; missing-operation policy leaving an operation open; inferred write-exposure. Mark `Confirmed`.
+- **Tier 1 (introspection, opt-in):** per table `rowsecurity`; per policy operation + `USING`/`WITH CHECK`. All Tier 1 findings are `Confirmed` (catalog-derived); severities track blast radius, since confidence is already fixed (resolved, §17.8):
+  - **RLS disabled** on an API-reachable table ⇒ **Critical** — read-equivalent to a Tier 0 `Exposed` result and strictly more definitive (catalog-confirmed, not probe-observed), so it gets the same severity.
+  - **Permissive `USING (true)`** on an API-reachable table ⇒ **Critical** — RLS is enabled but the predicate admits everyone, so it is read-equivalent to RLS-off.
+  - **Inferred write-exposure** (a grant permitting INSERT/UPDATE/DELETE to `anon`/`authenticated` with no restricting policy) ⇒ **High** — inferred from catalog facts, **never demonstrated by a write** (§1.3, §7.3); the confidence discount for "inferred, not proven" is why it sits below the confirmed read-exposure cases rather than at Critical.
+  - **Missing-operation policy** (RLS enabled, at least one policy, but an operation has no policy covering it) ⇒ **Medium**, as an **advisory**. Under Postgres default-deny an uncovered operation is *denied* for non-owner roles — the secure direction — so this flags a possibly-incomplete policy set to verify, not an open operation. (A missing policy *closes* the operation for `anon`/`authenticated`; do not describe it as "leaving an operation open.")
+  - **Policy keyed on user-writable metadata** — deferred as a noisy `Review` heuristic (§16); no finding in the confirmed set.
+  Correlation (§12 rule 1) does **not** change these base severities: when an exposed client-reachable key reaches an RLS-off/permissive table, the composite adds correlation context and priority to an **already-Critical** finding — it is not the source of the Critical.
 - **Storage/RPC (stretch, same tier gating):** flag public storage buckets and RPC functions exposed without execution restriction if reachable via the same enumeration. Optional in v1; spec it so the structure accommodates it.
 
 ### 10.3 Correlation contribution
@@ -602,6 +608,24 @@ deferred pending a download-signal decision (§16 governs). This keeps Track F's
 first pass to the two high-confidence checks and prevents the ecosystem asymmetry
 from being papered over. The track remains post-v1 and off by default; this
 decision unblocks writing the Track F instruction document.
+
+**17.8 — Tier 1 finding severities (§10.2, resolved 2026-07-18).** §10.2 fixed
+`Confirmed` confidence for the Tier 1 introspection findings but assigned them no
+**severities**; the E2 implementation then chose High for the read-exposure cases.
+That ranked a catalog-confirmed RLS-off *below* a probe-observed Tier 0 `Exposed`
+(Critical) — backwards triage, since introspection is the more definitive signal,
+and an artifact of an earlier instruction that told the implementer to "follow
+§10.2's severity" where none was written. Resolved: RLS-disabled and permissive
+`USING (true)` on API-reachable tables are **Critical** (read-equivalent to Tier 0
+Exposed, and confirmed); inferred-write-exposure is **High** (inferred, never
+demonstrated — the confidence discount keeps it below the confirmed read cases);
+missing-operation is a **Medium advisory** (default-deny makes an uncovered
+operation *denied*, not open — this also corrects §10.2's imprecise "leaving an
+operation open" wording). Severity tracks blast radius; confidence is captured
+separately as `Confirmed`. Correlation (§12 rule 1) adds context and priority, not
+base severity: an exposed key reaching an RLS-off table **annotates an
+already-Critical finding rather than escalating it** — which is what E3's chain
+assertion must check.
 
 ### Open question (deliberately not resolved here)
 

@@ -1,4 +1,4 @@
-vibescan snapshot - 1 finding(s) in 42 ms
+vibescan snapshot - 2 finding(s) in 42 ms
 collection: paths 40 | blobs 40 | unique 30 | dedup 25.00% | units 30 | truncated no
 target: fixtures/report-format-snapshots | scope: working tree only | network: enabled
 
@@ -6,6 +6,7 @@ network actions:
   - GET root enumeration at https://abcdefghijklmnopqrst.supabase.co/rest/v1/ -> root enumerated; HTTP 200
   - GET table read for table private_profiles at https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1 -> protected; HTTP 403
   - GET table read for table public_profiles at https://abcdefghijklmnopqrst.supabase.co/rest/v1/public_profiles?select=*&limit=1 -> exposed; HTTP 200; observed 1 row(s)
+  - SELECT catalog introspection for table profiles at db.abcdefghijklmnopqrst.supabase.co:5432 -> catalog read
 
 [high] Secret candidate matched stripe-secret-key [secret_exposure]
   id: snapshot-secret
@@ -13,4 +14,11 @@ network actions:
   location: src/server/billing.ts:3:17-57 (working tree, serveronly)
   evidence: secret sk_liv...1234 fingerprint snapshot-fingerprint
   remediation: Remove the secret from source and rotate it.
+
+[critical] Supabase table profiles has a literal-true SELECT policy [rls]
+  id: snapshot-rls-policy
+  confidence: confirmed
+  location: supabase/policies.sql (working tree, serveronly)
+  evidence: PermissivePolicy table profiles on https://abcdefghijklmnopqrst.supabase.co; command SELECT; rowsecurity enabled; USING (true); WITH CHECK <none>
+  remediation: Replace the literal-true predicate with a least-privilege condition.
 

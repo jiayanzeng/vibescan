@@ -68,8 +68,9 @@ deferred, and contradictory items separately.
 - JSON, SARIF, and HTML are always treated as shareable and must be redacted.
   TTY is redacted by default too. A future full-value local view would require
   an explicit local-only design and tests proving it cannot be exported.
-- RLS evidence contains the endpoint and observed row count, never returned row
-  data.
+- Tier 0 RLS evidence contains the endpoint and observed row count. Tier 1 RLS
+  evidence contains only catalog-derived table/operation, `rowsecurity`, and
+  policy predicates. Neither may contain returned application-row data.
 - Every finding must have stable identity, reproducible evidence, accurate
   scope/provenance, confidence, and concrete remediation.
 - Keep the seven-crate DAG. Do not add an eighth crate in v1.
@@ -195,9 +196,10 @@ third-party egress until the architecture explicitly resolves that conflict or
 the user authorizes a specification update. Preserve the offline dependency
 path in every case.
 
-Tier 1 introspection, release/distribution work, active DAST, web accounts,
-billing, and client-auth heuristics are deferred. Do not start deferred work
-merely because nearby code makes it convenient.
+Tier 1 is a staged post-v1 track and may advance only under the explicit Tier E
+instruction set; do not pull later E tasks forward merely because the catalog
+seam exists. Release/distribution work, active DAST, web accounts, billing, and
+client-auth heuristics remain separate deferred tracks.
 
 ## Test and fixture discipline
 

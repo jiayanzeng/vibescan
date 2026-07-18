@@ -77,10 +77,16 @@ Use an injected/mock HTTP client and assert method-equivalent behavior, exact
 continued offline findings after Network failure. Default tests must make zero
 requests. Do not run a live target without explicit user authorization.
 
-Tier 1 policy detections and correlation build on the E1 catalog seam in their
-dependency-ordered tasks. Active probes and writes remain deferred; no
-ownership proof makes them part of Tier 1. Registry/OSV egress belongs only in
-the architecture-owned `vibescan-registry` track, never in this crate.
+The E2 catalog pass emits only mechanically decidable findings: Critical RLS
+disabled, Critical literal-true permissive policy, Medium missing-operation
+advisory, and High grant-plus-absent-policy inferred write exposure. A missing
+operation policy is default-deny for `anon`/`authenticated`; never describe it
+as open exposure. Predicate substring matching is not evidence of a
+user-writable-metadata policy; architecture §17.8 defers that noisy `Review`
+heuristic. E3 owns correlation and fixture activation. Active probes and writes
+remain deferred; no ownership proof makes them part of Tier 1. Registry/OSV
+egress belongs only in the architecture-owned `vibescan-registry` track, never
+in this crate.
 
 Run package tests in both feature modes, the network golden corpus, all
 workspace gates, and `scripts/check-network-boundary.sh` for every change here.

@@ -198,6 +198,15 @@ pub enum Evidence {
         observed_row_count: u64,
         exposure: RlsExposure,
     },
+    RlsPolicy {
+        project: SupabaseProject,
+        table: String,
+        command: String,
+        using_expr: Option<String>,
+        check_expr: Option<String>,
+        rowsecurity: bool,
+        exposure: RlsExposure,
+    },
     Dependency {
         package: String,
         manifest_path: RepoPath,
@@ -326,6 +335,7 @@ pub struct NetworkActionAudit {
     pub table: Option<String>,
     pub status: Option<u16>,
     pub outcome: NetworkActionOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_row_count: Option<u64>,
 }
 
@@ -488,6 +498,50 @@ mod tests {
             serde_json::from_str(encoded).expect("older network scope deserializes");
 
         assert!(decoded.actions.is_empty());
+    }
+
+    #[test]
+    fn rls_policy_evidence_round_trips_through_json() {
+        let evidence = Evidence::RlsPolicy {
+            project: SupabaseProject {
+                ref_id: Some("abcdefghijklmnopqrst".to_owned()),
+                url: "https://abcdefghijklmnopqrst.supabase.co".to_owned(),
+            },
+            table: "profiles".to_owned(),
+            command: "SELECT".to_owned(),
+            using_expr: Some("(true)".to_owned()),
+            check_expr: None,
+            rowsecurity: true,
+            exposure: RlsExposure::PermissivePolicy,
+        };
+
+        let encoded = serde_json::to_string(&evidence).expect("RLS policy evidence serializes");
+        let decoded: Evidence =
+            serde_json::from_str(&encoded).expect("RLS policy evidence deserializes");
+
+        assert_eq!(decoded, evidence);
+        assert!(encoded.contains("\"kind\":\"rls_policy\""));
+        assert!(encoded.contains("\"using_expr\":\"(true)\""));
+    }
+
+    #[test]
+    fn catalog_action_omits_and_defaults_the_inapplicable_row_count() {
+        let action = NetworkActionAudit {
+            kind: NetworkActionKind::CatalogIntrospection,
+            intent: NetworkActionIntent::Select,
+            endpoint: "db.abcdefghijklmnopqrst.supabase.co:5432".to_owned(),
+            table: Some("profiles".to_owned()),
+            status: None,
+            outcome: NetworkActionOutcome::CatalogRead,
+            observed_row_count: None,
+        };
+
+        let encoded = serde_json::to_string(&action).expect("catalog action serializes");
+        assert!(!encoded.contains("observed_row_count"));
+
+        let decoded: NetworkActionAudit =
+            serde_json::from_str(&encoded).expect("omitted row count defaults");
+        assert_eq!(decoded, action);
     }
 
     #[test]

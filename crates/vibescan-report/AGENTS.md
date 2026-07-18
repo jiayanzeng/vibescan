@@ -19,8 +19,10 @@ does not permit sibling dependencies.
   redacted/fingerprinted evidence present in `Finding`.
 - Never accept a raw secret merely to render it. Never include returned row
   data, public keys in request headers, credentials, or environment values.
-- RLS reproduction is endpoint plus observed row count and must state read
-  exposure only.
+- Tier 0 RLS reproduction is endpoint plus observed row count and must state
+  read exposure only. Tier 1 reproduction is catalog-derived table/operation,
+  `rowsecurity`, and `USING`/`WITH CHECK` policy metadata; it must never imply
+  that an inferred write was attempted.
 - Render every relevant location/provenance and all coverage warnings. Do not
   hide truncation or Network degradation.
 - Escape all user/repository-derived HTML text and produce valid SARIF 2.1.0.

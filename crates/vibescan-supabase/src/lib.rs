@@ -1,8 +1,9 @@
 //! Supabase domain intelligence.
 //!
 //! By default this crate is LocalStatic only: it classifies Supabase key
-//! candidates and emits linkable findings. The Tier 0 read probe is compiled
-//! only with the `network` feature and must be explicitly enabled by callers.
+//! candidates and emits linkable findings. Tier 0 reads and Tier 1 catalog
+//! introspection are compiled only with the `network` feature and must be
+//! explicitly enabled by callers.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -18,7 +19,7 @@ use sha2::{Digest, Sha256};
 use url::Url;
 use vibescan_types::{
     CandidateKind, Category, Confidence, Evidence, Finding, FindingId, Location,
-    NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome,
+    NetworkActionAudit, NetworkActionIntent, NetworkActionKind, NetworkActionOutcome, RlsExposure,
     SecretCandidate, SecretFingerprint, Severity, SupabaseKeyClass, SupabaseProject,
 };
 
@@ -263,8 +264,9 @@ pub fn project_from_db_url(db_url: &str) -> Result<SupabaseProject, IntrospectEr
 
 /// Run Tier 1 catalog reads through an injected source.
 ///
-/// E1 establishes the transport, audit, and failure seams. The returned rows
-/// are intentionally not retained yet; E2 consumes them to emit findings.
+/// Successful catalog facts are converted into Tier 1 findings. Query failures
+/// remain nonfatal and suppress only conclusions that require the missing
+/// catalog facts.
 pub fn introspect_tier1_with_source(
     source: &impl PgCatalogSource,
     input: &Tier1IntrospectInput,
@@ -273,7 +275,7 @@ pub fn introspect_tier1_with_source(
     let endpoint = target.endpoint();
     let mut output = Tier1IntrospectOutput::default();
 
-    record_catalog_result(
+    let table_states = record_catalog_result(
         &mut output,
         &endpoint,
         CatalogQueryKind::TablesWithRowSecurity,
@@ -282,21 +284,42 @@ pub fn introspect_tier1_with_source(
     );
 
     for table in &input.candidate_tables {
-        record_catalog_result(
+        let policies = record_catalog_result(
             &mut output,
             &endpoint,
             CatalogQueryKind::Policies,
             Some(table),
             source.policies_for(table),
         );
-        record_catalog_result(
+        let grants = record_catalog_result(
             &mut output,
             &endpoint,
             CatalogQueryKind::Grants,
             Some(table),
             source.grants_for(table),
         );
+
+        let Some(table_states) = table_states.as_deref() else {
+            continue;
+        };
+        for table_state in table_states
+            .iter()
+            .filter(|state| catalog_table_matches(table, &state.schema, &state.table))
+        {
+            output.findings.extend(detect_tier1_table_findings(
+                input,
+                table,
+                table_state,
+                policies.as_deref(),
+                grants.as_deref(),
+            ));
+        }
     }
+
+    output
+        .findings
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    output.findings.dedup_by(|left, right| left.id == right.id);
 
     Ok(output)
 }
@@ -307,18 +330,19 @@ fn record_catalog_result<T>(
     query: CatalogQueryKind,
     table: Option<&str>,
     result: Result<Vec<T>, IntrospectError>,
-) {
-    let outcome = if result.is_ok() {
-        NetworkActionOutcome::CatalogRead
-    } else {
-        output
-            .warnings
-            .push(Tier1IntrospectWarning::CatalogQueryUnavailable {
-                host: endpoint.to_owned(),
-                query,
-                table: table.map(str::to_owned),
-            });
-        NetworkActionOutcome::TransportError
+) -> Option<Vec<T>> {
+    let (outcome, rows) = match result {
+        Ok(rows) => (NetworkActionOutcome::CatalogRead, Some(rows)),
+        Err(_) => {
+            output
+                .warnings
+                .push(Tier1IntrospectWarning::CatalogQueryUnavailable {
+                    host: endpoint.to_owned(),
+                    query,
+                    table: table.map(str::to_owned),
+                });
+            (NetworkActionOutcome::TransportError, None)
+        }
     };
     output.actions.push(NetworkActionAudit {
         kind: NetworkActionKind::CatalogIntrospection,
@@ -329,6 +353,241 @@ fn record_catalog_result<T>(
         outcome,
         observed_row_count: None,
     });
+    rows
+}
+
+const POLICY_COMMANDS: [&str; 4] = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+const WRITE_COMMANDS: [&str; 3] = ["INSERT", "UPDATE", "DELETE"];
+
+fn detect_tier1_table_findings(
+    input: &Tier1IntrospectInput,
+    candidate_table: &str,
+    table_state: &TableRls,
+    policies: Option<&[PolicyRow]>,
+    grants: Option<&[GrantRow]>,
+) -> Vec<Finding> {
+    // This mechanically decidable E2 pass intentionally does not infer that a
+    // predicate is keyed on user-writable metadata. Architecture section 17.8
+    // defers that noisy Review heuristic outside the confirmed finding set.
+    let table = evidence_table_name(candidate_table, table_state);
+    if !table_state.rowsecurity {
+        return vec![rls_policy_finding(
+            input,
+            &table,
+            "ALL",
+            None,
+            None,
+            false,
+            RlsExposure::RlsDisabled,
+            Severity::Critical,
+            format!("Supabase table {table} has RLS disabled"),
+            "Credentialed Tier 1 catalog introspection confirmed that row-level security is disabled for this API-exposed table.".to_owned(),
+            "Enable row-level security and add least-privilege policies for every intended API operation.".to_owned(),
+            None,
+        )];
+    }
+
+    let Some(policies) = policies else {
+        return Vec::new();
+    };
+    let table_policies = policies
+        .iter()
+        .filter(|policy| policy.schema == table_state.schema && policy.table == table_state.table)
+        .collect::<Vec<_>>();
+    let mut findings = Vec::new();
+
+    for policy in &table_policies {
+        let Some(using_expr) = policy.using_expr.as_deref() else {
+            continue;
+        };
+        if policy.permissive && is_literal_true(using_expr) {
+            let command = normalized_policy_command(&policy.command);
+            findings.push(rls_policy_finding(
+                input,
+                &table,
+                &command,
+                policy.using_expr.clone(),
+                policy.check_expr.clone(),
+                true,
+                RlsExposure::PermissivePolicy,
+                Severity::Critical,
+                format!("Supabase table {table} has a literal-true {command} policy"),
+                "Credentialed Tier 1 catalog introspection confirmed a permissive policy whose USING predicate is the literal true, so that policy does not restrict the operation.".to_owned(),
+                "Replace the literal-true predicate with a least-privilege condition tied to the authenticated subject and intended rows.".to_owned(),
+                Some(&command),
+            ));
+        }
+    }
+
+    if !table_policies.is_empty() {
+        for command in POLICY_COMMANDS {
+            if !table_policies
+                .iter()
+                .any(|policy| policy_covers_command(policy, command))
+            {
+                findings.push(rls_policy_finding(
+                    input,
+                    &table,
+                    command,
+                    None,
+                    None,
+                    true,
+                    RlsExposure::MissingOperationPolicy,
+                    Severity::Medium,
+                    format!("Supabase table {table} has no {command} policy"),
+                    format!("Credentialed Tier 1 catalog introspection confirmed that RLS is enabled and other policies exist, but no policy covers {command}. The operation is denied by default for anon/authenticated roles when no permissive policy applies; table owners and BYPASSRLS roles are exceptions. Verify that this secure default is the intended API behavior."),
+                    format!("Add an explicit least-privilege {command} policy if the operation is intended, or document and test that the default denial is required."),
+                    None,
+                ));
+            }
+        }
+    }
+
+    if let Some(grants) = grants {
+        for grant in grants.iter().filter(|grant| {
+            grant.schema == table_state.schema
+                && grant.table == table_state.table
+                && is_api_role(&grant.grantee)
+                && WRITE_COMMANDS
+                    .iter()
+                    .any(|command| grant.privilege.eq_ignore_ascii_case(command))
+                && !table_policies
+                    .iter()
+                    .any(|policy| policy_covers_command(policy, &grant.privilege))
+        }) {
+            let command = grant.privilege.trim().to_ascii_uppercase();
+            let grantee = grant.grantee.trim().to_ascii_lowercase();
+            findings.push(rls_policy_finding(
+                input,
+                &table,
+                &command,
+                None,
+                None,
+                true,
+                RlsExposure::InferredWriteExposure,
+                Severity::High,
+                format!("Supabase table {table} has inferred {command} exposure for {grantee}"),
+                format!("Write exposure is inferred from the {grantee} role's {command} grant plus the absence of a policy covering {command}; no write was attempted."),
+                format!("Revoke the {command} grant from {grantee} unless it is required, and add a least-privilege {command} policy before enabling the operation."),
+                Some(&grantee),
+            ));
+        }
+    }
+
+    findings
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rls_policy_finding(
+    input: &Tier1IntrospectInput,
+    table: &str,
+    command: &str,
+    using_expr: Option<String>,
+    check_expr: Option<String>,
+    rowsecurity: bool,
+    exposure: RlsExposure,
+    severity: Severity,
+    title: String,
+    detail: String,
+    remediation: String,
+    identity_detail: Option<&str>,
+) -> Finding {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{exposure:?}").as_bytes());
+    hasher.update(b"\0");
+    hasher.update(input.project.url.trim_end_matches('/').as_bytes());
+    hasher.update(b"\0");
+    hasher.update(table.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(command.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(identity_detail.unwrap_or_default().as_bytes());
+
+    Finding {
+        id: FindingId(format!(
+            "rls-policy-{}",
+            hex::encode(&hasher.finalize()[..12])
+        )),
+        category: Category::Rls,
+        severity,
+        title,
+        detail,
+        locations: vec![input.credential_location.clone()],
+        evidence: Evidence::RlsPolicy {
+            project: input.project.clone(),
+            table: table.to_owned(),
+            command: command.to_owned(),
+            using_expr,
+            check_expr,
+            rowsecurity,
+            exposure,
+        },
+        remediation,
+        related: Vec::new(),
+        confidence: Confidence::Confirmed,
+    }
+}
+
+fn catalog_table_matches(candidate: &str, schema: &str, table: &str) -> bool {
+    candidate
+        .split_once('.')
+        .map_or(candidate == table, |parts| {
+            parts.0 == schema && parts.1 == table
+        })
+}
+
+fn evidence_table_name(candidate: &str, table_state: &TableRls) -> String {
+    if candidate.contains('.') || table_state.schema == "public" {
+        candidate.to_owned()
+    } else {
+        format!("{}.{}", table_state.schema, table_state.table)
+    }
+}
+
+fn normalized_policy_command(command: &str) -> String {
+    command.trim().to_ascii_uppercase()
+}
+
+fn policy_covers_command(policy: &PolicyRow, command: &str) -> bool {
+    let policy_command = normalized_policy_command(&policy.command);
+    policy_command == "ALL" || policy_command.eq_ignore_ascii_case(command.trim())
+}
+
+fn is_api_role(role: &str) -> bool {
+    matches!(
+        role.trim().to_ascii_lowercase().as_str(),
+        "anon" | "authenticated"
+    )
+}
+
+fn is_literal_true(expression: &str) -> bool {
+    let mut normalized = expression.trim();
+    while let Some(inner) = strip_balanced_outer_parentheses(normalized) {
+        normalized = inner.trim();
+    }
+    normalized.eq_ignore_ascii_case("true")
+}
+
+fn strip_balanced_outer_parentheses(expression: &str) -> Option<&str> {
+    let expression = expression.trim();
+    if !expression.starts_with('(') || !expression.ends_with(')') {
+        return None;
+    }
+
+    let mut depth = 0_u64;
+    for (index, character) in expression.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 && index + character.len_utf8() != expression.len() {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    (depth == 0).then(|| &expression[1..expression.len() - 1])
 }
 
 fn validate_supabase_db_url(
@@ -2067,7 +2326,10 @@ mod tests {
         let output =
             introspect_tier1_with_source(&source, &input).expect("mock introspection succeeds");
 
-        assert!(output.findings.is_empty(), "E1 does not emit E2 detections");
+        assert!(
+            output.findings.is_empty(),
+            "the safe mock catalog should not emit Tier 1 findings"
+        );
         assert!(output.warnings.is_empty());
         assert_eq!(
             source.calls.borrow().as_slice(),
@@ -2101,6 +2363,185 @@ mod tests {
     }
 
     #[test]
+    fn tier1_detects_rls_disabled_candidate() {
+        let source = FakePgCatalog {
+            tables: vec![table_rls(false)],
+            policies: Vec::new(),
+            grants: Vec::new(),
+            ..FakePgCatalog::default()
+        };
+
+        let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+            .expect("mock introspection succeeds");
+
+        assert_single_tier1_finding(&output, RlsExposure::RlsDisabled, "ALL");
+        assert_eq!(output.findings[0].severity, Severity::Critical);
+        assert!(!policy_evidence(&output.findings[0]).rowsecurity);
+    }
+
+    #[test]
+    fn tier1_ignores_catalog_tables_outside_the_local_api_candidates() {
+        let source = FakePgCatalog {
+            tables: vec![TableRls {
+                schema: "public".to_owned(),
+                table: "unreferenced_admin_table".to_owned(),
+                rowsecurity: false,
+            }],
+            policies: Vec::new(),
+            grants: Vec::new(),
+            ..FakePgCatalog::default()
+        };
+
+        let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+            .expect("mock introspection succeeds");
+
+        assert!(output.findings.is_empty());
+    }
+
+    #[test]
+    fn tier1_detects_literal_true_permissive_policy() {
+        let source = FakePgCatalog {
+            policies: vec![policy_row("ALL", Some(" (( TRUE )) "), true)],
+            grants: Vec::new(),
+            ..FakePgCatalog::default()
+        };
+
+        let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+            .expect("mock introspection succeeds");
+
+        assert_single_tier1_finding(&output, RlsExposure::PermissivePolicy, "ALL");
+        assert_eq!(output.findings[0].severity, Severity::Critical);
+        assert_eq!(
+            policy_evidence(&output.findings[0]).using_expr,
+            Some(" (( TRUE )) ")
+        );
+    }
+
+    #[test]
+    fn tier1_detects_one_missing_select_policy() {
+        let source = FakePgCatalog {
+            policies: vec![
+                policy_row("INSERT", None, true),
+                policy_row("UPDATE", Some("auth.uid() = owner_id"), true),
+                policy_row("DELETE", Some("auth.uid() = owner_id"), true),
+            ],
+            grants: Vec::new(),
+            ..FakePgCatalog::default()
+        };
+
+        let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+            .expect("mock introspection succeeds");
+
+        assert_single_tier1_finding(&output, RlsExposure::MissingOperationPolicy, "SELECT");
+        assert_eq!(output.findings[0].severity, Severity::Medium);
+        assert!(output.findings[0].detail.contains("denied by default"));
+        assert!(output.findings[0].detail.contains("anon/authenticated"));
+        assert!(!output.findings[0].detail.contains("open"));
+        assert!(!output.findings[0].detail.contains("exposed"));
+    }
+
+    #[test]
+    fn tier1_infers_write_exposure_from_anon_grant_without_policy() {
+        let source = FakePgCatalog {
+            policies: Vec::new(),
+            grants: vec![grant_row("anon", "INSERT")],
+            ..FakePgCatalog::default()
+        };
+
+        let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+            .expect("mock introspection succeeds");
+
+        assert_single_tier1_finding(&output, RlsExposure::InferredWriteExposure, "INSERT");
+        assert_eq!(output.findings[0].severity, Severity::High);
+        assert!(output.findings[0].detail.contains("inferred"));
+        assert!(output.findings[0].detail.contains("no write was attempted"));
+        assert!(!output.findings[0].detail.contains("confirmed a write"));
+    }
+
+    #[test]
+    fn tier1_literal_true_matching_rejects_substrings() {
+        for expression in ["is_active = true", "true_flag", "(is_true(value))"] {
+            let source = FakePgCatalog {
+                policies: vec![policy_row("ALL", Some(expression), true)],
+                grants: Vec::new(),
+                ..FakePgCatalog::default()
+            };
+
+            let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+                .expect("mock introspection succeeds");
+
+            assert!(
+                output.findings.is_empty(),
+                "substring expression was misclassified: {expression}"
+            );
+        }
+    }
+
+    #[test]
+    fn tier1_output_contains_policy_reproduction_but_no_credentials_or_row_data() {
+        let source = FakePgCatalog {
+            policies: vec![PolicyRow {
+                policy: "catalog-row-marker".to_owned(),
+                roles: vec!["application-row-value".to_owned()],
+                ..policy_row("ALL", Some("(true)"), true)
+            }],
+            grants: Vec::new(),
+            ..FakePgCatalog::default()
+        };
+        let input = tier1_input(
+            "postgres://postgres:raw-db-password@db.abcdefghijklmnopqrst.supabase.co/postgres",
+        );
+
+        let output =
+            introspect_tier1_with_source(&source, &input).expect("mock introspection succeeds");
+        let serialized = format!(
+            "{}{}{}",
+            serde_json::to_string(&output.findings).expect("findings serialize"),
+            serde_json::to_string(&output.actions).expect("actions serialize"),
+            output
+                .warnings
+                .iter()
+                .map(Tier1IntrospectWarning::message)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+
+        assert!(
+            serialized.contains("(true)"),
+            "policy predicate is evidence"
+        );
+        for forbidden in [
+            "raw-db-password",
+            "catalog-row-marker",
+            "application-row-value",
+            "count",
+        ] {
+            assert!(
+                !serialized.to_ascii_lowercase().contains(forbidden),
+                "Tier 1 output leaked {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn tier1_metadata_keyed_policy_heuristic_remains_out_of_e2() {
+        let source = FakePgCatalog {
+            policies: vec![policy_row(
+                "ALL",
+                Some("(auth.jwt() -> 'user_metadata' ->> 'plan') = 'admin'"),
+                true,
+            )],
+            grants: Vec::new(),
+            ..FakePgCatalog::default()
+        };
+
+        let output = introspect_tier1_with_source(&source, &tier1_input(tier1_db_url()))
+            .expect("mock introspection succeeds");
+
+        assert!(output.findings.is_empty());
+    }
+
+    #[test]
     fn tier1_catalog_failure_is_nonfatal_and_sanitized() {
         let source = FakePgCatalog {
             fail: Some(CatalogQueryKind::Policies),
@@ -2117,6 +2558,10 @@ mod tests {
         assert_eq!(
             output.actions[1].outcome,
             NetworkActionOutcome::TransportError
+        );
+        assert!(
+            output.findings.is_empty(),
+            "a failed policy query must not manufacture a policy finding"
         );
         let serialized = serde_json::to_string(&output.actions).expect("actions serialize");
         assert!(!serialized.contains("raw-db-password"));
@@ -2217,6 +2662,10 @@ mod tests {
         }
     }
 
+    fn tier1_db_url() -> &'static str {
+        "postgres://postgres:pw@db.abcdefghijklmnopqrst.supabase.co/postgres"
+    }
+
     fn tier1_input(db_url: &str) -> Tier1IntrospectInput {
         Tier1IntrospectInput {
             project: SupabaseProject {
@@ -2235,10 +2684,26 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
     struct FakePgCatalog {
         calls: RefCell<Vec<(CatalogQueryKind, Option<String>)>>,
         fail: Option<CatalogQueryKind>,
+        tables: Vec<TableRls>,
+        policies: Vec<PolicyRow>,
+        grants: Vec<GrantRow>,
+    }
+
+    impl Default for FakePgCatalog {
+        fn default() -> Self {
+            let mut safe_policy = policy_row("ALL", Some("owner_id = auth.uid()"), true);
+            safe_policy.policy = "credential-row-marker".to_owned();
+            Self {
+                calls: RefCell::new(Vec::new()),
+                fail: None,
+                tables: vec![table_rls(true)],
+                policies: vec![safe_policy],
+                grants: vec![grant_row("anon", "SELECT")],
+            }
+        }
     }
 
     impl FakePgCatalog {
@@ -2263,36 +2728,88 @@ mod tests {
     impl PgCatalogSource for FakePgCatalog {
         fn tables_with_rowsecurity(&self) -> Result<Vec<TableRls>, IntrospectError> {
             self.record(CatalogQueryKind::TablesWithRowSecurity, None)?;
-            Ok(vec![TableRls {
-                schema: "public".to_owned(),
-                table: "profiles".to_owned(),
-                rowsecurity: true,
-            }])
+            Ok(self.tables.clone())
         }
 
         fn policies_for(&self, table: &str) -> Result<Vec<PolicyRow>, IntrospectError> {
             self.record(CatalogQueryKind::Policies, Some(table))?;
-            Ok(vec![PolicyRow {
-                schema: "public".to_owned(),
-                table: table.to_owned(),
-                policy: "credential-row-marker".to_owned(),
-                command: "SELECT".to_owned(),
-                permissive: true,
-                roles: vec!["anon".to_owned()],
-                using_expr: Some("owner_id = auth.uid()".to_owned()),
-                check_expr: None,
-            }])
+            Ok(self.policies.clone())
         }
 
         fn grants_for(&self, table: &str) -> Result<Vec<GrantRow>, IntrospectError> {
             self.record(CatalogQueryKind::Grants, Some(table))?;
-            Ok(vec![GrantRow {
-                schema: "public".to_owned(),
-                table: table.to_owned(),
-                grantee: "anon".to_owned(),
-                privilege: "SELECT".to_owned(),
-            }])
+            Ok(self.grants.clone())
         }
+    }
+
+    fn table_rls(rowsecurity: bool) -> TableRls {
+        TableRls {
+            schema: "public".to_owned(),
+            table: "profiles".to_owned(),
+            rowsecurity,
+        }
+    }
+
+    fn policy_row(command: &str, using_expr: Option<&str>, permissive: bool) -> PolicyRow {
+        PolicyRow {
+            schema: "public".to_owned(),
+            table: "profiles".to_owned(),
+            policy: format!("{command}-policy"),
+            command: command.to_owned(),
+            permissive,
+            roles: vec!["anon".to_owned()],
+            using_expr: using_expr.map(str::to_owned),
+            check_expr: None,
+        }
+    }
+
+    fn grant_row(grantee: &str, privilege: &str) -> GrantRow {
+        GrantRow {
+            schema: "public".to_owned(),
+            table: "profiles".to_owned(),
+            grantee: grantee.to_owned(),
+            privilege: privilege.to_owned(),
+        }
+    }
+
+    struct PolicyEvidenceRef<'a> {
+        command: &'a str,
+        using_expr: Option<&'a str>,
+        rowsecurity: bool,
+        exposure: RlsExposure,
+    }
+
+    fn policy_evidence(finding: &Finding) -> PolicyEvidenceRef<'_> {
+        let Evidence::RlsPolicy {
+            command,
+            using_expr,
+            rowsecurity,
+            exposure,
+            ..
+        } = &finding.evidence
+        else {
+            panic!("expected RLS policy evidence")
+        };
+        PolicyEvidenceRef {
+            command,
+            using_expr: using_expr.as_deref(),
+            rowsecurity: *rowsecurity,
+            exposure: *exposure,
+        }
+    }
+
+    fn assert_single_tier1_finding(
+        output: &Tier1IntrospectOutput,
+        exposure: RlsExposure,
+        command: &str,
+    ) {
+        assert_eq!(output.findings.len(), 1, "{:#?}", output.findings);
+        let finding = &output.findings[0];
+        let evidence = policy_evidence(finding);
+        assert_eq!(finding.category, Category::Rls);
+        assert_eq!(finding.confidence, Confidence::Confirmed);
+        assert_eq!(evidence.exposure, exposure);
+        assert_eq!(evidence.command, command);
     }
 
     #[derive(Default)]

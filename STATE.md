@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `f6cb5b5` (`main`, Tier D) plus the Tier E1
-worktree described below.
+Current implementation baseline: `350e099` (`main`, Task E1 and docs) plus the
+Tier E2 worktree described below.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -28,11 +28,13 @@ strict repository-root path handling, named-baseline failures, and additive
 custom rules without allowing repository config alone to enable Network work.
 
 The strict **buildable-v1** verdict is now **complete and proven** through
-architecture §15 step 9. Tier E1 now adds the first separately opted-in
-post-v1 capability: credentialed, read-only Postgres catalog transport and
-input plumbing. Tier 1 detections/correlation, registry-backed dependency
-intelligence, and distribution remain incomplete post-v1 tracks, so the
-verdict for the entire architecture document is still partial.
+architecture §15 step 9. Tier E1 added credentialed, read-only Postgres catalog
+transport and input plumbing. Tier E2 now adds the four mechanically decidable
+catalog detections and catalog-native evidence. Tier 1 correlation/fixtures,
+registry-backed dependency intelligence, and distribution remain incomplete
+post-v1 tracks. Architecture §17.8 explicitly defers the noisy
+user-writable-metadata heuristic, so its absence is not an E2 gap. The verdict
+for the entire architecture document is therefore partial.
 
 Use these three lenses when discussing completion:
 
@@ -42,34 +44,84 @@ Use these three lenses when discussing completion:
   identity, Network semantics, auditability, crate-DAG, CLI/config,
   real-repository, precision/recall, deterministic performance-counter, and
   resolved-decision ratification blockers are all covered by passing gates.
-- **Entire architecture document:** partial. Tier 1 transport/plumbing exists,
-  but its findings and correlation do not; online dependency intelligence and
-  distribution also remain incomplete.
+- **Entire architecture document:** partial. Tier 1 transport and four policy
+  findings exist, but E3 correlation/fixtures do not; online dependency
+  intelligence and distribution also remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
 returned row data after counting. Tier E1's Postgres transport accepts only
 validated Supabase DB hosts and ports and issues fixed, read-only catalog
-`SELECT`s. The default production dependency graph remains transport-free.
+`SELECT`s. E2 infers write exposure only from catalog grants plus policy absence
+and never attempts a write. The default production dependency graph remains
+transport-free.
 
 ## Current worktree context
 
-The user moved the completed gap-plan and Tier C/D instruction files into
-`docs/` and added the Tier E/F/G and post-v1 roadmap documents. Those moves are
-preserved as user-owned work. The roadmap was reconciled with the current
-architecture: Tier D is complete, architecture §11.2 resolves the Tier F
-mechanism, and Tier E is recorded as a staged post-v1 track.
+The worktree started clean at `350e099`, which commits Task E1 and the user's
+document moves. Tier E2 adds `Evidence::RlsPolicy`, turns successful injected
+catalog facts into stable `Confirmed` findings, preserves degraded-query
+warnings without manufacturing conclusions, and renders the policy reproduction
+in JSON, SARIF, HTML, and TTY. It emits Critical RLS-disabled and
+literal-true-policy findings, Medium missing-operation findings, and High
+inferred-write findings. The last is explicitly described as inference; no write
+is attempted.
 
-Tier E1 adds a distinct `--rls-tier1-introspect` runtime opt-in, reads the DB
-connection string only from `VIBESCAN_SUPABASE_DB_URL`, and keeps repository
-configuration inert for Network authorization. It adds an injectable catalog
-source, a network-feature-only sync Postgres implementation over rustls, strict
-Supabase DB-host/project/port/TLS validation before connection, redacted audit
-actions, and read-only catalog queries. E1 intentionally does not emit the
-policy findings or correlation assigned to E2/E3. No live database or Network
+Architecture §17.8 now fixes the first two severities at Critical and explicitly
+defers the user-writable-metadata predicate as a noisy `Review` heuristic. This
+worktree does not replace that analysis with substring matching. E3 correlation
+and the two gated Tier 1 fixtures remain pending. No live database or Network
 action was run here.
 
-All Phase 1–5, Tier D, and Tier E1 regressions and both unfiltered workspace
+All Phase 1–5, Tier D, E1, and E2 regressions and both unfiltered workspace
 matrices remain green.
+
+## Tier E2 verification observed on 2026-07-18
+
+Mock-catalog tests pin each E2 finding independently: RLS disabled, normalized
+literal `USING (true)`, one missing `SELECT` policy, and an `anon` `INSERT` grant
+without an operation policy. Negative controls reject `is_active = true`,
+`true_flag`, and `is_true(...)` as permissive policies; ignore catalog tables
+outside the project-scoped LocalStatic candidate set; and suppress policy
+conclusions when the policy query fails. A named test proves the metadata-keyed
+heuristic is absent. The production query guard still accepts only catalog
+`SELECT`s and rejects `SET`/DML controls.
+
+Architecture §17.8's severity and wording contract is pinned directly: RLS
+disabled and literal-true permissive policies are Critical standalone,
+inferred-write exposure is High, and a missing-operation policy is a Medium
+default-deny advisory for `anon`/`authenticated`, never described as an open or
+exposed operation.
+
+`Evidence::RlsPolicy` round-trips through JSON and carries project, table,
+command, `USING`, `WITH CHECK`, `rowsecurity`, and exposure. Catalog actions omit
+the inapplicable row-count field. Serialized mock output contains the intended
+policy predicate but no DB password, mock row markers, application row values,
+or count. The four report snapshots were regenerated under `UPDATE_GOLDEN=1`,
+reviewed, and rerun without the variable; no absolute path or raw credential was
+introduced.
+
+The following pass is green on the current Tier E2 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo test -p vibescan-types --locked
+cargo test -p vibescan-supabase --locked
+cargo test -p vibescan-supabase --features network --locked
+cargo test -p vibescan-report --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-core --test precision_recall --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+No live Network action or credentialed database connection was run. The Tier 1
+goldens remain gated with accurate `TODO(tier1)` labels because E3 owns their
+mock-catalog orchestration and correlation.
 
 ## Tier E1 verification observed on 2026-07-18
 
@@ -520,7 +572,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
 | Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. |
-| Tier 1 RLS introspection | E1 transport/plumbing complete; E2/E3 pending | A separate runtime opt-in, env-only DB URL, strict own-Supabase host/project/port/TLS guard, sync rustls Postgres transport, injectable mock catalog seam, fixed read-only catalog `SELECT`s, and redacted per-query actions exist. Policy findings, evidence, and correlation are intentionally not part of E1. |
+| Tier 1 RLS introspection | E1/E2 instruction surfaces complete; E3 pending | The gated env-only rustls catalog path emits `Confirmed` Critical RLS-disabled/literal-true findings, a Medium default-deny missing-operation advisory, and High inferred-write findings with catalog-native evidence. E3 correlation/fixtures remain gated; architecture §17.8 defers the metadata-keyed `Review` heuristic. |
 | Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
 | Dependency integrity | v1 §11.0 complete; Registry deferred | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks remain post-v1; architecture §§11.1–11.2 now resolve their separate consent, privacy, caching, failure, mechanism, and ownership contract. |
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
@@ -710,9 +762,10 @@ Tier 0 behavior.
 - Registry existence/newcomer/OSV checks: architecture §§11.1–11.2 resolve the
   contract and mechanism; implementation remains a post-v1 track with its own
   crate/feature work and verification instructions.
-- Tier 1 introspection/policy analysis: E1's credentialed read-only transport and
-  input plumbing are complete; E2 findings and E3 correlation/fixture work
-  remain in the post-v1 track.
+- Tier 1 introspection/policy analysis: E1 transport/input and E2's four
+  mechanically decidable findings are complete; E3 correlation/fixtures remain
+  in the post-v1 track. Architecture §17.8 defers the metadata-keyed `Review`
+  heuristic outside the confirmed E2 set.
 - Cross-platform static binaries, npm wrapper, Homebrew, signing, and release
   provenance: separate distribution track.
 - Active DAST/write probes: prohibited in v1, not merely postponed.

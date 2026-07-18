@@ -29,6 +29,40 @@
       "remediation": "Remove the secret from source and rotate it.",
       "related": [],
       "confidence": "likely"
+    },
+    {
+      "id": "snapshot-rls-policy",
+      "category": "rls",
+      "severity": "critical",
+      "title": "Supabase table profiles has a literal-true SELECT policy",
+      "detail": "Credentialed Tier 1 catalog introspection confirmed a permissive policy whose USING predicate is the literal true.",
+      "locations": [
+        {
+          "path": "supabase/policies.sql",
+          "span": null,
+          "provenance": {
+            "kind": "working_tree"
+          },
+          "additional_provenance": [],
+          "location_class": "server_only"
+        }
+      ],
+      "evidence": {
+        "kind": "rls_policy",
+        "project": {
+          "ref_id": "abcdefghijklmnopqrst",
+          "url": "https://abcdefghijklmnopqrst.supabase.co"
+        },
+        "table": "profiles",
+        "command": "SELECT",
+        "using_expr": "(true)",
+        "check_expr": null,
+        "rowsecurity": true,
+        "exposure": "permissive_policy"
+      },
+      "remediation": "Replace the literal-true predicate with a least-privilege condition.",
+      "related": [],
+      "confidence": "confirmed"
     }
   ],
   "scope": {
@@ -40,7 +74,7 @@
     "network": {
       "enabled": true,
       "tier0_read_probe": true,
-      "tier1_introspection": false,
+      "tier1_introspection": true,
       "actions": [
         {
           "kind": "root_enumeration",
@@ -48,8 +82,7 @@
           "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
           "table": null,
           "status": 200,
-          "outcome": "root_enumerated",
-          "observed_row_count": null
+          "outcome": "root_enumerated"
         },
         {
           "kind": "table_read",
@@ -57,8 +90,7 @@
           "endpoint": "https://abcdefghijklmnopqrst.supabase.co/rest/v1/private_profiles?select=*&limit=1",
           "table": "private_profiles",
           "status": 403,
-          "outcome": "protected",
-          "observed_row_count": null
+          "outcome": "protected"
         },
         {
           "kind": "table_read",
@@ -68,6 +100,14 @@
           "status": 200,
           "outcome": "exposed",
           "observed_row_count": 1
+        },
+        {
+          "kind": "catalog_introspection",
+          "intent": "select",
+          "endpoint": "db.abcdefghijklmnopqrst.supabase.co:5432",
+          "table": "profiles",
+          "status": null,
+          "outcome": "catalog_read"
         }
       ]
     },
@@ -77,8 +117,14 @@
   "started_at": "2026-01-01T00:00:00Z",
   "duration_ms": 42,
   "stats": {
-    "by_severity": {},
-    "by_category": {},
+    "by_severity": {
+      "high": 1,
+      "critical": 1
+    },
+    "by_category": {
+      "secret_exposure": 1,
+      "rls": 1
+    },
     "skipped_large_files": 0,
     "skipped_binary_files": 0,
     "scan_budget_hit": false,
