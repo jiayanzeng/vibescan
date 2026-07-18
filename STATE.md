@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `e0092ab` (Task G2 implementation commit on
-`codex/track-g2-npm-channel`; pull request #3).
+Current implementation baseline: `1dbe6f2` (`main`, Task G2 merge commit;
+pull request #3).
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -85,10 +85,10 @@ annotated `v0.1.0` tag points to that merge. No pre-existing user change was
 present or modified.
 
 Task G2 began from a clean `main` at `ac3757a`, after pull request #2 had landed
-the G1 close-out record. The G2 implementation commit is `e0092ab` on
-`codex/track-g2-npm-channel`; pull request
-[#3](https://github.com/jiayanzeng/vibescan/pull/3) carries the review. No
-pre-existing user change was present or modified. G2 changes only packaging,
+the G1 close-out record. Pull request
+[#3](https://github.com/jiayanzeng/vibescan/pull/3) merged the G2 implementation
+commit (`e0092ab`) and verification record (`69167a1`) to `main` as `1dbe6f2`.
+No pre-existing user change was present or modified. G2 changes only packaging,
 release workflow integration, tests, and documentation; it does not change a
 crate, dependency edge, scanner phase, target-project access, or Network
 capability.
@@ -334,7 +334,7 @@ affected workflow files parsed as YAML, and every JavaScript file passed
 `node --check`. The hardening aggregate reported its optional real-repository
 leg as skipped; no user repository was supplied.
 
-Pull request #3's implementation revision `e0092ab` passed 27 applicable GitHub
+Pull request #3's final branch revision `69167a1` passed 27 applicable GitHub
 Actions checks with six expected release-only skips. Its npm jobs passed the
 source contract and native smoke tests on macOS arm64, macOS x64, static-musl
 Linux arm64, static-musl Linux x64 on a glibc runner, and Windows x64. Each
