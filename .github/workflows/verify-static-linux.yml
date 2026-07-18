@@ -1,0 +1,63 @@
+name: Verify static Linux release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist release plan supplied by the generated workflow.
+        required: true
+        type: string
+
+jobs:
+  verify-static-linux:
+    name: Verify static Linux binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux musl artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*-unknown-linux-musl
+          path: artifacts
+          merge-multiple: true
+
+      - name: Assert both Linux binaries are statically linked
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          archives=(artifacts/vibescan-*-unknown-linux-musl.tar.xz)
+          if [[ ${#archives[@]} -ne 2 ]]; then
+            echo "expected exactly two Linux musl archives, found ${#archives[@]}" >&2
+            find artifacts -maxdepth 2 -type f -print >&2
+            exit 1
+          fi
+
+          for archive in "${archives[@]}"; do
+            extract_dir="$(mktemp -d)"
+            tar -xJf "$archive" -C "$extract_dir"
+
+            mapfile -t binaries < <(find "$extract_dir" -type f -name vibescan -print)
+            if [[ ${#binaries[@]} -ne 1 ]]; then
+              echo "expected one vibescan binary in $archive, found ${#binaries[@]}" >&2
+              find "$extract_dir" -maxdepth 3 -type f -print >&2
+              exit 1
+            fi
+
+            binary="${binaries[0]}"
+            file_output="$(file "$binary")"
+            echo "$file_output"
+
+            if ! grep -Eq 'statically linked|static-pie linked' <<<"$file_output"; then
+              echo "Linux release binary is not reported as statically linked: $binary" >&2
+              exit 1
+            fi
+            if readelf -l "$binary" | grep -q 'INTERP'; then
+              echo "Linux release binary declares a dynamic interpreter: $binary" >&2
+              exit 1
+            fi
+            if readelf -d "$binary" 2>/dev/null | grep -q '(NEEDED)'; then
+              echo "Linux release binary declares a shared-library dependency: $binary" >&2
+              exit 1
+            fi
+          done
