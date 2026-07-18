@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -7,10 +8,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vibescan_core::correlate_findings;
+use vibescan_supabase::{
+    GrantRow, IntrospectError, PgCatalogSource, PolicyRow, TableRls, Tier1IntrospectInput,
+    introspect_tier1_with_source,
+};
 use vibescan_types::{
     Category, Confidence, CorrelationRuleId, Evidence, Finding, FindingId, Location, LocationClass,
-    Provenance, RepoPath, RlsExposure, SecretFingerprint, Severity, Span, SupabaseKeyClass,
-    SupabaseProject,
+    NetworkActionIntent, Provenance, RepoPath, RlsExposure, SecretFingerprint, Severity, Span,
+    SupabaseKeyClass, SupabaseProject,
 };
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -46,6 +51,11 @@ pub(crate) const LIVE_FIXTURES: &[LiveFixture] = &[
     },
 ];
 
+// This shared module is compiled once per integration-test binary; the golden
+// binary uses these helpers only in its network-feature build.
+#[allow(dead_code)]
+pub(crate) const TIER1_FIXTURES: &[&str] = &["rls-off-table", "permissive-using-true-policy"];
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LiveFixture {
     pub(crate) name: &'static str,
@@ -73,6 +83,140 @@ pub(crate) fn offline_composite_findings() -> Vec<Finding> {
         .expect("correlation emitted");
     let mut findings = vec![key, rls, correlation];
     absorb_exposed_public_key_constituents_for_test(&mut findings);
+    findings
+}
+
+#[allow(dead_code)]
+pub(crate) fn tier1_fixture_findings(name: &str) -> Vec<Finding> {
+    let (catalog, expected_exposure) = match name {
+        "rls-off-table" => (
+            MockPgCatalog::new(
+                vec![TableRls {
+                    schema: "public".to_owned(),
+                    table: "profiles".to_owned(),
+                    rowsecurity: false,
+                }],
+                Vec::new(),
+                Vec::new(),
+            ),
+            RlsExposure::RlsDisabled,
+        ),
+        "permissive-using-true-policy" => (
+            MockPgCatalog::new(
+                vec![TableRls {
+                    schema: "public".to_owned(),
+                    table: "profiles".to_owned(),
+                    rowsecurity: true,
+                }],
+                vec![PolicyRow {
+                    schema: "public".to_owned(),
+                    table: "profiles".to_owned(),
+                    policy: "public-read".to_owned(),
+                    command: "SELECT".to_owned(),
+                    permissive: true,
+                    roles: vec!["anon".to_owned()],
+                    using_expr: Some("(true)".to_owned()),
+                    check_expr: None,
+                }],
+                Vec::new(),
+            ),
+            RlsExposure::PermissivePolicy,
+        ),
+        other => panic!("unknown Tier 1 fixture {other}"),
+    };
+    let key = synthetic_public_key_finding();
+    let output = introspect_tier1_with_source(
+        &catalog,
+        &Tier1IntrospectInput {
+            project: synthetic_project(),
+            db_url: "postgres://postgres:fixture-only@db.abcdefghijklmnopqrst.supabase.co/postgres"
+                .to_owned(),
+            credential_location: Location {
+                path: RepoPath("<environment:VIBESCAN_SUPABASE_DB_URL>".to_owned()),
+                span: None,
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ServerOnly,
+            },
+            candidate_tables: BTreeSet::from(["profiles".to_owned()]),
+        },
+    )
+    .expect("mocked Tier 1 fixture succeeds");
+
+    assert!(output.warnings.is_empty(), "{:#?}", output.warnings);
+    assert_eq!(
+        catalog.calls.borrow().as_slice(),
+        ["tables", "policies:profiles", "grants:profiles"]
+    );
+    assert_eq!(output.actions.len(), 3);
+    assert!(
+        output
+            .actions
+            .iter()
+            .all(|action| action.intent == NetworkActionIntent::Select),
+        "Tier 1 fixture must issue catalog reads only"
+    );
+    assert!(
+        output
+            .findings
+            .iter()
+            .all(|finding| matches!(&finding.evidence, Evidence::RlsPolicy { .. })),
+        "Tier 1 fixture must prove correlation without a Tier 0 probe"
+    );
+    let matching = output
+        .findings
+        .iter()
+        .filter(|finding| {
+            matches!(
+                &finding.evidence,
+                Evidence::RlsPolicy { exposure, .. } if *exposure == expected_exposure
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(matching.len(), 1, "{:#?}", output.findings);
+    let rls = (*matching[0]).clone();
+    assert_eq!(rls.category, Category::Rls);
+    assert_eq!(
+        rls.severity,
+        Severity::Critical,
+        "Tier 1 read exposure must be Critical before correlation"
+    );
+    let mut constituents = vec![key.clone()];
+    constituents.extend(output.findings);
+    let correlations = correlate_findings(&constituents);
+    let correlation = correlations
+        .into_iter()
+        .find(|finding| {
+            matches!(
+                &finding.evidence,
+                Evidence::Correlation { rule_id, .. }
+                    if rule_id == &CorrelationRuleId("exposed-public-key-chain".to_owned())
+            )
+        })
+        .expect("Tier 1 read exposure correlates with the public key");
+    assert_eq!(correlation.severity, Severity::Critical);
+    assert_eq!(
+        correlation.related.iter().cloned().collect::<BTreeSet<_>>(),
+        BTreeSet::from([key.id.clone(), rls.id.clone()])
+    );
+    assert_eq!(
+        rls.severity,
+        Severity::Critical,
+        "correlation must not mutate or re-derive the constituent severity"
+    );
+
+    let mut findings = vec![key];
+    findings.extend(constituents.into_iter().skip(1));
+    findings.push(correlation);
+    absorb_exposed_public_key_constituents_for_test(&mut findings);
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.category == Category::Correlation)
+            .count(),
+        1,
+        "the read exposure should produce exactly one composite"
+    );
     findings
 }
 
@@ -154,6 +298,43 @@ pub(crate) fn absorb_exposed_public_key_constituents_for_test(findings: &mut Vec
     findings.retain(|finding| {
         finding.category == Category::Correlation || !absorbed.contains(&finding.id)
     });
+}
+
+#[allow(dead_code)]
+struct MockPgCatalog {
+    calls: RefCell<Vec<String>>,
+    tables: Vec<TableRls>,
+    policies: Vec<PolicyRow>,
+    grants: Vec<GrantRow>,
+}
+
+#[allow(dead_code)]
+impl MockPgCatalog {
+    fn new(tables: Vec<TableRls>, policies: Vec<PolicyRow>, grants: Vec<GrantRow>) -> Self {
+        Self {
+            calls: RefCell::new(Vec::new()),
+            tables,
+            policies,
+            grants,
+        }
+    }
+}
+
+impl PgCatalogSource for MockPgCatalog {
+    fn tables_with_rowsecurity(&self) -> Result<Vec<TableRls>, IntrospectError> {
+        self.calls.borrow_mut().push("tables".to_owned());
+        Ok(self.tables.clone())
+    }
+
+    fn policies_for(&self, table: &str) -> Result<Vec<PolicyRow>, IntrospectError> {
+        self.calls.borrow_mut().push(format!("policies:{table}"));
+        Ok(self.policies.clone())
+    }
+
+    fn grants_for(&self, table: &str) -> Result<Vec<GrantRow>, IntrospectError> {
+        self.calls.borrow_mut().push(format!("grants:{table}"));
+        Ok(self.grants.clone())
+    }
 }
 
 fn materialize_working_tree_fixture(name: &str) -> PathBuf {

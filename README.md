@@ -147,9 +147,12 @@ The current Tier 1 pass emits `Confirmed` findings for Critical RLS-disabled and
 literal-true permissive policies, a Medium default-deny missing-operation
 advisory, and High write exposure inferred from role grants plus an absent
 operation policy. It never attempts a write. Correlation and the gated Tier 1
-fixtures remain assigned to E3. Architecture §17.8 defers the noisy
-user-writable-metadata policy heuristic; this pass does not infer it by
-substring matching.
+fixtures are complete: RLS-disabled and permissive-policy evidence can drive
+the same-project public-key read chain, while missing-operation advisories and
+inferred-write findings cannot overclaim that reads were proven. The two Tier 1
+goldens run through an injected catalog under `--features network` and never
+contact a live database. Architecture §17.8 defers the noisy user-writable-
+metadata policy heuristic; this pass does not infer it by substring matching.
 
 The process exit code is controlled by `--severity-gate`, which defaults to
 `high`.

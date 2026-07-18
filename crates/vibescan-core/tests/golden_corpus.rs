@@ -13,8 +13,8 @@ use common::{
 };
 #[cfg(feature = "network")]
 use common::{
-    absorb_exposed_public_key_constituents_for_test, synthetic_project,
-    synthetic_public_key_finding,
+    TIER1_FIXTURES, absorb_exposed_public_key_constituents_for_test, synthetic_project,
+    synthetic_public_key_finding, tier1_fixture_findings,
 };
 use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, correlate_findings, scan};
@@ -209,13 +209,27 @@ fn network_exposed_public_key_chain_fixture_is_gated() {
 }
 
 #[test]
-#[ignore = "TODO(tier1): RLS-off requires credentialed policy introspection"]
+#[cfg(feature = "network")]
+fn network_rls_off_table_fixture() {
+    assert_tier1_fixture("rls-off-table");
+}
+
+#[test]
+#[cfg(not(feature = "network"))]
+#[ignore = "TODO(network): run with --features network to exercise the mocked Tier 1 RLS-off fixture"]
 fn network_rls_off_table_fixture() {
     ignored_network_fixture("rls-off-table");
 }
 
 #[test]
-#[ignore = "TODO(tier1): permissive policy assertions require credentialed policy introspection"]
+#[cfg(feature = "network")]
+fn network_permissive_using_true_policy_fixture() {
+    assert_tier1_fixture("permissive-using-true-policy");
+}
+
+#[test]
+#[cfg(not(feature = "network"))]
+#[ignore = "TODO(network): run with --features network to exercise the mocked Tier 1 permissive-policy fixture"]
 fn network_permissive_using_true_policy_fixture() {
     ignored_network_fixture("permissive-using-true-policy");
 }
@@ -276,6 +290,24 @@ fn ignored_network_fixture(name: &str) {
         manifest.is_file(),
         "network placeholder fixture {name} must carry expected.json"
     );
+}
+
+#[cfg(feature = "network")]
+fn assert_tier1_fixture(name: &str) {
+    assert!(TIER1_FIXTURES.contains(&name));
+    let findings = tier1_fixture_findings(name);
+    let correlations = findings
+        .iter()
+        .filter(|finding| finding.category == Category::Correlation)
+        .collect::<Vec<_>>();
+    assert_eq!(correlations.len(), 1);
+    assert_eq!(correlations[0].severity, Severity::Critical);
+
+    let manifest = GoldenManifest {
+        todo: None,
+        findings: canonicalize_findings(&findings, false),
+    };
+    assert_or_update_manifest(fixture_dir(name).join("expected.json"), &manifest);
 }
 
 fn include_location_classes(fixture: &LiveFixture) -> bool {

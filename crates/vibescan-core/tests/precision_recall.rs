@@ -5,12 +5,15 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use common::{LIVE_FIXTURES, fixture_dir, materialize_fixture, offline_composite_findings};
+use common::{
+    LIVE_FIXTURES, TIER1_FIXTURES, fixture_dir, materialize_fixture, offline_composite_findings,
+    tier1_fixture_findings,
+};
 use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, scan};
 use vibescan_types::{Category, Evidence, Finding, LocationClass, Severity};
 
-const CORPUS_VERSION: &str = "tier-d2-live-v1";
+const CORPUS_VERSION: &str = "tier-e3-live-v1";
 const CLEAN_CONTROL: &str = "clean-control";
 const OFFLINE_COMPOSITE: &str = "offline-composite-exposed-public-key-chain";
 
@@ -103,8 +106,8 @@ struct FixtureMetrics {
 fn live_corpus_metrics_match_committed_baseline() {
     let report = compute_report();
     assert_eq!(
-        report.totals.coverage, 0.6,
-        "classification coverage should remain exactly 3/5: the two Unknown findings are the intentionally generic src/history.ts and packages/nested/ignored-but-scanned/secret.ts paths"
+        report.totals.coverage, 0.75,
+        "classification coverage should be exactly 6/8: Tier 1 adds three classified policy advisories while the two Unknown findings remain the intentionally generic src/history.ts and packages/nested/ignored-but-scanned/secret.ts paths"
     );
 
     let path = baseline_path();
@@ -228,6 +231,16 @@ fn compute_report() -> MetricsReport {
         measure_fixture(&expected, &observed),
     );
 
+    for name in TIER1_FIXTURES {
+        let findings = tier1_fixture_findings(name);
+        let expected = read_expected_identities(name);
+        let observed = findings.iter().map(observed_identity).collect::<Vec<_>>();
+        let (classified, eligible) = classification_coverage(&findings);
+        coverage_classified += classified;
+        coverage_total += eligible;
+        per_fixture.insert((*name).to_owned(), measure_fixture(&expected, &observed));
+    }
+
     report_from_metrics(per_fixture, ratio(coverage_classified, coverage_total))
 }
 
@@ -347,6 +360,13 @@ fn finding_rule_id(finding: &Finding) -> String {
 }
 
 fn correlation_subject(rule_id: &str, reproduction: Option<&str>) -> (String, String) {
+    if let Some(table) = reproduction
+        .and_then(|value| value.strip_prefix("table "))
+        .and_then(|value| value.split_once(" has ").map(|parts| parts.0))
+    {
+        return (format!("correlation:{rule_id}:{table}"), String::new());
+    }
+
     let Some(endpoint) = reproduction.and_then(|value| value.split_once(" returned").map(|v| v.0))
     else {
         return (format!("correlation:{rule_id}"), String::new());

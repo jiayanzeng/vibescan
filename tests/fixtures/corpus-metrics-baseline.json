@@ -1,12 +1,12 @@
 {
-  "corpus_version": "tier-d2-live-v1",
+  "corpus_version": "tier-e3-live-v1",
   "totals": {
-    "tp": 8,
+    "tp": 13,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
     "recall": 1.0,
-    "coverage": 0.6
+    "coverage": 0.75
   },
   "per_fixture": {
     "clean-control": {
@@ -51,7 +51,21 @@
       "fp": 0,
       "fn": 0
     },
+    "permissive-using-true-policy": {
+      "expected": 4,
+      "observed": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0
+    },
     "publishable-client-reachable": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "rls-off-table": {
       "expected": 1,
       "observed": 1,
       "tp": 1,

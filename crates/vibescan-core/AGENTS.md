@@ -28,6 +28,10 @@ Preserve collect → detect → enrich → correlate → finalize. In particular
 - v1 rule 1 requires same-project public-key and confirmed read exposure plus a
   client-reachable or committed key location. Rule 2 orders elevated-key
   remediation ahead of same-project RLS findings.
+- Rule 1 accepts Tier 0 `Exposed` probes and Tier 1 `RlsDisabled` or
+  `PermissivePolicy` evidence. It must not treat `MissingOperationPolicy` or
+  `InferredWriteExposure` as proof of anonymous reads. Rule 2 sees all
+  same-project `Category::Rls` evidence shapes.
 - Treat primary and `additional_provenance` commit entries equivalently for the
   committed predicates in both rules.
 - Tier 0 correlation may say anyone can read the observed table; it may not say

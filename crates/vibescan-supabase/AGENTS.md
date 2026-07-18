@@ -83,8 +83,11 @@ advisory, and High grant-plus-absent-policy inferred write exposure. A missing
 operation policy is default-deny for `anon`/`authenticated`; never describe it
 as open exposure. Predicate substring matching is not evidence of a
 user-writable-metadata policy; architecture §17.8 defers that noisy `Review`
-heuristic. E3 owns correlation and fixture activation. Active probes and writes
-remain deferred; no ownership proof makes them part of Tier 1. Registry/OSV
+heuristic. E3 correlation and fixture activation are complete. Active probes
+and writes remain deferred; no ownership proof makes them part of Tier 1. Core now
+correlates the two confirmed Tier 1 read-exposure shapes, and their mock-catalog
+goldens are live under `--features network`; keep transport and final
+correlation in their owning crates. Registry/OSV
 egress belongs only in the architecture-owned `vibescan-registry` track, never
 in this crate.
 

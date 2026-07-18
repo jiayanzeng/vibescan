@@ -1,4 +1,26 @@
 {
-  "todo": "TODO(tier1): RLS-off requires credentialed policy introspection.",
-  "findings": []
+  "findings": [
+    {
+      "stable_key": "correlation-37a32d1a1058b74a6537bbb9",
+      "rule_id": "exposed-public-key-chain",
+      "category": "correlation",
+      "severity": "critical",
+      "locations": [
+        "<environment:VIBESCAN_SUPABASE_DB_URL>",
+        "src/app/page.tsx"
+      ],
+      "provenance_kind": "working_tree",
+      "correlation_related": [
+        "golden-key",
+        "rls-policy-ddcc3a6fe027da21b423670a"
+      ],
+      "evidence": {
+        "kind": "correlation",
+        "rule_id": "exposed-public-key-chain"
+      },
+      "truth": {
+        "fingerprint": "correlation:exposed-public-key-chain:profiles"
+      }
+    }
+  ]
 }

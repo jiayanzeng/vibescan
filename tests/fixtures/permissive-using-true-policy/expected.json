@@ -1,4 +1,77 @@
 {
-  "todo": "TODO(tier1): permissive USING (true) assertions require credentialed policy introspection.",
-  "findings": []
+  "findings": [
+    {
+      "stable_key": "correlation-b4abc8fbc8572c0b844f08b7",
+      "rule_id": "exposed-public-key-chain",
+      "category": "correlation",
+      "severity": "critical",
+      "locations": [
+        "<environment:VIBESCAN_SUPABASE_DB_URL>",
+        "src/app/page.tsx"
+      ],
+      "provenance_kind": "working_tree",
+      "correlation_related": [
+        "golden-key",
+        "rls-policy-b1a2abcd43ccc87d824e4d8b"
+      ],
+      "evidence": {
+        "kind": "correlation",
+        "rule_id": "exposed-public-key-chain"
+      },
+      "truth": {
+        "fingerprint": "correlation:exposed-public-key-chain:profiles"
+      }
+    },
+    {
+      "stable_key": "rls-policy-07c4a3294e6e682c72c1a244",
+      "rule_id": "rls:missing_operation_policy",
+      "category": "rls",
+      "severity": "medium",
+      "locations": [
+        "<environment:VIBESCAN_SUPABASE_DB_URL>"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "rls_policy",
+        "project_url": "https://abcdefghijklmnopqrst.supabase.co",
+        "table": "profiles",
+        "command": "DELETE",
+        "exposure": "missing_operation_policy"
+      }
+    },
+    {
+      "stable_key": "rls-policy-4a24f2f40026218e16cd2c2a",
+      "rule_id": "rls:missing_operation_policy",
+      "category": "rls",
+      "severity": "medium",
+      "locations": [
+        "<environment:VIBESCAN_SUPABASE_DB_URL>"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "rls_policy",
+        "project_url": "https://abcdefghijklmnopqrst.supabase.co",
+        "table": "profiles",
+        "command": "UPDATE",
+        "exposure": "missing_operation_policy"
+      }
+    },
+    {
+      "stable_key": "rls-policy-679f74049afbef847db48cb7",
+      "rule_id": "rls:missing_operation_policy",
+      "category": "rls",
+      "severity": "medium",
+      "locations": [
+        "<environment:VIBESCAN_SUPABASE_DB_URL>"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "rls_policy",
+        "project_url": "https://abcdefghijklmnopqrst.supabase.co",
+        "table": "profiles",
+        "command": "INSERT",
+        "exposure": "missing_operation_policy"
+      }
+    }
+  ]
 }

@@ -31,7 +31,9 @@ entry against `vibescan-architecture.md`. Then rerun the same test without
 Do not bless a regression, delete a fixture, or add `#[ignore]` to make a gate
 pass. Deferred placeholders must say exactly which architecture capability is
 missing. Promote them only when a deterministic mock exercises the real
-pipeline. Keep Tier 1 fixtures deferred while Tier 1 itself is out of v1.
+pipeline. The RLS-off and permissive-policy fixtures are live under the
+`network` feature through an injected Tier 1 catalog; only the registry-backed
+hallucinated-dependency fixture remains capability-gated.
 
 Temporary mutation tests used to prove drift detection must restore the exact
 fixture before the task ends.

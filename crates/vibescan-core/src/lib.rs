@@ -26,8 +26,8 @@ use vibescan_supabase::{introspect_tier1, probe_tier0_read, project_from_db_url}
 use vibescan_types::RepoPath;
 use vibescan_types::{
     Category, Confidence, ContentId, CorrelationRuleId, Evidence, Finding, FindingId, HistoryScope,
-    Location, LocationClass, NetworkScope, Provenance, ScanResult, ScanScope, ScanStats,
-    ScannableUnit, ScopeWarning, SecretCandidate, SecretFingerprint, SupabaseKeyClass,
+    Location, LocationClass, NetworkScope, Provenance, RlsExposure, ScanResult, ScanScope,
+    ScanStats, ScannableUnit, ScopeWarning, SecretCandidate, SecretFingerprint, SupabaseKeyClass,
     SupabaseProject, UnitRef,
 };
 
@@ -494,15 +494,7 @@ fn correlate_exposed_public_key(rule: &CorrelationRule, findings: &[Finding]) ->
                 ) {
                     return None;
                 }
-                let Evidence::RlsProbe {
-                    table,
-                    endpoint,
-                    observed_row_count,
-                    ..
-                } = &rls_finding.evidence
-                else {
-                    return None;
-                };
+                let read_exposure = rls_read_exposure(rls_finding)?;
 
                 let rule_id = CorrelationRuleId(rule.id.to_owned());
                 let id = correlation_id(&rule_id, &[&key_finding.id, &rls_finding.id]);
@@ -517,14 +509,15 @@ fn correlate_exposed_public_key(rule: &CorrelationRule, findings: &[Finding]) ->
                     id,
                     category: Category::Correlation,
                     severity: Severity::Critical,
-                    title: format!("Public Supabase key can read unprotected table {table}"),
+                    title: format!(
+                        "Public Supabase key can read unprotected table {}",
+                        read_exposure.table
+                    ),
                     detail: "A browser-reachable Supabase public key is present and an API-exposed table on the same project is readable without additional authorization.".to_owned(),
                     locations,
                     evidence: Evidence::Correlation {
                         rule_id,
-                        reproduction: Some(format!(
-                            "{endpoint} returned {observed_row_count} row(s) to the public key"
-                        )),
+                        reproduction: Some(read_exposure.reproduction),
                     },
                     remediation: "Fix RLS policies for the exposed table, then rotate affected keys if exposure is confirmed.".to_owned(),
                     related: vec![key_finding.id.clone(), rls_finding.id.clone()],
@@ -552,9 +545,10 @@ fn correlate_elevated_key_moots_rls(rule: &CorrelationRule, findings: &[Finding]
             let related_rls = findings
                 .iter()
                 .filter(|finding| {
-                    project_url_from_rls(finding).is_some_and(|project| {
-                        normalized_project_url(project) == normalized_project_url(key_project)
-                    })
+                    finding.category == Category::Rls
+                        && project_url_from_rls(finding).is_some_and(|project| {
+                            normalized_project_url(project) == normalized_project_url(key_project)
+                        })
                 })
                 .map(|finding| finding.id.clone())
                 .collect::<Vec<_>>();
@@ -1461,7 +1455,58 @@ fn project_url_from_key(finding: &Finding) -> Option<&str> {
 
 fn project_url_from_rls(finding: &Finding) -> Option<&str> {
     match &finding.evidence {
-        Evidence::RlsProbe { project, .. } => Some(project.url.as_str()),
+        Evidence::RlsProbe { project, .. } | Evidence::RlsPolicy { project, .. } => {
+            Some(project.url.as_str())
+        }
+        _ => None,
+    }
+}
+
+struct RlsReadExposure<'a> {
+    table: &'a str,
+    reproduction: String,
+}
+
+fn rls_read_exposure(finding: &Finding) -> Option<RlsReadExposure<'_>> {
+    if finding.category != Category::Rls {
+        return None;
+    }
+
+    match &finding.evidence {
+        Evidence::RlsProbe {
+            table,
+            endpoint,
+            observed_row_count,
+            exposure: RlsExposure::Exposed,
+            ..
+        } => Some(RlsReadExposure {
+            table,
+            reproduction: format!(
+                "{endpoint} returned {observed_row_count} row(s) to the public key"
+            ),
+        }),
+        Evidence::RlsPolicy {
+            table,
+            exposure: RlsExposure::RlsDisabled,
+            ..
+        } => Some(RlsReadExposure {
+            table,
+            reproduction: format!("table {table} has RLS disabled"),
+        }),
+        Evidence::RlsPolicy {
+            table,
+            exposure: RlsExposure::PermissivePolicy,
+            ..
+        } => Some(RlsReadExposure {
+            table,
+            reproduction: format!("table {table} has permissive USING (true)"),
+        }),
+        // TODO(post-tier-e): reconsider SELECT-specific missing-policy evidence only if
+        // catalog semantics establish read exposure rather than default-deny behavior.
+        Evidence::RlsPolicy {
+            exposure: RlsExposure::MissingOperationPolicy | RlsExposure::InferredWriteExposure,
+            ..
+        } => None,
         _ => None,
     }
 }
@@ -3374,6 +3419,103 @@ mod tests {
     }
 
     #[test]
+    fn correlates_public_key_with_critical_rls_disabled_policy_without_probe() {
+        let key = public_key_finding();
+        let rls = rls_policy_finding(RlsExposure::RlsDisabled, project());
+        assert_eq!(rls.severity, Severity::Critical);
+        assert!(matches!(rls.evidence, Evidence::RlsPolicy { .. }));
+
+        let correlations = correlate_findings(&[key.clone(), rls.clone()]);
+
+        assert_eq!(rls.severity, Severity::Critical);
+        assert_eq!(correlations.len(), 1);
+        assert_eq!(correlations[0].severity, Severity::Critical);
+        assert_eq!(correlations[0].related, vec![key.id, rls.id]);
+        assert!(matches!(
+            &correlations[0].evidence,
+            Evidence::Correlation {
+                reproduction: Some(reproduction),
+                ..
+            } if reproduction.contains("table profiles has RLS disabled")
+        ));
+    }
+
+    #[test]
+    fn correlates_public_key_with_critical_permissive_policy_without_probe() {
+        let key = public_key_finding();
+        let rls = rls_policy_finding(RlsExposure::PermissivePolicy, project());
+        assert_eq!(rls.severity, Severity::Critical);
+
+        let correlations = correlate_findings(&[key.clone(), rls.clone()]);
+
+        assert_eq!(correlations.len(), 1);
+        assert_eq!(correlations[0].related, vec![key.id, rls.id]);
+        assert!(matches!(
+            &correlations[0].evidence,
+            Evidence::Correlation {
+                reproduction: Some(reproduction),
+                ..
+            } if reproduction.contains("table profiles has permissive USING (true)")
+        ));
+    }
+
+    #[test]
+    fn operation_advisory_and_inferred_write_do_not_fire_read_chain() {
+        let key = public_key_finding();
+        for exposure in [
+            RlsExposure::MissingOperationPolicy,
+            RlsExposure::InferredWriteExposure,
+        ] {
+            let rls = rls_policy_finding(exposure, project());
+            assert!(
+                correlate_findings(&[key.clone(), rls]).is_empty(),
+                "{exposure:?} must not prove anonymous read exposure"
+            );
+        }
+    }
+
+    #[test]
+    fn tier1_read_exposure_on_different_project_does_not_correlate() {
+        let key = public_key_finding();
+        let other_project = SupabaseProject {
+            ref_id: Some("zyxwvutsrqponmlkjihg".to_owned()),
+            url: "https://zyxwvutsrqponmlkjihg.supabase.co/".to_owned(),
+        };
+        let rls = rls_policy_finding(RlsExposure::RlsDisabled, other_project);
+
+        assert!(correlate_findings(&[key, rls]).is_empty());
+    }
+
+    #[test]
+    fn committed_elevated_key_moots_tier1_policy_finding() {
+        let mut key = public_key_finding();
+        key.id = FindingId("elevated-key".to_owned());
+        key.category = Category::SecretExposure;
+        key.locations[0].provenance = Provenance::Commit {
+            sha: "0123456789abcdef".to_owned(),
+            author: None,
+            date: None,
+        };
+        if let Evidence::SupabaseKey { class, .. } = &mut key.evidence {
+            *class = SupabaseKeyClass::SecretNew;
+        }
+        let rls = rls_policy_finding(RlsExposure::PermissivePolicy, project());
+
+        let correlation = correlate_findings(&[key.clone(), rls.clone()])
+            .into_iter()
+            .find(|finding| {
+                matches!(
+                    &finding.evidence,
+                    Evidence::Correlation { rule_id, .. } if rule_id.0 == "elevated-key-in-tree"
+                )
+            })
+            .expect("elevated-key correlation includes Tier 1 RLS evidence");
+
+        assert!(correlation.related.contains(&key.id));
+        assert!(correlation.related.contains(&rls.id));
+    }
+
+    #[test]
     fn additional_commit_provenance_qualifies_server_public_key_for_correlation() {
         let mut key = public_key_finding();
         key.locations[0].location_class = LocationClass::ServerOnly;
@@ -3722,6 +3864,52 @@ mod tests {
                 exposure: RlsExposure::Exposed,
             },
             remediation: "fix".to_owned(),
+            related: Vec::new(),
+            confidence: Confidence::Confirmed,
+        }
+    }
+
+    fn rls_policy_finding(exposure: RlsExposure, project: SupabaseProject) -> Finding {
+        let (id, command, using_expr, rowsecurity, severity) = match exposure {
+            RlsExposure::RlsDisabled => ("rls-disabled", "ALL", None, false, Severity::Critical),
+            RlsExposure::PermissivePolicy => (
+                "rls-permissive",
+                "SELECT",
+                Some("(true)".to_owned()),
+                true,
+                Severity::Critical,
+            ),
+            RlsExposure::MissingOperationPolicy => {
+                ("rls-missing", "SELECT", None, true, Severity::Medium)
+            }
+            RlsExposure::InferredWriteExposure => {
+                ("rls-write", "INSERT", None, true, Severity::High)
+            }
+            other => panic!("unexpected Tier 1 exposure in test helper: {other:?}"),
+        };
+        Finding {
+            id: FindingId(id.to_owned()),
+            category: Category::Rls,
+            severity,
+            title: "Tier 1 RLS policy finding".to_owned(),
+            detail: "catalog-derived policy fact".to_owned(),
+            locations: vec![Location {
+                path: RepoPath("<environment:VIBESCAN_SUPABASE_DB_URL>".to_owned()),
+                span: None,
+                provenance: Provenance::WorkingTree,
+                additional_provenance: Vec::new(),
+                location_class: LocationClass::ServerOnly,
+            }],
+            evidence: Evidence::RlsPolicy {
+                project,
+                table: "profiles".to_owned(),
+                command: command.to_owned(),
+                using_expr,
+                check_expr: None,
+                rowsecurity,
+                exposure,
+            },
+            remediation: "fix policy".to_owned(),
             related: Vec::new(),
             confidence: Confidence::Confirmed,
         }

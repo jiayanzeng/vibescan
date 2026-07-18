@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `350e099` (`main`, Task E1 and docs) plus the
-Tier E2 worktree described below.
+Current implementation baseline: `f1ef57e` (`main`, Task E2) plus the Tier E3
+worktree described below.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -29,12 +29,14 @@ custom rules without allowing repository config alone to enable Network work.
 
 The strict **buildable-v1** verdict is now **complete and proven** through
 architecture §15 step 9. Tier E1 added credentialed, read-only Postgres catalog
-transport and input plumbing. Tier E2 now adds the four mechanically decidable
-catalog detections and catalog-native evidence. Tier 1 correlation/fixtures,
-registry-backed dependency intelligence, and distribution remain incomplete
-post-v1 tracks. Architecture §17.8 explicitly defers the noisy
-user-writable-metadata heuristic, so its absence is not an E2 gap. The verdict
-for the entire architecture document is therefore partial.
+transport and input plumbing. Tier E2 added the four mechanically decidable
+catalog detections and catalog-native evidence. Tier E3 now integrates the two
+confirmed Tier 1 read-exposure shapes with both v1 correlation rules, activates
+the RLS-off and permissive-policy mock goldens, and incorporates them into the
+committed corpus metrics. Registry-backed dependency intelligence and
+distribution remain incomplete post-v1 tracks. Architecture §17.8 explicitly
+defers the noisy user-writable-metadata heuristic, so its absence is not an E2
+gap. The verdict for the entire architecture document is therefore partial.
 
 Use these three lenses when discussing completion:
 
@@ -44,9 +46,9 @@ Use these three lenses when discussing completion:
   identity, Network semantics, auditability, crate-DAG, CLI/config,
   real-repository, precision/recall, deterministic performance-counter, and
   resolved-decision ratification blockers are all covered by passing gates.
-- **Entire architecture document:** partial. Tier 1 transport and four policy
-  findings exist, but E3 correlation/fixtures do not; online dependency
-  intelligence and distribution also remain incomplete.
+- **Entire architecture document:** partial. Tier E's E1–E3 implementation is
+  complete, while online dependency intelligence and distribution remain
+  incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
 returned row data after counting. Tier E1's Postgres transport accepts only
@@ -57,23 +59,65 @@ transport-free.
 
 ## Current worktree context
 
-The worktree started clean at `350e099`, which commits Task E1 and the user's
-document moves. Tier E2 adds `Evidence::RlsPolicy`, turns successful injected
-catalog facts into stable `Confirmed` findings, preserves degraded-query
-warnings without manufacturing conclusions, and renders the policy reproduction
-in JSON, SARIF, HTML, and TTY. It emits Critical RLS-disabled and
-literal-true-policy findings, Medium missing-operation findings, and High
-inferred-write findings. The last is explicitly described as inference; no write
-is attempted.
+The worktree started clean at `f1ef57e`, which commits Task E2. Tier E3 adds a
+single read-exposure predicate in core: Tier 0 `Exposed`, Tier 1 `RlsDisabled`,
+and Tier 1 `PermissivePolicy` may drive rule 1; `MissingOperationPolicy` and
+`InferredWriteExposure` deliberately may not. Rule 2 now enumerates every
+same-project `Category::Rls` finding across both evidence shapes.
 
-Architecture §17.8 now fixes the first two severities at Critical and explicitly
-defers the user-writable-metadata predicate as a noisy `Review` heuristic. This
-worktree does not replace that analysis with substring matching. E3 correlation
-and the two gated Tier 1 fixtures remain pending. No live database or Network
-action was run here.
+The RLS-off and permissive-policy fixtures are live under `--features network`
+through an injected read-only catalog. Default builds retain loud ignored stubs;
+the network build now leaves only the registry-backed hallucinated-dependency
+fixture ignored. The corpus baseline is `tier-e3-live-v1`: 13 TP, 0 FP, 0 FN,
+1.0 precision, 1.0 recall, and 0.75 classification coverage. No live database or
+Network action was run here.
 
-All Phase 1–5, Tier D, E1, and E2 regressions and both unfiltered workspace
+All Phase 1–5, Tier D, and Tier E regressions and both unfiltered workspace
 matrices remain green.
+
+## Tier E3 verification observed on 2026-07-18
+
+Core unit tests prove rule 1 fires from standalone-Critical `RlsDisabled` and
+`PermissivePolicy` evidence with no `RlsProbe` present. Negative controls prove
+missing-operation, inferred-write, and known-different-project policy findings
+cannot fire the read chain. A committed elevated-key case proves rule 2 includes
+Tier 1 policy evidence.
+
+Both promoted fixtures run `introspect_tier1_with_source` through a deterministic
+mock and assert three catalog `SELECT` actions. RLS-off produces one absorbed
+Critical composite. The permissive fixture produces the absorbed Critical
+composite plus the three valid Medium default-deny operation advisories from E2.
+Reviewed goldens contain only the environment-source sentinel and repo-relative
+client path; they contain no DB URL, password, row data, timestamp, or absolute
+host path. Under `network`, only `hallucinated-dependency` remains ignored with
+its accurate `TODO(registry)` capability label.
+
+The committed metrics baseline now includes both fixtures: **13 TP, 0 FP, 0 FN,
+precision 1.0, recall 1.0, coverage 0.75**. The clean-control FP gate remains
+zero, and the negative recall/FP controls still fail when intentionally
+perturbed.
+
+The following pass is green on the current Tier E3 worktree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-core --test golden_corpus --features network --locked
+cargo test -p vibescan-core --test precision_recall --locked
+cargo test -p vibescan-core --test precision_recall --features network --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+Measured workspace results are **153 passed, 4 ignored** by default and **166
+passed, 1 ignored** with `network`. The hardening helper's self-tests, workspace
+tests, and boundary leg passed; its optional real-repository leg printed
+`real-repo leg skipped: no fixture`. No live target or credential was used.
 
 ## Tier E2 verification observed on 2026-07-18
 
@@ -119,9 +163,9 @@ bash scripts/verify-hardening-checks.sh
 git diff --check
 ```
 
-No live Network action or credentialed database connection was run. The Tier 1
-goldens remain gated with accurate `TODO(tier1)` labels because E3 owns their
-mock-catalog orchestration and correlation.
+No live Network action or credentialed database connection was run. At this E2
+checkpoint, the Tier 1 goldens were still gated; Tier E3 has since promoted them
+through the mock-catalog orchestration recorded above.
 
 ## Tier E1 verification observed on 2026-07-18
 
@@ -174,11 +218,12 @@ candidate-to-finding boundary. The report integration test pins presentation of
 the supplied redacted evidence in all four formats. No production behavior or
 snapshot changed.
 
-The existing
-`gitignored_env_fixture_has_exact_elevated_key_finding` test remains the §17.1
-pin: a gitignored `.env` containing an elevated new-format key produces exactly
-one `Critical` `SecretNew` finding. No duplicate assertion was added. The gated
-RLS fixtures now say `TODO(tier1)`, the hallucinated-dependency fixture says
+At the Tier D4 checkpoint, the existing
+`gitignored_env_fixture_has_exact_elevated_key_finding` test was the §17.1 pin:
+a gitignored `.env` containing an elevated new-format key produces exactly one
+`Critical` `SecretNew` finding. No duplicate assertion was added.
+At that checkpoint, the gated RLS fixtures said `TODO(tier1)`; the
+hallucinated-dependency fixture said
 `TODO(registry)`, and the mocked exposed-public-key chain remains
 `TODO(network)` in default builds.
 
@@ -572,13 +617,13 @@ After the documentation changes, the closeout pass also reran and passed:
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
 | Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. |
-| Tier 1 RLS introspection | E1/E2 instruction surfaces complete; E3 pending | The gated env-only rustls catalog path emits `Confirmed` Critical RLS-disabled/literal-true findings, a Medium default-deny missing-operation advisory, and High inferred-write findings with catalog-native evidence. E3 correlation/fixtures remain gated; architecture §17.8 defers the metadata-keyed `Review` heuristic. |
-| Correlation | Phase 2 linkage verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Later Network coverage limitations still affect which RLS facts exist to correlate. |
+| Tier 1 RLS introspection | Tier E E1–E3 complete | The env-only rustls catalog path emits `Confirmed` Critical RLS-disabled/literal-true findings, a Medium default-deny missing-operation advisory, and High inferred-write findings with catalog-native evidence. The two read-exposure shapes drive same-project rule 1, all Tier 1 RLS findings participate in rule 2, and both mock fixtures are live under `network`; architecture §17.8 defers the metadata-keyed `Review` heuristic. |
+| Correlation | Phase 2 + Tier E3 verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Rule 1 accepts only evidence that proves reads; rule 2 includes both RLS evidence shapes. |
 | Dependency integrity | v1 §11.0 complete; Registry deferred | Offline npm/Python structural checks exist. Registry existence, newcomer heuristics, and OSV/advisory checks remain post-v1; architecture §§11.1–11.2 now resolve their separate consent, privacy, caching, failure, mechanism, and ownership contract. |
 | Reporting | Verified for current v1 | JSON, SARIF, TTY, and HTML include redacted findings and Network action scope evidence, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 complete | LocalStatic precedence is defaults < repository TOML < explicitly supplied CLI values, with paired scope flags. CLI/config baseline and custom-rule paths are repository-root-relative unless absolute; named missing files exit 2; real baselines suppress findings. Repository config alone cannot enable Network work. |
 | Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. Tier D3 now records deterministic collection/dedup counters and non-gated wall time. No static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
-| Testing strategy | v1 closeout complete | Exact goldens, clean control, report snapshots, boundary checks, a mocked Tier 0 exposed-chain test, the Tier D1 scripted real-repository invariant/CI path, the Tier D2 committed live-corpus metrics baseline, the Tier D3 deterministic performance-counter gate, and the Tier D4 end-to-end redaction pin exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); D2 records 1.0 precision, 1.0 recall, and 0.6 classification coverage over 8 live findings; D3 gates 40 blobs, 30 unique contents, 30 units, and 25.00% dedup. Three post-v1 architecture cases remain intentionally gated. |
+| Testing strategy | v1 closeout + Tier E complete | Exact goldens, clean control, report snapshots, boundary checks, mocked Tier 0/Tier 1 correlation fixtures, the Tier D1 scripted real-repository invariant/CI path, the committed live-corpus metrics baseline, the Tier D3 deterministic performance-counter gate, and the Tier D4 end-to-end redaction pin exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Tier E3 corpus records 1.0 precision, 1.0 recall, and 0.75 classification coverage over 13 live findings; D3 gates 40 blobs, 30 unique contents, 30 units, and 25.00% dedup. Only the registry-backed architecture case remains gated in the network matrix. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
 ## Tier C status
@@ -762,10 +807,10 @@ Tier 0 behavior.
 - Registry existence/newcomer/OSV checks: architecture §§11.1–11.2 resolve the
   contract and mechanism; implementation remains a post-v1 track with its own
   crate/feature work and verification instructions.
-- Tier 1 introspection/policy analysis: E1 transport/input and E2's four
-  mechanically decidable findings are complete; E3 correlation/fixtures remain
-  in the post-v1 track. Architecture §17.8 defers the metadata-keyed `Review`
-  heuristic outside the confirmed E2 set.
+- Tier 1 introspection/policy analysis: E1 transport/input, E2's four
+  mechanically decidable findings, and E3 correlation/fixtures are complete.
+  Architecture §17.8 defers the metadata-keyed `Review` heuristic outside the
+  confirmed set.
 - Cross-platform static binaries, npm wrapper, Homebrew, signing, and release
   provenance: separate distribution track.
 - Active DAST/write probes: prohibited in v1, not merely postponed.

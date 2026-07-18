@@ -450,16 +450,16 @@ every run) or *gated* (present, `#[ignore]`d, carrying an explicit
 `TODO(<tier>)` naming the capability it waits on). A gated fixture is a scheduled
 verification gap, **not** a v1 blocker — but it must never be silently deleted or
 left with a stale TODO.
-- **Live (v1, must stay green):** the exposed-public-key chain (offline
+- **Live (implemented, must stay green):** the exposed-public-key chain (offline
   composite, plus the mocked-PostgREST Tier 0 chain under `--features network`),
   an elevated key committed then removed (history-only), a monorepo layout
   exercising §6.2 at depth, vendor-chunk noise, nested gitignore, a malformed
   dependency (§11.0), and a **clean control repo that must produce zero
-  findings**.
-- **Gated (post-v1, `#[ignore]` + `TODO`):** an RLS-off table and a permissive
-  `USING (true)` policy — both require Tier 1 introspection (§7.2), deferred by
-  §15 — and a hallucinated dependency, which requires the registry tier (§11.1).
-  Each is un-gated by the change that lands its tier, in that change.
+  findings**. The RLS-off-table and permissive-`USING (true)` fixtures are also
+  live through an injected Tier 1 catalog under `--features network`.
+- **Gated (post-v1, `#[ignore]` + `TODO`):** the hallucinated-dependency fixture,
+  which requires the registry tier (§11.1). It is un-gated by the change that
+  lands that tier, in that change.
 
 **Precision/recall harness (v1 closeout requirement).** Measuring detection is
 itself a deliverable, not a byproduct of the goldens. The harness runs the *live*

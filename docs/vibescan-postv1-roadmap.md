@@ -5,11 +5,12 @@ Author: architecture review (Claude)
 
 ## Where this picks up
 
-Tier D has closed v1: **D1 (real-repo validation), D2 (precision/recall
+Tier D closed v1: **D1 (real-repo validation), D2 (precision/recall
 harness), D3 (performance counters), and D4 (ratified §17 decisions) have all
 landed.** Architecture §15 step 9 — "buildable v1, proven" — is complete.
-Everything below is *post-v1* and was deferred on purpose (§15, §16); none of
-it should have been pulled forward.
+Tier E has since landed the opt-in credentialed introspection track and its two
+mock-catalog fixtures. The remaining tracks below are post-v1 work that was
+deferred on purpose (§15, §16).
 
 This is a **roadmap, not a Codex instruction set.** Each track is large enough to
 need its own dependency-ordered instruction document (the `vibescan-tierX-
@@ -24,13 +25,14 @@ decision, that decision is a spec patch, reviewed before any code.
 | Track | What it is | Unblocks | Decision-first? | Depends on |
 |---|---|---|---|---|
 | **H** | Resolve §17 `src/api/` classification | Coverage-metric accuracy | No — *evidence-gated* | Tier D (D1+D2 coverage data) |
-| **E** | Tier 1 credentialed introspection (§7.2) | `rls-off-table`, `permissive-using-true-policy` fixtures; the deep RLS moat | Resolved in the Tier E instruction set | v1 proven |
+| **E (complete)** | Tier 1 credentialed introspection (§7.2) | `rls-off-table`, `permissive-using-true-policy` fixtures; the deep RLS moat | Resolved and implemented in Tier E | v1 proven |
 | **F** | Registry egress + `vibescan-registry` (§11.1–§11.2) | `hallucinated-dependency` fixture; high-confidence OSV/nonexistent-package detection | No — mechanism resolved in §11.2 | v1 proven |
 | **G** | Distribution pipeline (§13.1) | `npx vibescan`; the actual npm-native audience | Resolved in the Track G instruction set, subject to architecture review | v1 proven (parallel) |
 | **I** | DAST / write-probe (§7.3, §7.4) | Active write-exposure proof | Yes — security design + ownership gate | Everything; far future |
 
-Recommended order: **H (fast-follow) → E and G in parallel → F → I (much later).**
-Rationale below.
+Original recommended order was **H (fast-follow) → E and G in parallel → F → I
+(much later)**. Tier E is now complete; H remains evidence-gated, while F, G,
+and I retain their ordering constraints below.
 
 ---
 
@@ -40,9 +42,10 @@ Rationale below.
 `src/api/` classifies as `ServerOnly`, but in many Vite/Next frontends `src/api/`
 is a *client-side* wrapper that ships to the browser with the publishable key and
 table names in it. I refused to guess and said: measure it. Tier D produces the
-measurement — D2's baseline already reports `coverage: 0.6` (≈40% of findings
-land `Unknown`), and D1 emits a real-repo coverage number. H is where that
-evidence is cashed in.
+measurement — D2's original baseline reported `coverage: 0.6`; Tier E3
+recomputed the expanded corpus at `0.75` because it added three classified
+policy advisories, while the original two `Unknown` paths remain. D1 emits a
+real-repo coverage number. H is where that evidence is cashed in.
 
 **The work.** After a handful of real Next.js/Supabase repos have been run
 through D1's `real-repo-invariants.py`, inspect the paths that classify `Unknown`
@@ -57,27 +60,25 @@ patch §6.2 accordingly:
 
 **Grain.** A small, evidence-gated §6.2 patch plus classifier tests and a
 coverage-metric assertion — closer to a Tier C task than a full track. It can
-ride in a "Tier E-prep" change or open Track E. It is listed first because it is
-cheap, it directly sharpens the headline metric, and its input exists the moment
-Tier D lands.
+remain an independent evidence-gated patch. It is listed first because it is
+cheap, it directly sharpens the headline metric, and its input has existed since
+Tier D landed.
 
 **Decision-first?** No — the decision *is* the evidence. Do not resolve it on
 intuition; that is the whole point of §17's open-question framing.
 
 ---
 
-## Track E — Tier 1 credentialed introspection (§7.2)
+## Track E — Tier 1 credentialed introspection (§7.2) — complete
 
-**Why high value.** This is the deepest part of the moat and the largest single
-capability still deferred. Tier 0 (shipped) proves a table is readable; Tier 1
-proves *why* RLS is broken — and catches the failures Tier 0 structurally cannot:
-RLS-theater (enabled but `USING (true)`), policies keyed on user-writable
-metadata, missing-operation policies, and inferred write-exposure. It un-gates
-two of the three remaining corpus fixtures (`rls-off-table`,
-`permissive-using-true-policy`).
+**Delivered value.** This is the deepest part of the moat. Tier 0 proves a table
+is readable; Tier 1 proves *why* RLS is broken — and catches failures Tier 0
+structurally cannot: RLS-theater (enabled but `USING (true)`), missing-operation
+policies, and inferred write-exposure. The noisy user-writable-metadata heuristic
+is intentionally deferred by §16/§17.8. Tier E un-gated the RLS-off and
+permissive-policy fixtures, both now live.
 
-**The work** (all specced in §7.2 / §10.2, so this is mostly a build, not a
-design):
+**Implemented scope** (specified in §7.2 / §10.2):
 - A credentialed transport in `vibescan-supabase` under `--features network` —
   the same rustls-backed, nearest-parented pattern the Tier 0 probe already uses.
   The Tier E implementation uses a DB connection string **from local env only**
@@ -86,20 +87,21 @@ design):
   clarification rather than an implementation-document override.
 - Per-table `rowsecurity` introspection; per-policy `USING` / `WITH CHECK`
   extraction.
-- Distinct findings, each `Confirmed`: RLS disabled; permissive `USING (true)`;
-  user-writable-metadata-keyed policy; missing-operation policy; inferred
-  write-exposure (from grants + absent restricting policy — **inferred, never
-  demonstrated**, per §7.3).
-- Un-gate the two Tier 1 fixtures (flip `TODO(tier1)` → live under a Tier 1
-  feature/opt-in), and extend the D2 precision/recall corpus to include them.
+- Distinct `Confirmed` findings: RLS disabled; permissive `USING (true)`;
+  missing-operation policy; and inferred write-exposure from grants plus an
+  absent restricting policy — **inferred, never demonstrated**, per §7.3. The
+  noisy user-writable-metadata heuristic remains deferred by §16/§17.8.
+- The two Tier 1 fixtures were un-gated under the `network` feature, and the D2
+  precision/recall corpus was extended to include them.
 
 **Resolved implementation choices.** The Tier E instruction set selects a
 direct, sync, pure-Rust/rustls PostgreSQL connection and a distinct
 `--rls-tier1-introspect` runtime opt-in. Credentials remain env-only and the
 transport rejects non-Supabase DB hosts before connecting.
 
-**Decision-first?** No. The implementation choices are recorded in the Tier E
-instruction set; the architecture remains authoritative.
+**Status.** E1 transport/input plumbing, E2 catalog detections, and E3
+correlation/fixture activation are complete. The two Tier 1 fixtures are live
+under `--features network`, and the precision/recall baseline includes them.
 
 ---
 
@@ -196,16 +198,15 @@ concrete user demand.
 2. **Track H** as a fast-follow — cheap, evidence-gated on data Tier D already
    produced, directly improves the coverage metric. Resolve §6.2's `src/api/`
    question *from the evidence*.
-3. **Track E (Tier 1)** and **Track G (distribution)** in parallel — E is the
-   highest-value capability and mostly specced; G is the highest product leverage
-   and touches no scan logic, so a second owner can run it concurrently.
+3. **Track E (Tier 1) is complete.** Track G remains the independent
+   distribution track and touches no scan logic.
 4. **Track F (registry)** next — implement the already-resolved §11.1–§11.2
    mechanism from the Tier F instruction set; un-gates the last corpus fixture.
 5. **Track I (DAST)** much later, security-design-first, only on real demand.
 
-After E and F, all three currently-gated corpus fixtures are live and the
-precision/recall corpus covers the full v1+ detection surface. After G, the tool
-reaches its intended audience. That is the natural "v2" line.
+After F, the last gated corpus fixture becomes live and the precision/recall
+corpus covers the full v1+ detection surface. After G, the tool reaches its
+intended audience. That is the natural "v2" line.
 
 ## Available implementation documents
 
