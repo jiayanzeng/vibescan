@@ -1,7 +1,7 @@
 {
-  "corpus_version": "tier-e3-live-v1",
+  "corpus_version": "tier-f3-live-v1",
   "totals": {
-    "tp": 13,
+    "tp": 14,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
@@ -13,6 +13,13 @@
       "expected": 0,
       "observed": 0,
       "tp": 0,
+      "fp": 0,
+      "fn": 0
+    },
+    "hallucinated-dependency": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
       "fp": 0,
       "fn": 0
     },

@@ -1,4 +1,20 @@
 {
-  "todo": "TODO(registry): assert nonexistent dependency once registry-backed dependency checks exist.",
-  "findings": []
+  "findings": [
+    {
+      "stable_key": "dependency-fd01d00203abd5aa29446627",
+      "rule_id": "dependency:nonexistent_package",
+      "category": "dependency_integrity",
+      "severity": "high",
+      "locations": [
+        "package.json"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "dependency",
+        "package": "vibescan-certainly-hallucinated-fixture-package@9.9.9",
+        "manifest_path": "package.json",
+        "reason": "nonexistent_package"
+      }
+    }
+  ]
 }

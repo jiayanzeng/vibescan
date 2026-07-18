@@ -9,13 +9,17 @@ use common::{
     LIVE_FIXTURES, TIER1_FIXTURES, fixture_dir, materialize_fixture, offline_composite_findings,
     tier1_fixture_findings,
 };
+#[cfg(feature = "registry")]
+use common::{REGISTRY_FIXTURES, registry_fixture_findings};
 use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, scan};
 use vibescan_types::{Category, Evidence, Finding, LocationClass, Severity};
 
-const CORPUS_VERSION: &str = "tier-e3-live-v1";
+const CORPUS_VERSION: &str = "tier-f3-live-v1";
 const CLEAN_CONTROL: &str = "clean-control";
 const OFFLINE_COMPOSITE: &str = "offline-composite-exposed-public-key-chain";
+#[cfg(not(feature = "registry"))]
+const HALLUCINATED_DEPENDENCY: &str = "hallucinated-dependency";
 
 #[derive(Clone, Debug, Deserialize)]
 struct ExpectedManifest {
@@ -115,13 +119,21 @@ fn live_corpus_metrics_match_committed_baseline() {
         .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
     let baseline = serde_json::from_str::<MetricsReport>(&baseline_content)
         .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()));
+    let baseline = baseline_for_enabled_features(baseline, report.totals.coverage);
     assert_hard_gates(&report, &baseline).unwrap_or_else(|error| panic!("{error}"));
 
     let actual_content = serialize_report(&report);
     if update_metrics() {
-        fs::write(&path, &actual_content)
-            .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
-        return;
+        #[cfg(not(feature = "registry"))]
+        panic!(
+            "UPDATE_METRICS=1 requires --features registry so the committed baseline includes the Registry fixture"
+        );
+        #[cfg(feature = "registry")]
+        {
+            fs::write(&path, &actual_content)
+                .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+            return;
+        }
     }
 
     assert_eq!(
@@ -241,7 +253,29 @@ fn compute_report() -> MetricsReport {
         per_fixture.insert((*name).to_owned(), measure_fixture(&expected, &observed));
     }
 
+    #[cfg(feature = "registry")]
+    for name in REGISTRY_FIXTURES {
+        let findings = registry_fixture_findings(name);
+        let expected = read_expected_identities(name);
+        let observed = findings.iter().map(observed_identity).collect::<Vec<_>>();
+        per_fixture.insert((*name).to_owned(), measure_fixture(&expected, &observed));
+    }
+
     report_from_metrics(per_fixture, ratio(coverage_classified, coverage_total))
+}
+
+#[cfg(not(feature = "registry"))]
+fn baseline_for_enabled_features(mut baseline: MetricsReport, coverage: f64) -> MetricsReport {
+    baseline
+        .per_fixture
+        .remove(HALLUCINATED_DEPENDENCY)
+        .expect("committed baseline must retain the Registry fixture");
+    report_from_metrics(baseline.per_fixture, coverage)
+}
+
+#[cfg(feature = "registry")]
+fn baseline_for_enabled_features(baseline: MetricsReport, _coverage: f64) -> MetricsReport {
+    baseline
 }
 
 fn read_expected_identities(name: &str) -> Vec<StableIdentity> {

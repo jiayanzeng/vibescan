@@ -1,0 +1,8 @@
+{
+  "name": "hallucinated-dependency-fixture",
+  "private": true,
+  "dependencies": {
+    "@vibescan/private-fixture": "1.0.0",
+    "vibescan-certainly-hallucinated-fixture-package": "9.9.9"
+  }
+}

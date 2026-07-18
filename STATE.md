@@ -2,8 +2,8 @@
 
 Reviewed: 2026-07-18
 
-Current implementation baseline: `c36ceb5` (`main`, Task E3) plus the Track
-F1–F2 worktree described below.
+Current implementation baseline: `aa0efdd` (`main`, Task F2) plus the Track F3
+worktree described below.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -38,8 +38,9 @@ committed corpus metrics. Track F1 provides the separately gated registry crate,
 rustls transport boundary, dependency-input plumbing, explicit CLI opt-in, and
 auditable scope shapes. Track F2 adds local OSV snapshot matching, public
 package-existence checks, precision guards, failure taxonomy, and 24-hour
-public-data caches. The registry-backed corpus activation remains F3 work;
-distribution remains a separate post-v1 track.
+public-data caches. Track F3 activates the last gated corpus fixture through a
+mock registry and adds it to the committed metrics baseline. Distribution
+remains a separate post-v1 track.
 Architecture §17.8 explicitly defers the noisy user-writable-metadata
 heuristic, so its absence is not an E2 gap. The verdict for the entire
 architecture document is therefore partial.
@@ -53,8 +54,8 @@ Use these three lenses when discussing completion:
   real-repository, precision/recall, deterministic performance-counter, and
   resolved-decision ratification blockers are all covered by passing gates.
 - **Entire architecture document:** partial. Tier E's E1–E3 implementation and
-  Track F1–F2 registry intelligence are complete, while F3 corpus activation
-  and distribution remain incomplete.
+  Track F's registry intelligence/corpus activation are complete, while
+  distribution and other deferred tracks remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
 returned row data after counting. Tier E1's Postgres transport accepts only
@@ -65,12 +66,12 @@ transport-free.
 
 ## Current worktree context
 
-The worktree started clean at `c36ceb5`, which commits Task E3. Track F1 adds
-the architecture-authorized eighth crate, `vibescan-registry`, with only the
-allowed `vibescan-registry -> vibescan-types` edge. Core owns parsing and
-orchestration; the CLI exposes `--registry-checks` only under its independent
-`registry` feature. Repository configuration cannot confirm Registry egress,
-and registry opt-in does not enable either RLS tier.
+The worktree started clean at `aa0efdd`, which commits Tasks F1–F2. F1 adds the
+architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
+`vibescan-registry -> vibescan-types` edge. Core owns parsing and orchestration;
+the CLI exposes `--registry-checks` only under its independent `registry`
+feature. Repository configuration cannot confirm Registry egress, and registry
+opt-in does not enable either RLS tier.
 
 The registry crate's private transport feature is named `transport`, while the
 public core/CLI feature is `registry`. This is intentional: Cargo applies a
@@ -89,10 +90,17 @@ drive the public-404 rule. Both public-data caches use a 24-hour TTL, and cache
 hits issue no request. Tests use mocks and local cache fixtures only. No live
 registry, OSV, database, or target-project Network action was run.
 
-All Phase 1–5, Tier D, Tier E, and F1–F2 regressions are green in the default,
+F3 materializes a public unscoped nonexistent-package fixture, drives F2 through
+an injected 404 source, and keeps a scoped npm 404 in the same manifest as a
+negative control. Its reviewed golden contains exactly one High confirmed
+`NonexistentPackage` finding. The `tier-f3-live-v1` metrics baseline records
+14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and coverage 0.75. No capability-
+gated corpus fixture remains; remaining ignored tests are feature-off stubs.
+
+All Phase 1–5, Tier D, Tier E, and Track F regressions are green in the default,
 `network`, `registry`, and combined workspace matrices.
 
-## Track F1–F2 verification observed on 2026-07-18
+## Track F verification observed on 2026-07-18
 
 The exact post-v1 eight-crate DAG is enforced across all declared dependency
 kinds and resolved feature graphs. The default graph has no transport, the
@@ -110,9 +118,11 @@ Critical confirmed OSV matches without name egress, High confirmed public 404s
 with auditable name egress, resolvable controls, precision guards, nonfatal
 failure taxonomy, duplicate coalescing, and zero-request cache hits. Report
 tests and reviewed snapshots disclose Registry activity without secrets or
-absolute paths.
+absolute paths. F3's shared mock helper proves the public name resolves once,
+the scoped name is never queried, and the golden/metrics harnesses observe the
+same single High finding.
 
-The following pass is green on the current F1–F2 worktree:
+The following pass is green on the current Track F worktree:
 
 ```sh
 cargo fmt --all -- --check
@@ -132,8 +142,10 @@ git diff --check
 
 The snapshot update was run only after the additive Registry scope fields and
 synthetic disclosure action were intentional, reviewed, and rerun without the
-update guard. The worktree remains intentionally dirty with the uncommitted
-F1–F2 implementation. The hardening helper emitted
+update guard. F3's golden and metrics updates were separately regenerated,
+reviewed, and rerun without their update guards. The worktree remains
+intentionally dirty only with the uncommitted F3 implementation. The hardening
+helper emitted
 `real-repo leg skipped: no fixture`.
 
 ## Tier E3 verification observed on 2026-07-18
@@ -150,8 +162,8 @@ Critical composite. The permissive fixture produces the absorbed Critical
 composite plus the three valid Medium default-deny operation advisories from E2.
 Reviewed goldens contain only the environment-source sentinel and repo-relative
 client path; they contain no DB URL, password, row data, timestamp, or absolute
-host path. Under `network`, only `hallucinated-dependency` remains ignored with
-its accurate `TODO(registry)` capability label.
+host path. At that checkpoint, `hallucinated-dependency` was the only remaining
+capability-gated fixture; Track F3 has since promoted it under `registry`.
 
 The committed metrics baseline now includes both fixtures: **13 TP, 0 FP, 0 FN,
 precision 1.0, recall 1.0, coverage 0.75**. The clean-control FP gate remains
@@ -684,11 +696,11 @@ After the documentation changes, the closeout pass also reran and passed:
 | Tier 0 RLS probe | Partial, Phase 3C verified | Feature/runtime gating, `apikey`, URL restriction, GET-only probing, no row retention, precise root fallback, typed references, exact/unambiguous project-scoped table sets, and one redacted scope record per attempted GET are tested. |
 | Tier 1 RLS introspection | Tier E E1–E3 complete | The env-only rustls catalog path emits `Confirmed` Critical RLS-disabled/literal-true findings, a Medium default-deny missing-operation advisory, and High inferred-write findings with catalog-native evidence. The two read-exposure shapes drive same-project rule 1, all Tier 1 RLS findings participate in rule 2, and both mock fixtures are live under `network`; architecture §17.8 defers the metadata-keyed `Review` heuristic. |
 | Correlation | Phase 2 + Tier E3 verified | Both declarative v1 rules honor primary/additional commit provenance, compare normalized projects, and produce deterministic unique location/related unions. Rule 1 accepts only evidence that proves reads; rule 2 includes both RLS evidence shapes. |
-| Dependency integrity | v1 §11.0 + Registry F1–F2 complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. Newcomer policy is out of Track F; only F3's golden/metrics activation remains. |
+| Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
 | Security/nonfunctional | Partial | Pure-Rust/default transport boundary is enforced. Tier D3 now records deterministic collection/dedup counters and non-gated wall time. No static cross-platform build matrix, npm wrapper, or Homebrew path exists. |
-| Testing strategy | v1 closeout + Tier E + F1–F2 complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1 fixtures, Registry source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Tier E3 corpus records 1.0 precision, 1.0 recall, and 0.75 classification coverage over 13 live findings. The registry-backed detection golden remains gated for F3. |
+| Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
 ## Tier C status
@@ -764,10 +776,12 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- F1 establishes Registry ownership, feature/runtime consent, parsing,
-  transport isolation, and auditable output shapes. F2 completes exact
-  existence/advisory semantics and bounded privacy-aware caching. F3 still must
-  activate the hallucinated-dependency golden and metrics baseline.
+- **Track F complete:** F1 establishes Registry ownership, feature/runtime
+  consent, parsing, transport isolation, and auditable output shapes; F2 adds
+  the two confirmed checks and bounded privacy-aware caching; F3 activates the
+  hallucinated-dependency golden and metrics baseline. The separate npm-only
+  `Review` newcomer heuristic remains deferred and off by default; PyPI remains
+  blocked on a download-signal decision.
 - Tier D3 now provides the required deterministic counter gate and records wall
   time without asserting it. Longer-term timing trends and peak-memory growth
   for the materialized pipeline are not yet tracked.
@@ -873,11 +887,12 @@ Tier 0 behavior.
 
 ### Post-v1 tracks
 
-- Registry checks: F1's crate/DAG/transport/opt-in/input plumbing and F2's two
-  confirmed detections, precision guards, failure taxonomy, and bounded caches
-  are complete. Continue with F3 for the gated fixture and committed metric
-  activation. Newcomer checks remain a separate, explicitly consented mode and
-  must not be inferred from `--registry-checks`.
+- Registry checks: Track F is complete—F1's crate/DAG/transport/opt-in/input
+  plumbing, F2's two confirmed detections/guards/failure taxonomy/caches, and
+  F3's golden plus committed metric activation are all verified. Newcomer
+  checks remain a separate, explicitly consented npm-only `Review` mode and
+  must not be inferred from `--registry-checks`; PyPI newcomer remains deferred
+  pending a download-signal decision.
 - Tier 1 introspection/policy analysis: E1 transport/input, E2's four
   mechanically decidable findings, and E3 correlation/fixtures are complete.
   Architecture §17.8 defers the metadata-keyed `Review` heuristic outside the

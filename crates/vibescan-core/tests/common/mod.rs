@@ -8,6 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vibescan_core::correlate_findings;
+#[cfg(feature = "registry")]
+use vibescan_registry::{
+    AdvisorySet, RegistryCheckInput, RegistryError, RegistryResolution, RegistrySource,
+    run_registry_checks,
+};
 use vibescan_supabase::{
     GrantRow, IntrospectError, PgCatalogSource, PolicyRow, TableRls, Tier1IntrospectInput,
     introspect_tier1_with_source,
@@ -17,6 +22,8 @@ use vibescan_types::{
     NetworkActionIntent, Provenance, RepoPath, RlsExposure, SecretFingerprint, Severity, Span,
     SupabaseKeyClass, SupabaseProject,
 };
+#[cfg(feature = "registry")]
+use vibescan_types::{DependencyIntegrityReason, Ecosystem, ParsedDependency};
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -56,6 +63,9 @@ pub(crate) const LIVE_FIXTURES: &[LiveFixture] = &[
 #[allow(dead_code)]
 pub(crate) const TIER1_FIXTURES: &[&str] = &["rls-off-table", "permissive-using-true-policy"];
 
+#[cfg(feature = "registry")]
+pub(crate) const REGISTRY_FIXTURES: &[&str] = &["hallucinated-dependency"];
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LiveFixture {
     pub(crate) name: &'static str,
@@ -84,6 +94,76 @@ pub(crate) fn offline_composite_findings() -> Vec<Finding> {
     let mut findings = vec![key, rls, correlation];
     absorb_exposed_public_key_constituents_for_test(&mut findings);
     findings
+}
+
+#[cfg(feature = "registry")]
+pub(crate) fn registry_fixture_findings(name: &str) -> Vec<Finding> {
+    assert!(REGISTRY_FIXTURES.contains(&name));
+    let fixture = LiveFixture {
+        name: "hallucinated-dependency",
+        history: false,
+    };
+    let repo = materialize_fixture(&fixture);
+    let dependencies = vibescan_core::parse_dependencies(&repo)
+        .unwrap_or_else(|error| panic!("{name} dependencies failed to parse: {error}"));
+    assert_eq!(
+        dependencies.len(),
+        2,
+        "fixture must retain its guard control"
+    );
+
+    #[derive(Default)]
+    struct MockRegistry {
+        resolve_calls: RefCell<Vec<String>>,
+    }
+
+    impl RegistrySource for MockRegistry {
+        fn resolves(
+            &self,
+            dependency: &ParsedDependency,
+        ) -> Result<RegistryResolution, RegistryError> {
+            self.resolve_calls
+                .borrow_mut()
+                .push(dependency.name.clone());
+            Ok(RegistryResolution {
+                exists: false,
+                request_made: true,
+            })
+        }
+
+        fn advisories_for(&self, ecosystem: Ecosystem) -> Result<AdvisorySet, RegistryError> {
+            Ok(AdvisorySet::empty(ecosystem))
+        }
+    }
+
+    let source = MockRegistry::default();
+    let output = run_registry_checks(
+        &source,
+        &RegistryCheckInput {
+            dependencies,
+            private_registry_ecosystems: BTreeSet::new(),
+        },
+    )
+    .expect("mocked Registry fixture succeeds");
+
+    assert!(output.warnings.is_empty(), "{:#?}", output.warnings);
+    assert_eq!(
+        source.resolve_calls.borrow().as_slice(),
+        ["vibescan-certainly-hallucinated-fixture-package"],
+        "the scoped 404 control must never reach the public registry"
+    );
+    assert_eq!(output.actions.len(), 1);
+    assert_eq!(output.findings.len(), 1);
+    assert_eq!(output.findings[0].severity, Severity::High);
+    assert_eq!(output.findings[0].confidence, Confidence::Confirmed);
+    assert!(matches!(
+        output.findings[0].evidence,
+        Evidence::Dependency {
+            reason: DependencyIntegrityReason::NonexistentPackage,
+            ..
+        }
+    ));
+    output.findings
 }
 
 #[allow(dead_code)]

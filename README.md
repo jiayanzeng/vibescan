@@ -173,6 +173,11 @@ from the public-404 rule. Outages, rate limits, and invalid responses produce
 coverage warnings, never nonexistent-package findings. The flag never enables
 either Supabase RLS tier.
 
+Track F3 activates the committed `hallucinated-dependency` golden through an
+injected registry mock and includes it in the precision/recall baseline. The
+fixture also carries a scoped-package 404 negative control, proving that private
+package names do not become High nonexistent-package findings.
+
 For confirmed OSV matching, vibescan uses exact versions from npm and supported
 Python lockfiles, plus exact manifest pins. A loose version range is not called
 known-malicious without a resolved version. The optional live OSV API and the

@@ -9,8 +9,9 @@ Tier D closed v1: **D1 (real-repo validation), D2 (precision/recall
 harness), D3 (performance counters), and D4 (ratified §17 decisions) have all
 landed.** Architecture §15 step 9 — "buildable v1, proven" — is complete.
 Tier E has since landed the opt-in credentialed introspection track and its two
-mock-catalog fixtures. The remaining tracks below are post-v1 work that was
-deferred on purpose (§15, §16).
+mock-catalog fixtures. Track F has also landed the independent Registry egress
+class, its two confirmed detections, and the final corpus fixture. The remaining
+tracks below are post-v1 work that was deferred on purpose (§15, §16).
 
 This is a **roadmap, not a Codex instruction set.** Each track is large enough to
 need its own dependency-ordered instruction document (the `vibescan-tierX-
@@ -26,13 +27,13 @@ decision, that decision is a spec patch, reviewed before any code.
 |---|---|---|---|---|
 | **H** | Resolve §17 `src/api/` classification | Coverage-metric accuracy | No — *evidence-gated* | Tier D (D1+D2 coverage data) |
 | **E (complete)** | Tier 1 credentialed introspection (§7.2) | `rls-off-table`, `permissive-using-true-policy` fixtures; the deep RLS moat | Resolved and implemented in Tier E | v1 proven |
-| **F** | Registry egress + `vibescan-registry` (§11.1–§11.2) | `hallucinated-dependency` fixture; high-confidence OSV/nonexistent-package detection | No — mechanism resolved in §11.2 | v1 proven |
+| **F (complete)** | Registry egress + `vibescan-registry` (§11.1–§11.2) | `hallucinated-dependency` fixture; high-confidence OSV/nonexistent-package detection | Resolved and implemented in Track F | v1 proven |
 | **G** | Distribution pipeline (§13.1) | `npx vibescan`; the actual npm-native audience | Resolved in the Track G instruction set, subject to architecture review | v1 proven (parallel) |
 | **I** | DAST / write-probe (§7.3, §7.4) | Active write-exposure proof | Yes — security design + ownership gate | Everything; far future |
 
 Original recommended order was **H (fast-follow) → E and G in parallel → F → I
-(much later)**. Tier E is now complete; H remains evidence-gated, while F, G,
-and I retain their ordering constraints below.
+(much later)**. Tiers E and F are now complete; H remains evidence-gated, while
+G and I retain their ordering constraints below.
 
 ---
 
@@ -105,7 +106,7 @@ under `--features network`, and the precision/recall baseline includes them.
 
 ---
 
-## Track F — Registry egress and the `vibescan-registry` crate (§11.1)
+## Track F — Registry egress and the `vibescan-registry` crate (§11.1) — complete
 
 **Why after E.** It un-gates the *last* corpus fixture
 (`hallucinated-dependency`) and adds high-signal dependency intelligence, but it
@@ -138,6 +139,12 @@ of it ships):
 **Decision-first?** **No.** Architecture §11.2 made the registry, OSV, cache,
 confidence, and privacy decisions on 2026-07-18; the Tier F instruction set now
 implements them without reopening the mechanism.
+
+**Status (2026-07-18): complete.** F1 established the crate, DAG, independent
+opt-in, input plumbing, and disclosure shapes; F2 implemented the two confirmed
+detections, guards, failure taxonomy, and 24-hour caches; F3 promoted
+`hallucinated-dependency` into the golden and precision/recall corpus. The
+newcomer heuristic remains the separate deferred follow-up described above.
 
 ---
 
@@ -200,11 +207,11 @@ concrete user demand.
    question *from the evidence*.
 3. **Track E (Tier 1) is complete.** Track G remains the independent
    distribution track and touches no scan logic.
-4. **Track F (registry)** next — implement the already-resolved §11.1–§11.2
-   mechanism from the Tier F instruction set; un-gates the last corpus fixture.
+4. **Track F (registry) is complete:** the resolved §11.1–§11.2 mechanism is
+   implemented and the last corpus fixture is live.
 5. **Track I (DAST)** much later, security-design-first, only on real demand.
 
-After F, the last gated corpus fixture becomes live and the precision/recall
+With F complete, the last gated corpus fixture is live and the precision/recall
 corpus covers the full v1+ detection surface. After G, the tool reaches its
 intended audience. That is the natural "v2" line.
 

@@ -7,6 +7,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+#[cfg(feature = "registry")]
+use common::registry_fixture_findings;
 use common::{
     LIVE_FIXTURES, LiveFixture, fixture_dir, materialize_fixture, offline_composite_findings,
     synthetic_rls_finding,
@@ -205,7 +207,7 @@ fn network_exposed_public_key_chain_fixture_is_gated() {
 #[cfg(not(feature = "network"))]
 #[ignore = "TODO(network): run with --features network to exercise the mocked Tier 0 exposed-chain fixture"]
 fn network_exposed_public_key_chain_fixture_is_gated() {
-    ignored_network_fixture("exposed-public-key-chain");
+    ignored_feature_fixture("exposed-public-key-chain");
 }
 
 #[test]
@@ -218,7 +220,7 @@ fn network_rls_off_table_fixture() {
 #[cfg(not(feature = "network"))]
 #[ignore = "TODO(network): run with --features network to exercise the mocked Tier 1 RLS-off fixture"]
 fn network_rls_off_table_fixture() {
-    ignored_network_fixture("rls-off-table");
+    ignored_feature_fixture("rls-off-table");
 }
 
 #[test]
@@ -231,13 +233,28 @@ fn network_permissive_using_true_policy_fixture() {
 #[cfg(not(feature = "network"))]
 #[ignore = "TODO(network): run with --features network to exercise the mocked Tier 1 permissive-policy fixture"]
 fn network_permissive_using_true_policy_fixture() {
-    ignored_network_fixture("permissive-using-true-policy");
+    ignored_feature_fixture("permissive-using-true-policy");
 }
 
 #[test]
-#[ignore = "TODO(registry): enable when registry-backed dependency checks exist"]
+#[cfg(feature = "registry")]
 fn network_hallucinated_dependency_fixture() {
-    ignored_network_fixture("hallucinated-dependency");
+    let findings = registry_fixture_findings("hallucinated-dependency");
+    let manifest = GoldenManifest {
+        todo: None,
+        findings: canonicalize_findings(&findings, false),
+    };
+    assert_or_update_manifest(
+        fixture_dir("hallucinated-dependency").join("expected.json"),
+        &manifest,
+    );
+}
+
+#[test]
+#[cfg(not(feature = "registry"))]
+#[ignore = "feature-off: run with --features registry to exercise the mocked Registry fixture"]
+fn network_hallucinated_dependency_fixture() {
+    ignored_feature_fixture("hallucinated-dependency");
 }
 
 #[test]
@@ -284,11 +301,12 @@ fn monorepo_bundle_key_can_drive_exposed_public_key_chain() {
     ));
 }
 
-fn ignored_network_fixture(name: &str) {
+#[cfg(any(not(feature = "network"), not(feature = "registry")))]
+fn ignored_feature_fixture(name: &str) {
     let manifest = fixture_dir(name).join("expected.json");
     assert!(
         manifest.is_file(),
-        "network placeholder fixture {name} must carry expected.json"
+        "feature-gated fixture {name} must carry expected.json"
     );
 }
 
