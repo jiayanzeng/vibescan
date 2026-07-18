@@ -1224,7 +1224,7 @@ mod tests {
     #[test]
     fn history_scan_collects_changed_blobs_from_all_refs() {
         let repo = TestRepo::new();
-        repo.git(["init"]);
+        repo.git(["init", "--initial-branch=main"]);
         repo.git(["config", "user.email", "a@example.com"]);
         repo.git(["config", "user.name", "A"]);
         repo.write("src/app.ts", "console.log('clean');\n");

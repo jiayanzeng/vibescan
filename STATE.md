@@ -70,11 +70,11 @@ transport-free.
 
 ## Current worktree context
 
-The checkout was clean at `1dfa85c` when Task G1 began. The current dirty tree
-contains only G1-owned changes: root release metadata and the `dist` profile,
-`dist-workspace.toml`, `rust-toolchain.toml`, generated `release.yml`, and the
-reusable Linux static-link verification workflow. No pre-existing user change
-was present or modified.
+The checkout was clean at `1dfa85c` when Task G1 began. Branch
+`codex/track-g1-release-ci` contains the initial G1 implementation in
+`1225975`. Its only follow-up is a test-fixture portability correction exposed
+by the first hosted branch-push run; no production collection behavior changed.
+No pre-existing user change was present or modified.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -116,8 +116,8 @@ All Phase 1–5, Tier D, Tier E, and Track F regressions are green in the defaul
 G1 is release/distribution plumbing under architecture §13.1. It does not
 change scan behavior, the crate DAG, the LocalStatic default, runtime Network
 consent, or target-project access. Every intra-workspace dependency now carries
-both its local path and matching `0.1.0` registry version. The workspace repository
-URL now matches the checkout's actual `origin`,
+both its local path and matching `0.1.0` registry version. The workspace
+repository URL now matches the checkout's actual `origin`,
 `https://github.com/jiayanzeng/vibescan`, rather than the prior placeholder.
 
 The checksum-verified official `dist` 0.32.0 binary initialized
@@ -145,6 +145,15 @@ described in the G1 instruction note; G1 still deliberately leaves
 `cargo-auditable = false` so embedded dependency metadata is not silently added
 to this release-only task.
 
+The first hosted branch-push run, GitHub Actions run `29646107632`, exposed an
+existing fixture dependency on the runner's global Git default branch. The
+all-ref history test ran `git init`, created `feature`, then assumed the initial
+branch was named `main`; Ubuntu initialized `master`, so checkout failed and
+poisoned the fixture's shared Git environment lock. The regression reproduces
+locally by injecting `init.defaultBranch=master`. The fixture now uses
+`git init --initial-branch=main`, making its branch contract explicit without
+changing production code or adding a runtime Git dependency.
+
 The following commands passed on this G1 worktree using pinned Rust 1.85.0:
 
 ```sh
@@ -166,6 +175,11 @@ cargo test --workspace --locked
 cargo test --workspace --features network --locked
 cargo test --workspace --features registry --locked
 cargo test --workspace --features network,registry --locked
+env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch \
+  GIT_CONFIG_VALUE_0=master cargo test -p vibescan-git --locked \
+  tests::history_scan_collects_changed_blobs_from_all_refs -- --exact
+cargo test -p vibescan-git --locked
+cargo test -p vibescan-core --test golden_corpus --locked
 bash scripts/check-network-boundary.sh
 bash scripts/verify-hardening-checks.sh
 git diff --check
