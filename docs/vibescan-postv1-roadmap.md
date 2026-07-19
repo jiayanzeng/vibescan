@@ -28,7 +28,7 @@ decision, that decision is a spec patch, reviewed before any code.
 | **H** | Resolve §17 `src/api/` classification | Coverage-metric accuracy | No — *evidence-gated* | Tier D (D1+D2 coverage data) |
 | **E (complete)** | Tier 1 credentialed introspection (§7.2) | `rls-off-table`, `permissive-using-true-policy` fixtures; the deep RLS moat | Resolved and implemented in Tier E | v1 proven |
 | **F (complete)** | Registry egress + `vibescan-registry` (§11.1–§11.2) | `hallucinated-dependency` fixture; high-confidence OSV/nonexistent-package detection | Resolved and implemented in Track F | v1 proven |
-| **G** | Distribution pipeline (§13.1) | `npx @vibescan/cli`; the actual npm-native audience | Scoped entry point selected in G4.0; rollout remains dependency-gated | v1 proven (parallel) |
+| **G** | Distribution pipeline (§13.1) | `npx @jiayanzeng/vibescan`; the actual npm-native audience | Release-owner personal-scope entry point selected in G4.0; rollout remains dependency-gated | v1 proven (parallel) |
 | **I** | DAST / write-probe (§7.3, §7.4) | Active write-exposure proof | Yes — security design + ownership gate | Everything; far future |
 
 Original recommended order was **H (fast-follow) → E and G in parallel → F → I
@@ -157,14 +157,15 @@ F3 baseline and metrics in `STATE.md`. No Tier F acceptance residual remains.
 alongside E/F with a different owner. It also has the highest *product* leverage
 of anything here: §13.1 is explicit that the audience "lives in npm," and the
 pure-Rust constraint (no OpenSSL, no libgit2) exists precisely to make per-target
-prebuilds painless — the tool is architected for `npx @vibescan/cli` but cannot yet be
+prebuilds painless — the tool is architected for `npx @jiayanzeng/vibescan` but cannot yet be
 installed that way.
 
 **The work:**
 - Cross-compile matrix: macOS arm64/x64, Linux x64/arm64, Windows x64 — a CI
   release workflow producing prebuilt binaries per target.
-- The primary channel: the scoped `@vibescan/cli` npm wrapper package ships the
-  correct prebuilt per platform so `npx @vibescan/cli` works. Secondary: `cargo install`,
+- The primary channel: the release-owner personal-scope `@jiayanzeng/vibescan`
+  npm wrapper package ships the correct prebuilt per platform so
+  `npx @jiayanzeng/vibescan` works. Secondary: `cargo install`,
   Homebrew.
 - Release provenance/signing.
 

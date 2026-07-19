@@ -15,7 +15,7 @@ test("publish plan sends platform packages before the main package with provenan
   const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibescan-publish-plan-"));
   try {
     const manifest = {
-      main: "vibescan-cli-0.1.0.tgz",
+      main: "jiayanzeng-vibescan-0.1.0.tgz",
       platforms: {},
     };
     fs.writeFileSync(path.join(packagesRoot, manifest.main), "main");
@@ -50,7 +50,7 @@ test("publish plan sends platform packages before the main package with provenan
       plan.map((entry) => entry.name),
       [...platforms.map((platform) => platform.packageName), mainPackageName],
     );
-    assert.ok(plan.every((entry) => entry.name.startsWith("@vibescan/")));
+    assert.ok(plan.every((entry) => entry.name.startsWith("@jiayanzeng/vibescan")));
     assert.ok(!plan.some((entry) => entry.name === "vibescan"));
     for (const entry of plan) {
       assert.deepEqual(entry.args, ["--access", "public", "--provenance"]);

@@ -9,7 +9,7 @@ import tomllib
 
 REPOSITORY = "https://github.com/jiayanzeng/vibescan"
 TAP = "jiayanzeng/homebrew-tap"
-NPM_MAIN_PACKAGE = "@vibescan/cli"
+NPM_MAIN_PACKAGE = "@jiayanzeng/vibescan"
 PUBLISH_ORDER = [
     "vibescan-types",
     "vibescan-secrets",

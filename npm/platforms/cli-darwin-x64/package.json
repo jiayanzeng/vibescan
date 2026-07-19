@@ -1,5 +1,5 @@
 {
-  "name": "@vibescan/cli-darwin-x64",
+  "name": "@jiayanzeng/vibescan-darwin-x64",
   "version": "0.1.0",
   "description": "vibescan binary for macOS x64",
   "license": "MIT",

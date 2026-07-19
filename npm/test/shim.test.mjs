@@ -38,7 +38,7 @@ test("missing optional dependency is actionable and never downloads", () => {
   assert.match(result.stderr, /cached across operating systems/i);
   assert.match(result.stderr, /lockfile is stale/i);
   assert.match(result.stderr, /npm ci/i);
-  assert.match(result.stderr, /@vibescan\/cli/i);
+  assert.match(result.stderr, /@jiayanzeng\/vibescan/i);
   assert.match(result.stderr, /cargo install vibescan-cli/i);
   assert.match(result.stderr, /will not download or execute/i);
   assert.doesNotMatch(result.stderr, /\n\s+at\s/);

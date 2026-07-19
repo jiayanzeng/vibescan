@@ -1,5 +1,5 @@
 {
-  "name": "@vibescan/cli-win32-x64-msvc",
+  "name": "@jiayanzeng/vibescan-win32-x64-msvc",
   "version": "0.1.0",
   "description": "vibescan binary for Windows x64",
   "license": "MIT",

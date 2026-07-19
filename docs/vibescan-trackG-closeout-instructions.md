@@ -6,10 +6,11 @@ triggered **no publication** — the publishers only fire on a pushed tag, and n
 Track G therefore remains **partially complete**: G1 and G2 are done; G3 is *implemented*
 but its *rollout* is at 0%.
 
-This document specifies the remaining rollout as dependency-ordered tasks (G4.0–G4.4). It is
-Codex-ready for the in-repo tasks, but **G4.0 is a human decision** and **G4.1 requires the
-release owner to perform registry-mutating actions under explicit authorization** — those are
-external mutations that must not be inferred from approval to implement code.
+This document specifies the remaining rollout as dependency-ordered tasks
+(G4.0–G4.4). G4.0 is resolved to `@jiayanzeng/vibescan`. **G4.1 requires the
+release owner to perform registry-mutating actions under explicit
+authorization** — those are external mutations that must not be inferred from
+approval to implement code.
 
 ---
 
@@ -19,7 +20,7 @@ external mutations that must not be inferred from approval to implement code.
 |---|---|---|---|
 | crates.io | 8 crates incl. `vibescan-types`, `vibescan-cli` | Neither exists (`does not exist`) | First-ever publish; names free to claim on first push |
 | npm unscoped `vibescan` | ships-only shim `0.1.x` | **Taken**: `vibescan@0.0.5`, maintainer `tanayvk`, Nuxt-scaffold placeholder, published 2025‑04‑16, `bin.vibescan → dist/cli.js` | **Hard blocker** — the final publish step will 403 |
-| npm `@vibescan/cli-*` (5) | published, provenance | All 404 | Scope `@vibescan` appears unclaimed; needs bootstrap |
+| npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six return 404; npm user `jiayanzeng` owns the personal `@jiayanzeng` scope | First-ever publish creates the package identities; no organization is required |
 | `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | Repo 404, formula 404 | Tap not created |
 | release tag exercising G3 publishers | new immutable `v0.1.x` | None (`v0.1.0` predates G3) | Publishers have never run |
 
@@ -28,9 +29,11 @@ external mutations that must not be inferred from approval to implement code.
 - crates.io, publish bottom-up: `vibescan-types` → `vibescan-secrets` → `vibescan-git` →
   `vibescan-report` → `vibescan-supabase` → `vibescan-registry` → `vibescan-core` →
   `vibescan-cli`.
-- npm, publish platform-first then unscoped: `@vibescan/cli-darwin-arm64`,
-  `@vibescan/cli-darwin-x64`, `@vibescan/cli-linux-arm64-musl`,
-  `@vibescan/cli-linux-x64-musl`, `@vibescan/cli-win32-x64-msvc`, then `vibescan`.
+- npm, publish platform-first then the main package:
+  `@jiayanzeng/vibescan-darwin-arm64`, `@jiayanzeng/vibescan-darwin-x64`,
+  `@jiayanzeng/vibescan-linux-arm64-musl`,
+  `@jiayanzeng/vibescan-linux-x64-musl`,
+  `@jiayanzeng/vibescan-win32-x64-msvc`, then `@jiayanzeng/vibescan`.
 - Homebrew: formula `vibescan.rb` published to `jiayanzeng/homebrew-tap`.
 
 ---
@@ -39,10 +42,11 @@ external mutations that must not be inferred from approval to implement code.
 
 - **Read-only registry queries** (existence/ownership/provenance checks) are permitted and are
   the basis for the acceptance criteria below.
-- **Registry-mutating actions** — claiming crate names, creating npm packages/scope, creating
-  the tap repo, configuring bootstrap secrets and trusted publishers, and pushing the release
-  tag — are performed by the **release owner** only, with explicit authorization. Codex must
-  not perform them and must not assume they were done.
+- **Registry-mutating actions** — claiming crate names, publishing the first npm
+  package versions, creating the tap repo, configuring bootstrap secrets and
+  trusted publishers, and pushing the release tag — are performed by the
+  **release owner** only, with explicit authorization. Codex must not perform
+  them and must not assume they were done.
 - **Immutability:** crates.io versions cannot be overwritten or (after 72h / once depended-on)
   unpublished; npm unpublish is likewise constrained. The ordering below front-loads the
   reversible dry-runs (G4.2) *before* the irreversible tag (G4.3) precisely because a partial
@@ -66,23 +70,29 @@ Do not start G4.1 until G4.0 is decided; do not cut the tag in G4.3 until G4.2 i
 ## Task G4.0 — DECISION GATE: resolve the unscoped `vibescan` npm name
 
 ### Spec basis
-§13.1 primary channel: `npx vibescan` for the JS-native audience. §13.4 npm packaging.
+§13.1 primary channel: the release-owner-controlled
+`npx @jiayanzeng/vibescan` entry point for the JS-native audience. §13.4 npm
+packaging.
 
 ### Problem
-The unscoped `vibescan` npm name — the literal target of `npx vibescan` and the last step of
-`publish-packages.mjs` — is owned by a different account. The tagged release will publish the
-five scoped platform packages and (per current code) then attempt to publish unscoped
-`vibescan`, which will fail with 403 *after* the scoped packages and crates are already live and
-immutable. This must be resolved before any tag is cut.
+The unscoped `vibescan` npm name — the original target of `npx vibescan` — is
+owned by a different account. Before G4.0 was corrected, a tagged release would
+have published the five platform packages and then attempted the foreign
+unscoped name, failing with 403 after scoped packages and crates were already
+live and immutable. The approved personal-scope identity removes that failure
+path before any tag is cut.
 
-### Decision (release owner) — choose exactly one
-1. **Scoped entry point (recommended, fully in your control).** Make `@vibescan/cli` the user
-   entry point: `npx @vibescan/cli`. No third party is on the critical path.
+### Decision (release owner) — approved 2026-07-19
+1. **Controlled personal-scope entry point (selected).** Make
+   `@jiayanzeng/vibescan` the user entry point: `npx @jiayanzeng/vibescan`.
+   The `jiayanzeng` user account automatically owns `@jiayanzeng`; do not create
+   an organization and do not convert the user account into one. No third party
+   is on the critical path.
    - Implies: promote the shim in `npm/vibescan/` to a scoped main package (e.g.
-     `@vibescan/cli`) that keeps the `bin.vibescan` and the exact-version `optionalDependencies`
+     `@jiayanzeng/vibescan`) that keeps the `bin.vibescan` and the exact-version `optionalDependencies`
      on the five platform packages; remove the unscoped `vibescan` publish step from
      `publish-packages.mjs`; update `README`, npm fallback text, `RELEASING.md`, and §13.1's
-     `npx vibescan` wording to `npx @vibescan/cli`.
+     `npx vibescan` wording to `npx @jiayanzeng/vibescan`.
    - Note: §13.1's `npx vibescan` phrasing is a **decision-gated** edit and is intentionally not
      touched by the P2 status-debt patch; apply it here only if this option is chosen.
 2. **Acquire the unscoped name.** File an npm name dispute (the incumbent is a single `0.0.5`
@@ -95,8 +105,9 @@ immutable. This must be resolved before any tag is cut.
 ### Acceptance criteria
 1. A written decision (1–3) is recorded in `RELEASING.md`.
 2. If (1): `npm/` no longer publishes an unscoped `vibescan`; `publish-packages.mjs --print-plan`
-   shows `@vibescan/cli` last, five platform packages first; all user-facing docs say
-   `npx @vibescan/cli`; `npm --prefix npm test` and `node npm/scripts/verify-packages.mjs` pass.
+   shows `@jiayanzeng/vibescan` last, five platform packages first; all
+   user-facing docs say `npx @jiayanzeng/vibescan`; `npm --prefix npm test` and
+   `node npm/scripts/verify-packages.mjs` pass.
 3. If (2): ownership of `vibescan` is confirmed by a read-only query returning the owner as the
    release account **before** G4.3; otherwise fall back to (1)/(3).
 4. Negative control: no code path publishes an unscoped name the release account does not own —
@@ -110,24 +121,32 @@ immutable. This must be resolved before any tag is cut.
 §13.1 secondary channels (`cargo install`, Homebrew); §13.4 npm; G3 acceptance #1–#3.
 
 ### Problem
-No crate names, npm scope/packages, or tap repo exist yet, and the trusted-publishing / bootstrap
-credentials are unset, so a tag would fail immediately.
+No crate names, npm packages, or tap repo exist yet. The `jiayanzeng` npm user
+and its personal `@jiayanzeng` scope exist, but the trusted-publishing /
+bootstrap credentials are unset, so a tag would fail immediately.
 
 ### Actions (release owner, in this order)
 1. **crates.io.** Reserve/own the 8 crate names (first publish in G4.3 claims them, but confirm no
    name is squatted). Configure either a one-time bootstrap `CARGO_REGISTRY_TOKEN` secret or the
    crates.io trusted-publisher (OIDC) binding to `release.yml`.
-2. **npm.** Create/own the `@vibescan` scope and the five platform package names; resolve the main
-   entry point per G4.0. Configure `id-token: write` (OIDC provenance) and, if needed for the very
-   first publish, a bootstrap `NPM_TOKEN`.
+2. **npm.** Use the existing `jiayanzeng` user and its personal `@jiayanzeng`
+   scope; do not create an organization or convert the user account. Confirm
+   `npm whoami` returns `jiayanzeng`, enable two-factor authentication, and
+   configure the existing `id-token: write` provenance path plus a short-lived
+   bootstrap `NPM_TOKEN` if the first publication requires it. The first publish
+   creates `@jiayanzeng/vibescan` and the five platform package identities;
+   after they exist, configure trusted publishing for each package and remove
+   the bootstrap token.
 3. **Homebrew.** Create `jiayanzeng/homebrew-tap` (public), with the layout `dist` writes to
    (`Formula/`). Grant the release workflow push access (token/app) to that repo.
 
 ### Acceptance criteria (read-only, self-verifiable)
 1. `GET https://crates.io/api/v1/crates/<name>` for all 8 either 404 (free to claim) or resolve
    to the release owner — none resolve to a foreign owner.
-2. `GET https://registry.npmjs.org/@vibescan%2F<pkg>` scope reachable; the release account is a
-   maintainer of the scope; the chosen main entry point is owned (per G4.0).
+2. `npm whoami` returns `jiayanzeng`; before first publication, all six exact
+   `GET https://registry.npmjs.org/@jiayanzeng%2F<vibescan-name>` requests
+   return 404 rather than resolving to a foreign owner. After first publication,
+   they resolve with `jiayanzeng` as a maintainer.
 3. `GET https://github.com/jiayanzeng/homebrew-tap` returns 200 (repo exists).
 4. Required secrets/OIDC bindings are present in repo settings (owner confirms; not logged).
 5. Negative control: none of the target identities is owned by a third party at tag time.
@@ -220,7 +239,7 @@ G3 acceptance #1–#3; `RELEASING.md` "Verify a release".
 ### Steps (read-only, after G4.3)
 ```sh
 # npm
-npx <main-entry>@<version> --version          # `vibescan` or `@vibescan/cli` per G4.0
+npx @jiayanzeng/vibescan@<version> --version
 npm audit signatures                           # provenance verified
 
 # cargo (architecture-named package installs the `vibescan` binary)
