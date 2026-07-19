@@ -9,8 +9,9 @@ but its *publication rollout* is at 0%.
 This document specifies the remaining rollout as dependency-ordered tasks
 (G4.0–G4.4). G4.0 is resolved to `@jiayanzeng/vibescan`. G4.1's explicitly
 owner-controlled identity/credential/tap bootstrap and G4.2's reversible local
-preflight are complete as of 2026-07-19. The next task is G4.3; no version bump,
-tag, or publication has occurred.
+preflight are complete as of 2026-07-19. G4.3's recommended `0.1.1` version bump
+and local gates are prepared at commit `be615a0`; the branch is not merged and
+no tag or publication has occurred.
 
 ---
 
@@ -22,7 +23,7 @@ tag, or publication has occurred.
 | npm unscoped `vibescan` (excluded) | not published by vibescan | **Taken**: `vibescan@0.0.5`, maintainer `tanayvk`, Nuxt-scaffold placeholder, published 2025‑04‑16, `bin.vibescan → dist/cli.js` | Not in the approved publish plan; no longer a blocker |
 | npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six return 404; npm user `jiayanzeng` owns the personal `@jiayanzeng` scope | First-ever publish creates the package identities; no organization is required |
 | `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | Public repo and `Formula/` layout return 200; formula awaits the release | Bootstrap complete; G4.3 writes the first formula |
-| release tag exercising G3 publishers | new immutable `v0.1.x` | None (`v0.1.0` predates G3); G4.2 is green | Publishers have never run; G4.3 is next |
+| release tag exercising G3 publishers | new immutable `v0.1.x` | `0.1.1` is prepared at `be615a0`, but no `v0.1.1` tag exists (`v0.1.0` predates G3) | Publishers have never run; owner-only merge/tag step remains |
 
 **Exact identities the publishers target:**
 
@@ -208,6 +209,12 @@ ruby -c target/distrib/vibescan.rb
 ---
 
 ## Task G4.3 — Version bump and tag (owner-authorized, irreversible)
+
+**Status:** prepared but incomplete as of 2026-07-19. Step 1 and the complete
+local release matrix pass at commit `be615a0` on
+`codex/track-g4-release-0.1.1`. Steps 2–3 remain owner-only: merge the reviewed
+branch, create annotated tag `v0.1.1` on that exact merge, push only the tag,
+and require the tagged workflow to pass before marking G4.3 complete.
 
 ### Spec basis
 `RELEASING.md` runbook; G3 acceptance #1–#3.
