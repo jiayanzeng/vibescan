@@ -4,13 +4,13 @@
 G3 *publishers, provenance wiring, Homebrew formula, and `RELEASING.md`* onto `main` but
 triggered **no publication** — the publishers only fire on a pushed tag, and none was cut.
 Track G therefore remains **partially complete**: G1 and G2 are done; G3 is *implemented*
-but its *rollout* is at 0%.
+but its *publication rollout* is at 0%.
 
 This document specifies the remaining rollout as dependency-ordered tasks
-(G4.0–G4.4). G4.0 is resolved to `@jiayanzeng/vibescan`. **G4.1 requires the
-release owner to perform registry-mutating actions under explicit
-authorization** — those are external mutations that must not be inferred from
-approval to implement code.
+(G4.0–G4.4). G4.0 is resolved to `@jiayanzeng/vibescan`. G4.1's explicitly
+owner-controlled identity/credential/tap bootstrap and G4.2's reversible local
+preflight are complete as of 2026-07-19. The next task is G4.3; no version bump,
+tag, or publication has occurred.
 
 ---
 
@@ -18,11 +18,11 @@ approval to implement code.
 
 | Channel | Expected after rollout | Observed now | Consequence |
 |---|---|---|---|
-| crates.io | 8 crates incl. `vibescan-types`, `vibescan-cli` | Neither exists (`does not exist`) | First-ever publish; names free to claim on first push |
-| npm unscoped `vibescan` | ships-only shim `0.1.x` | **Taken**: `vibescan@0.0.5`, maintainer `tanayvk`, Nuxt-scaffold placeholder, published 2025‑04‑16, `bin.vibescan → dist/cli.js` | **Hard blocker** — the final publish step will 403 |
+| crates.io | 8 crates incl. `vibescan-types`, `vibescan-cli` | All eight return 404 | First-ever publish; names free to claim on first push |
+| npm unscoped `vibescan` (excluded) | not published by vibescan | **Taken**: `vibescan@0.0.5`, maintainer `tanayvk`, Nuxt-scaffold placeholder, published 2025‑04‑16, `bin.vibescan → dist/cli.js` | Not in the approved publish plan; no longer a blocker |
 | npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six return 404; npm user `jiayanzeng` owns the personal `@jiayanzeng` scope | First-ever publish creates the package identities; no organization is required |
-| `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | Repo 404, formula 404 | Tap not created |
-| release tag exercising G3 publishers | new immutable `v0.1.x` | None (`v0.1.0` predates G3) | Publishers have never run |
+| `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | Public repo and `Formula/` layout return 200; formula awaits the release | Bootstrap complete; G4.3 writes the first formula |
+| release tag exercising G3 publishers | new immutable `v0.1.x` | None (`v0.1.0` predates G3); G4.2 is green | Publishers have never run; G4.3 is next |
 
 **Exact identities the publishers target:**
 
@@ -117,6 +117,9 @@ path before any tag is cut.
 
 ## Task G4.1 — External identity bootstrap (owner-authorized, dependency-ordered)
 
+**Status:** complete on 2026-07-19; see `STATE.md` for the owner confirmations
+and read-only acceptance evidence. No secret value was inspected or recorded.
+
 ### Spec basis
 §13.1 secondary channels (`cargo install`, Homebrew); §13.4 npm; G3 acceptance #1–#3.
 
@@ -155,6 +158,9 @@ bootstrap credentials are unset, so a tag would fail immediately.
 
 ## Task G4.2 — Pre-flight dry-run gate (reversible, before the immutable tag)
 
+**Status:** complete on 2026-07-19 at commit `0781869`; see `STATE.md` for the
+commands, negative-control result, and clean final worktree.
+
 ### Spec basis
 G3 acceptance #1 (`--dry-run` / `cargo publish --dry-run` chain), #4 (runbook), #5 (engine green).
 
@@ -178,6 +184,8 @@ bash scripts/check-network-boundary.sh
 
 # publisher contracts, no mutation
 bash scripts/publish-crates.sh --dry-run
+# `target/npm-packages` is generated output; begin with it absent or empty so
+# exact-file verification cannot mix prior versions or package identities.
 node npm/scripts/build-packages.mjs --artifacts target/distrib --out target/npm-packages
 node npm/scripts/verify-packages.mjs --packages target/npm-packages
 node npm/scripts/publish-packages.mjs --packages target/npm-packages --print-plan
