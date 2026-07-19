@@ -1,0 +1,82 @@
+name: Publish release channels in dependency order
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: The dist release plan supplied by the generated workflow.
+        required: true
+        type: string
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        description: Optional first-release crates.io bootstrap token.
+        required: false
+      NPM_TOKEN:
+        description: Optional first-release npm bootstrap token.
+        required: false
+      HOMEBREW_TAP_TOKEN:
+        description: Token permitted to update the Homebrew tap.
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+jobs:
+  publish-crates:
+    uses: ./.github/workflows/publish-crates.yml
+    with:
+      plan: ${{ inputs.plan }}
+    secrets: inherit
+
+  publish-npm:
+    needs: publish-crates
+    uses: ./.github/workflows/publish-npm.yml
+    with:
+      plan: ${{ inputs.plan }}
+    secrets: inherit
+
+  publish-homebrew:
+    needs: publish-npm
+    runs-on: ubuntu-22.04
+    env:
+      PLAN: ${{ inputs.plan }}
+      GITHUB_USER: axo bot
+      GITHUB_EMAIL: admin+bot@axo.dev
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+          repository: jiayanzeng/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Fetch Homebrew formulae
+        uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: Formula/
+          merge-multiple: true
+
+      - name: Commit formula files
+        shell: bash
+        run: |
+          git config --global user.name "${GITHUB_USER}"
+          git config --global user.email "${GITHUB_EMAIL}"
+
+          while IFS= read -r release; do
+            filename=$(jq --raw-output '.artifacts[] | select(endswith(".rb"))' <<<"$release")
+            name=${filename%.rb}
+            version=$(jq --raw-output '.app_version' <<<"$release")
+
+            export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+            brew update
+            brew style --except-cops FormulaAudit/Homepage,FormulaAudit/Desc,FormulaAuditStrict \
+              --fix "Formula/${filename}" || true
+
+            git add "Formula/${filename}"
+            git commit -m "${name} ${version}"
+          done < <(jq --compact-output \
+            '.releases[] | select([.artifacts[] | endswith(".rb")] | any)' \
+            <<<"$PLAN")
+          git push

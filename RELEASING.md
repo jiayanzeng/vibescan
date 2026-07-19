@@ -14,7 +14,25 @@ The npm publisher must publish the five `@jiayanzeng/vibescan-*` platform
 packages first and `@jiayanzeng/vibescan` last; its print plan must contain only
 these six scoped identities.
 
-## `v0.1.2` recovery release decision (G4.3)
+## `v0.1.3` recovery release decision (G4.3)
+
+Release run #13 for immutable tag `v0.1.2` built, attested, packaged, and
+hosted all release artifacts. It then published all six npm packages and the
+Homebrew formula, while crates.io accepted the first five workspace crates and
+rate-limited the sixth new identity with HTTP 429. Because package versions
+were already live, `v0.1.2` cannot be retried or reused. The release owner
+therefore authorized synchronized version `0.1.3` on 2026-07-19. This remains a
+distribution-only recovery: scanner behavior, the eight-crate dependency graph,
+LocalStatic/Network boundaries, target-project access, detection output, and
+the six approved npm identities are unchanged.
+
+The recovery also makes the observed failure mode deterministic: the Cargo
+publisher retries only crates.io's explicit new-crate 429 with a bounded delay,
+and the release runs crates.io, then npm, then Homebrew as one dependency chain.
+A Cargo failure now prevents both downstream publishers from creating another
+parallel partial release.
+
+## `v0.1.2` partial-release record (G4.3)
 
 After PR #7 merged the reusable-publisher permission repair to `main` as
 `66e5fa2`, the release owner authorized the next immutable patch preparation on
@@ -22,9 +40,11 @@ After PR #7 merged the reusable-publisher permission repair to `main` as
 `v0.1.1` attempt. It is a distribution-only recovery release: scanner behavior,
 the eight-crate dependency graph, LocalStatic/Network boundaries,
 target-project access, detection output, and the six approved npm identities
-are unchanged. The release exists to exercise the already-implemented
-crates.io, scoped npm, and Homebrew publishers with the repaired generated
-workflow.
+are unchanged. Annotated tag `v0.1.2` points to PR #8's merge `1883d61`.
+Release run #13 proved all build, attestation, static-link, npm packaging, npm
+publication, and Homebrew paths, but crates.io's new-crate rate limit stopped
+the bottom-up sequence after `vibescan-supabase`. The tag and every published
+`0.1.2` package remain immutable evidence and must not be moved or reused.
 
 ## `v0.1.1` failed-attempt record (G4.3)
 
@@ -79,6 +99,7 @@ reused.
    npm --prefix npm test
    python3 scripts/verify-release-publishing.py
    bash scripts/publish-crates.sh --dry-run
+   bash scripts/test-publish-crates.sh
    dist generate --check
    dist plan
    cargo fmt --all -- --check
@@ -98,12 +119,14 @@ reused.
    and push only that tag. The release workflow builds and attests the five
    platform archives, verifies static Linux linkage, packages and smoke-tests
    the six npm tarballs, creates the GitHub release, then runs the package
-   publishers.
+   publishers strictly in crates.io → npm → Homebrew order.
 
 ## Publication order
 
 The crates.io job publishes bottom-up so every registry dependency exists before
-its parent:
+its parent. It retries only an explicit crates.io HTTP 429 with a bounded
+60-second backoff; authentication, ownership, validation, and other failures
+remain fail-closed:
 
 1. `vibescan-types`
 2. `vibescan-secrets`

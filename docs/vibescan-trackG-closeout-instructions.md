@@ -15,10 +15,13 @@ that exact merge. Tagged Release run #10 failed workflow validation before any
 job, artifact, GitHub release, registry publication, or formula update ran:
 the generated caller denied `contents: read` to both reusable publisher
 workflows. Pull request #7 merged commit `bca901a` plus its status record to
-`main` as `66e5fa2`; all 36 hosted checks passed. Commit `0efdca0` on
-`codex/track-g4-release-0.1.2` now prepares the synchronized `0.1.2` immutable
-recovery version. It is locally verified but not merged or tagged. G4.3
-remains incomplete.
+`main` as `66e5fa2`; all 36 hosted checks passed. PR #8 then merged the
+synchronized `0.1.2` recovery and annotated tag `v0.1.2` points to merge
+`1883d61`. Release run #13 built and hosted every artifact, published all six
+npm packages and the Homebrew formula, and published the first five crates;
+crates.io rate-limited the sixth new crate identity with HTTP 429. The tag is
+immutable, so `0.1.3` is the next recovery version. G4.3 remains incomplete
+until that tagged workflow passes end to end.
 
 ---
 
@@ -26,11 +29,11 @@ remains incomplete.
 
 | Channel | Expected after rollout | Observed now | Consequence |
 |---|---|---|---|
-| crates.io | 8 crates incl. `vibescan-types`, `vibescan-cli` | All eight return 404 | First-ever publish; names free to claim on first push |
+| crates.io | 8 crates incl. `vibescan-types`, `vibescan-cli` | `vibescan-types`, `vibescan-secrets`, `vibescan-git`, `vibescan-report`, and `vibescan-supabase` published at `0.1.2`; registry/core/CLI remain 404 | Partial immutable publication; `0.1.3` must publish the complete graph after the rate-limit window |
 | npm unscoped `vibescan` (excluded) | not published by vibescan | **Taken**: `vibescan@0.0.5`, maintainer `tanayvk`, Nuxt-scaffold placeholder, published 2025‑04‑16, `bin.vibescan → dist/cli.js` | Not in the approved publish plan; no longer a blocker |
-| npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six return 404; npm user `jiayanzeng` owns the personal `@jiayanzeng` scope | First-ever publish creates the package identities; no organization is required |
-| `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | Public repo and `Formula/` layout return 200; formula awaits the release | Bootstrap complete; G4.3 writes the first formula |
-| release tag exercising G3 publishers | new immutable `v0.1.x` | `v0.1.1` points to `01f7f39`, but Release run #10 failed validation before jobs; PR #7 merged the caller-permission repair and `0efdca0` prepares `0.1.2` | Nothing was published; merge the verified `0.1.2` preparation, then create a new annotated `v0.1.2` tag rather than moving `v0.1.1` |
+| npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six are live at `0.1.2` | `0.1.2` is immutable; the synchronized recovery publishes all six at `0.1.3` only after crates.io succeeds |
+| `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | `Formula/vibescan.rb` is live at `0.1.2` | The ordered recovery updates the formula to `0.1.3` last |
+| release tag exercising G3 publishers | new immutable `v0.1.x` | `v0.1.2` points to `1883d61`; Release run #13 created the release but failed on crates.io HTTP 429 after partial publication | Preserve `v0.1.2`; merge the verified `0.1.3` recovery, then create a new annotated `v0.1.3` tag |
 
 **Exact identities the publishers target:**
 
@@ -217,33 +220,40 @@ ruby -c target/distrib/vibescan.rb
 
 ## Task G4.3 — Version bump and tag (owner-authorized, irreversible)
 
-**Status:** recovery prepared as of 2026-07-19. PR #6 merged the `0.1.1`
+**Status:** second recovery in progress as of 2026-07-19. PR #6 merged the `0.1.1`
 release preparation as `01f7f39`, and annotated tag `v0.1.1` points to that
 exact merge. Release run #10 failed workflow validation before any job or
 publication because both reusable publisher calls were denied
 `contents: read`. PR #7 merged the supported cargo-dist permission repair to
-`main` as `66e5fa2`, with all 36 checks passing. Commit `0efdca0` now
-synchronizes and fully verifies the next immutable patch version, `0.1.2`; it
-is not merged or tagged. Do not move or reuse `v0.1.1`. Require the
-owner-pushed `v0.1.2` tagged workflow to pass before marking G4.3 complete.
+`main` as `66e5fa2`, with all 36 checks passing. PR #8 merged `0.1.2` as
+`1883d61`, and the annotated `v0.1.2` workflow published npm, Homebrew, and the
+first five crates before crates.io returned HTTP 429 for `vibescan-registry`.
+Do not move or reuse `v0.1.1` or `v0.1.2`. The next owner-pushed tag must be
+`v0.1.3`, with bounded crates.io 429 retry and strict
+crates.io → npm → Homebrew sequencing.
 
 ### Spec basis
 `RELEASING.md` runbook; G3 acceptance #1–#3.
 
 ### Problem
-`v0.1.0` is consumed by the G1 release and its publishers never ran; a *new* immutable tag is
-required to exercise the G3 publishers, and it will be the first published version on
-crates.io/npm.
+`v0.1.0` is consumed by the G1 release and its publishers never ran. `v0.1.1`
+failed before jobs, while `v0.1.2` partially published before crates.io's
+new-crate rate limit stopped the dependency chain. A new immutable tag is
+required to complete all eight crates and prove the publishers end to end.
 
 ### Steps
-1. **Version decision (owner):** after the failed immutable `v0.1.1` attempt,
-   bump the workspace to `0.1.2` (distribution-only recovery, no engine
-   behavior change) and record the rationale in `RELEASING.md`. Commit
-   `0efdca0` prepares this synchronized version. The five platform packages,
-   six/eight registry identities, and the formula all carry `0.1.2`.
-2. Merge the version bump to `main`, create an annotated `v<version>` tag on that merge, push
+1. **Version decision (owner):** after the partially published immutable
+   `v0.1.2` attempt, bump the workspace to `0.1.3` (distribution-only recovery,
+   no engine behavior change) and record the rationale in `RELEASING.md`. The
+   five platform packages, all eight crates, all six npm identities, and the
+   formula carry `0.1.3`.
+2. Pin the observed failure mode: retry only an explicit crates.io HTTP 429 with
+   a bounded delay, fail closed on every other publication error, and sequence
+   crates.io → npm → Homebrew so downstream channels cannot publish after an
+   upstream failure.
+3. Merge the version bump to `main`, create an annotated `v<version>` tag on that merge, push
    **only** the tag.
-3. The release workflow builds + attests the five platform archives, verifies static Linux
+4. The release workflow builds + attests the five platform archives, verifies static Linux
    linkage, packages and smoke-tests the npm tarballs, creates the GitHub release, then runs the
    crates.io → npm → Homebrew publishers in order.
 
@@ -305,6 +315,9 @@ gh attestation verify <archive> \
   cannot incorporate the fixed workflow definition.
 - If a publisher fails **after** some crates/packages are live, do **not** retry the same version.
   Diagnose, bump to the next patch version, and re-run — published immutable versions stay as-is.
+  Release run #13 is the concrete example: its first five crates, six npm
+  packages, Homebrew formula, release assets, and attestations remain at
+  `0.1.2`, while the complete recovery moves to `0.1.3`.
 - The single most likely failure is the unscoped `vibescan` publish; G4.0 removes that risk before
   the tag. Do not skip G4.0.
 - Homebrew failures are the cheapest to recover (formula-only, no registry immutability); fix the

@@ -24,14 +24,14 @@ cargo-auditable = false
 # so G2 deliberately packages shipped binaries in the custom job instead.
 # Both custom jobs consume the completed platform archives and block hosting.
 global-artifacts-jobs = ["./verify-static-linux", "./package-npm"]
-# Publish only after GitHub hosting succeeds. npm and crates.io use custom jobs
-# so their ordering and provenance contracts remain explicit and testable.
-publish-jobs = ["homebrew", "./publish-crates", "./publish-npm"]
-# Reusable publisher workflows check out this repository before publishing.
-# Job-level permissions replace the workflow default, so retain contents:read
-# alongside the publish jobs' OIDC and package permissions.
-github-custom-job-permissions = { "publish-crates" = { contents = "read", id-token = "write", packages = "write" }, "publish-npm" = { contents = "read", id-token = "write", packages = "write" } }
-# dist's Homebrew publisher writes the generated formula to this tap.
+# Publish only after GitHub hosting succeeds. One custom workflow sequences
+# crates.io, npm, and Homebrew so a failed prerequisite cannot produce another
+# parallel partial release.
+publish-jobs = ["./publish-all"]
+# The ordered publisher checks out this repository, uses OIDC for both package
+# registries, and passes only the permissions its nested workflows can consume.
+github-custom-job-permissions = { "publish-all" = { contents = "read", id-token = "write", packages = "write" } }
+# The ordered custom publisher writes dist's generated formula to this tap.
 tap = "jiayanzeng/homebrew-tap"
 # The Cargo package is architecture-named `vibescan-cli`, but users invoke the
 # binary as `vibescan`; keep the Homebrew formula aligned with the binary.
