@@ -32,6 +32,17 @@ and the release runs crates.io, then npm, then Homebrew as one dependency chain.
 A Cargo failure now prevents both downstream publishers from creating another
 parallel partial release.
 
+PR #9 merged this recovery to `main` as `e788b1c`; annotated tag `v0.1.3`
+peels to that exact merge. Release run
+[#29676514551](https://github.com/jiayanzeng/vibescan/actions/runs/29676514551)
+completed all 19 jobs successfully. It proved the five builds and attestations,
+static Linux linkage, five-platform npm smoke, GitHub hosting, complete
+bottom-up crates.io resolution, all six npm publications, and the Homebrew
+update in the required order. Public reads resolve all eight crates and all six
+npm identities at `0.1.3`; the tap formula is `0.1.3`. Re-pushing the unchanged
+tag returned `Everything up-to-date`, so it created no duplicate release or
+publication.
+
 ## `v0.1.2` partial-release record (G4.3)
 
 After PR #7 merged the reusable-publisher permission repair to `main` as

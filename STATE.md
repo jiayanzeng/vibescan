@@ -2,17 +2,16 @@
 
 Reviewed: 2026-07-19
 
-Current implementation checkpoint: `a12499a` on
-`codex/track-g4-release-0.1.3` (G4.3 second immutable recovery-release
-preparation; Tasks G4.0–G4.2 complete). Pull request #8 merged the `0.1.2`
-recovery to `main` as `1883d61`, and annotated tag `v0.1.2` points to that
-merge. Release run #13 built, attested, packaged, and hosted the five-platform
-release; published all six scoped npm packages and the Homebrew formula; and
-published the first five crates before crates.io rate-limited the sixth new
-identity with HTTP 429. Because those versions are immutable, `a12499a`
-synchronizes every Cargo/npm surface to `0.1.3`, adds bounded 429-only Cargo
-retry, and sequences crates.io → npm → Homebrew. It is not yet merged or tagged,
-and no target-project state has changed.
+Current released implementation checkpoint: `e788b1c` on `main`, with annotated
+tag `v0.1.3` peeling to that exact merge (G4.3 complete; Tasks G4.0–G4.2 also
+complete). Release run #29676514551 passed all 19 jobs: five builds and
+attestations, static Linux verification, five-platform npm smoke, GitHub
+hosting, and the ordered crates.io → npm → Homebrew publishers. Public reads
+resolve all eight crates and all six scoped npm identities at `0.1.3`; the tap
+formula is `0.1.3`. An unchanged-tag re-push returned `Everything up-to-date`.
+Documentation closeout checkpoint `a9507b2` is on
+`codex/track-g4-release-0.1.3-closeout`. G4.4 remains outstanding, and no
+target-project state changed.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -82,11 +81,14 @@ attestations, static Linux verification, npm packaging/smoke, GitHub hosting,
 all six npm publications, the Homebrew update, and the first five crate
 publications without any 403. crates.io returned HTTP 429 for the sixth new
 crate, so `v0.1.2` remains partial immutable evidence. Preparation `a12499a`
-synchronizes `0.1.3`, retries only explicit crates.io 429 failures with a
-bounded delay, sequences crates.io → npm → Homebrew, and passes the complete
-local release and architecture matrix. Track G's operational rollout remains
-partial because this recovery is not merged or tagged, the complete eight-crate
-publisher has not passed, and G4.4 public verification has not run, and
+synchronized `0.1.3`, retries only explicit crates.io 429 failures with a
+bounded delay, sequences crates.io → npm → Homebrew, and passed the complete
+local release and architecture matrix. PR #9 merged it as `e788b1c`; annotated
+tag `v0.1.3` peels to that merge, and Release run #29676514551 passed all 19
+jobs. All eight crates and all six npm identities now resolve publicly at
+`0.1.3`, the formula is `0.1.3`, and the required same-tag push was a no-op.
+G4.3 is complete. Track G remains partial because G4.4's install/provenance
+verification has not run, and
 the literal instruction
 `cargo install vibescan` conflicts with the architecture-named
 `vibescan-cli` package (which installs the `vibescan` binary).
@@ -107,9 +109,8 @@ Use these three lenses when discussing completion:
   implementation, G4.0's npm identity decision, and G4.1's external bootstrap
   plus G4.2's reversible preflight are complete; G4.3's first tagged attempt
   failed before publication, and its `0.1.2` recovery partially published
-  before crates.io rate-limited the sixth new identity. The fully verified
-  `0.1.3` recovery is locally committed but unmerged. G4.3 completion, G4.4
-  verification, and
+  before crates.io rate-limited the sixth new identity. The `v0.1.3` recovery
+  then passed end to end and completes G4.3. G4.4 verification and
   other deferred tracks remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
@@ -196,6 +197,16 @@ implementation commit `a12499a` contains the synchronized `0.1.3` surfaces,
 strict crates.io → npm → Homebrew workflow, bounded 429-only retry and its
 negative controls, generated workflow, runbook, and closeout updates. No
 pre-existing user change was present or modified.
+
+Pull request #9 merged both reviewed recovery commits to `main` as
+`e788b1c139556f979a23fc6e97705bc54fce1cc7`; GitHub reported 27 successful
+checks and seven expected release-only skips. Annotated tag object `45e6841`
+peels to that exact merge. The initial push named only `refs/tags/v0.1.3`.
+Release run #29676514551 completed successfully, and the required unchanged-tag
+re-push returned `Everything up-to-date`. The post-run documentation closeout
+began from clean `origin/main` at `e788b1c` on
+`codex/track-g4-release-0.1.3-closeout`; commit `a9507b2` records the runbook and
+G4.3 completion evidence. No pre-existing user change was present or modified.
 
 ## Track G4.0 verification observed on 2026-07-19
 
@@ -628,6 +639,65 @@ and no target-project data or scanner behavior changed. G4.3 remains
 status follow-up to `main`, create annotated `v0.1.3` on that exact merge, push
 only the tag, require the tagged workflow to pass end to end, and prove that a
 second push of the same tag is a no-op. G4.4 remains a separate follow-up.
+
+## Track G4.3 `v0.1.3` release completion observed on 2026-07-19
+
+Pull request #9 merged implementation `a12499a` and preparation record
+`234981f` to `main` as `e788b1c139556f979a23fc6e97705bc54fce1cc7` after 27
+hosted checks passed with seven expected release-only skips. The remote had no
+`v0.1.3` tag before release. Annotated tag object
+`45e6841294c37a843e17164d54cfc1fe9ee51620` peels to the exact PR merge. The
+initial push sent only `refs/tags/v0.1.3` and triggered
+[Release run #29676514551](https://github.com/jiayanzeng/vibescan/actions/runs/29676514551).
+
+The run completed all 19 jobs successfully on tagged merge `e788b1c`. All five
+platform build jobs passed, including one successful `Attest` step each. The
+static Linux verifier, npm package job, all five platform smoke jobs, GitHub
+host, crates.io publisher, npm publisher, Homebrew publisher, and announcement
+also passed. Job timestamps and dependency state showed only crates.io active
+after hosting; npm began only after crates.io completed; Homebrew began only
+after npm completed. No publisher returned 403.
+
+The [v0.1.3 GitHub release](https://github.com/jiayanzeng/vibescan/releases/tag/v0.1.3)
+targets `e788b1c` and includes `source.tar.gz`, `sha256.sum`, and the exact five
+architecture-approved platform archives:
+
+- `vibescan-cli-aarch64-apple-darwin.tar.xz`;
+- `vibescan-cli-x86_64-apple-darwin.tar.xz`;
+- `vibescan-cli-aarch64-unknown-linux-musl.tar.xz`;
+- `vibescan-cli-x86_64-unknown-linux-musl.tar.xz`; and
+- `vibescan-cli-x86_64-pc-windows-msvc.zip`.
+
+Each of those five SHA-256 digests returned exactly one record from GitHub's
+public attestations API. Public crates.io API reads returned maximum version
+`0.1.3` for all eight workspace crates, proving that each dependency resolved
+at publish time. Public npm registry reads returned `latest = 0.1.3` for the
+main package and all five platform packages. The public tap's
+`Formula/vibescan.rb` declares `version "0.1.3"` and uses the release archive
+URLs and matching digests.
+
+The completion verification used these command forms against public endpoints;
+the package and digest queries were repeated for every identity named above:
+
+```sh
+git ls-remote origin refs/tags/v0.1.3 refs/tags/v0.1.3^{}
+curl -fsSL 'https://api.github.com/repos/jiayanzeng/vibescan/actions/runs/29676514551'
+curl -fsSL 'https://api.github.com/repos/jiayanzeng/vibescan/actions/runs/29676514551/jobs?per_page=100'
+curl -fsSL 'https://api.github.com/repos/jiayanzeng/vibescan/releases/tags/v0.1.3'
+curl -fsSL 'https://github.com/jiayanzeng/vibescan/releases/download/v0.1.3/sha256.sum'
+curl -fsSL 'https://api.github.com/repos/jiayanzeng/vibescan/attestations/sha256:<digest>'
+curl -fsSL 'https://crates.io/api/v1/crates/<crate>'
+curl -fsSL 'https://registry.npmjs.org/@jiayanzeng%2f<package>'
+curl -fsSL 'https://raw.githubusercontent.com/jiayanzeng/homebrew-tap/main/Formula/vibescan.rb'
+git push origin refs/tags/v0.1.3
+```
+
+The required negative control repeated `git push origin
+refs/tags/v0.1.3`. Git returned `Everything up-to-date`; the remote annotated
+tag object and peeled merge remained unchanged, and no duplicate workflow or
+publication ran. G4.3 is therefore **complete**. G4.4 remains a distinct
+post-publish install, signature/provenance, checksum, and tamper-control task;
+this completion record does not claim it.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -1623,7 +1693,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial; G1–G3 implemented, G4.0–G4.2 complete, G4.3 second recovery prepared | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. G3's fail-closed Cargo/npm publishers, OIDC provenance wiring, and prebuilt Homebrew formula are implemented and merged to `main`. G4.0 selects controlled `@jiayanzeng/vibescan` plus its five platform packages. G4.1 records the owner-controlled registry/account/tap bootstrap. G4.2 passes the reversible preflight. G4.3's `v0.1.1` tag failed workflow validation before jobs; PR #7 repaired permissions. PR #8's `v0.1.2` run built, attested, hosted, published all npm packages and Homebrew, and published five crates before crates.io HTTP 429 stopped the sixth. `a12499a` prepares synchronized `0.1.3`, bounded 429-only Cargo retry, and strict crates.io → npm → Homebrew sequencing. Its merge, owner-pushed tag, complete publication, and G4.4 remain outstanding. |
+| Security/nonfunctional | Partial; G1–G3 and G4.0–G4.3 complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, checksums, attestations, and static-link verification. G2 adds the ships-only npm wrapper and green five-platform `npx` matrix. G3 implements fail-closed Cargo/npm publishers, OIDC provenance, and the prebuilt formula. G4.0 selects controlled `@jiayanzeng/vibescan`; G4.1 records the owner-controlled bootstrap; G4.2 passes the reversible preflight. After immutable `v0.1.1` and partial `v0.1.2` evidence, PR #9's `v0.1.3` recovery passed all 19 jobs with strict crates.io → npm → Homebrew sequencing. All eight crates and all six npm packages resolve at `0.1.3`, the formula is `0.1.3`, five attestation records exist, and the same-tag push was a no-op. G4.4 remains outstanding. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -1700,7 +1770,7 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1–G3 implemented; G4.0–G4.2 complete, G4.3 second recovery prepared:** the release workspace, exact five-target
+- **Track G1–G3 implemented; G4.0–G4.3 complete:** the release workspace, exact five-target
   `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
   blocking static-link verification are locally validated and proven by the
   successful hosted `v0.1.0` release. The ships-only npm shim, five exact
@@ -1716,11 +1786,12 @@ secret-gated.
   PR #7 merged the generated caller-permission repair. PR #8's `v0.1.2` run
   proved the build, attestation, static-link, npm package/smoke, hosting, npm,
   and Homebrew paths and published five crates before crates.io HTTP 429 stopped
-  the sixth. Commit `a12499a` prepares and fully verifies synchronized `0.1.3`,
-  retries only bounded explicit crates.io 429 responses, and enforces strict
-  crates.io → npm → Homebrew sequencing. Its merge, owner-pushed tag, successful
-  publication, and G4.4 post-publish checks remain outstanding, as does the CLI
-  Cargo package naming decision.
+  the sixth. PR #9 merged synchronized `0.1.3` as `e788b1c`, and annotated tag
+  `v0.1.3` triggered green Release run #29676514551. All eight crates and all
+  six npm packages resolve at `0.1.3`, the formula is current, all five archive
+  digests have attestation records, and the unchanged-tag push was a no-op.
+  G4.3 is complete. G4.4 post-publish install/provenance checks remain
+  outstanding, as does the CLI Cargo package naming decision.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
   the two confirmed checks and bounded privacy-aware caching; F3 activates the
@@ -1854,11 +1925,12 @@ Tier 0 behavior.
   `0.1.1` preparation was merged and correctly tagged, but Release run #10
   failed validation before any job or publication. PR #7 merged the permission
   repair. PR #8's `v0.1.2` run completed every release channel except the final
-  three crates after crates.io rate-limited the sixth new identity. `a12499a`
-  prepares and fully verifies synchronized `0.1.3`, explicit bounded 429 retry,
-  and ordered crates.io → npm → Homebrew publication. That branch must merge,
-  then the release owner must create and push annotated tag `v0.1.3` on its
-  exact merge before G4.3 can close. G4.4 follows. Do not add a ninth crate
+  three crates after crates.io rate-limited the sixth new identity. PR #9's
+  `v0.1.3` recovery added bounded 429-only retry and ordered crates.io → npm →
+  Homebrew publication, merged as `e788b1c`, and passed all 19 tagged release
+  jobs. All registry identities and the formula are live at `0.1.3`; five
+  attestation records exist; the unchanged-tag push was a no-op. G4.3 is
+  complete and G4.4 follows. Do not add a ninth crate
   or rename `vibescan-cli` merely to satisfy the instruction's literal Cargo
   command without first amending the architecture.
 - Active DAST/write probes: prohibited in v1, not merely postponed.
