@@ -30,6 +30,9 @@ jobs:
       - name: Verify Cargo package order without publication
         run: bash scripts/publish-crates.sh --dry-run
 
+      - name: Verify crates.io rate-limit retry policy
+        run: bash scripts/test-publish-crates.sh
+
   smoke:
     name: npm smoke (${{ matrix.target }})
     strategy:

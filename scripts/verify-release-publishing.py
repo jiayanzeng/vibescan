@@ -21,14 +21,9 @@ PUBLISH_ORDER = [
     "vibescan-core",
     "vibescan-cli",
 ]
-REQUIRED_PUBLISH_JOBS = {"homebrew", "./publish-crates", "./publish-npm"}
+REQUIRED_PUBLISH_JOBS = {"./publish-all"}
 REQUIRED_CUSTOM_PUBLISH_PERMISSIONS = {
-    "publish-crates": {
-        "contents": "read",
-        "id-token": "write",
-        "packages": "write",
-    },
-    "publish-npm": {
+    "publish-all": {
         "contents": "read",
         "id-token": "write",
         "packages": "write",
@@ -178,6 +173,24 @@ def main():
                 f"{expected_permissions}, found {actual_permissions}"
             )
 
+    if "  publish-homebrew-formula:" in release_workflow:
+        fail("release.yml must not run Homebrew in parallel with package publishers")
+    for old_job in ("custom-publish-crates", "custom-publish-npm"):
+        if f"  {old_job}:" in release_workflow:
+            fail(f"release.yml must not retain parallel publisher job {old_job}")
+
+    ordered_workflow = (
+        repository_root / ".github" / "workflows" / "publish-all.yml"
+    ).read_text(encoding="utf-8")
+    ordered_markers = [
+        "  publish-crates:\n    uses: ./.github/workflows/publish-crates.yml",
+        "  publish-npm:\n    needs: publish-crates\n",
+        "  publish-homebrew:\n    needs: publish-npm\n",
+    ]
+    for marker in ordered_markers:
+        if marker not in ordered_workflow:
+            fail(f"publish-all.yml is missing ordered publisher marker: {marker!r}")
+
     npm_main = read_json(repository_root / "npm" / "vibescan" / "package.json")
     if npm_main.get("name") != NPM_MAIN_PACKAGE:
         fail(f"main npm package must be the approved scoped identity {NPM_MAIN_PACKAGE}")
@@ -197,6 +210,13 @@ def main():
             "CARGO_REGISTRY_TOKEN",
             "scripts/publish-crates.sh",
             "--publish",
+        ],
+        ".github/workflows/publish-all.yml": [
+            "publish-crates.yml",
+            "publish-npm.yml",
+            "packages: write",
+            "HOMEBREW_TAP_TOKEN",
+            "jiayanzeng/homebrew-tap",
         ],
         ".github/workflows/publish-npm.yml": [
             'id-token: write',
@@ -223,6 +243,20 @@ def main():
     ).read_text(encoding="utf-8")
     if "if: ${{ secrets." in crates_workflow:
         fail("publish-crates.yml must route secret-dependent conditions through env")
+
+    retry_script = (repository_root / "scripts" / "publish-crates.sh").read_text(
+        encoding="utf-8"
+    )
+    for marker in (
+        "status 429 Too Many Requests",
+        "VIBESCAN_CRATES_IO_MAX_ATTEMPTS",
+        "scripts/test-publish-crates.sh",
+    ):
+        source = retry_script if marker != "scripts/test-publish-crates.sh" else (
+            repository_root / ".github" / "workflows" / "npm-smoke.yml"
+        ).read_text(encoding="utf-8")
+        if marker not in source:
+            fail(f"crates.io retry contract is missing marker: {marker}")
 
     print("release publishing contracts verified")
 
