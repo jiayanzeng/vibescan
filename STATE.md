@@ -2,14 +2,15 @@
 
 Reviewed: 2026-07-19
 
-Current implementation checkpoint: `bca901a` on
-`codex/track-g4-release-permissions` (G4.3 tagged-workflow startup repair;
-Tasks G4.0–G4.2 complete). Pull request #6 merged the `0.1.1` preparation to
-`main` as `01f7f39`; annotated tag `v0.1.1` dereferences to that exact merge.
-Tagged Release run #10 failed workflow validation before any job, artifact,
-GitHub release, registry package, or formula publication ran. The current
-branch repairs the missing reusable-workflow caller permissions and adds a
-regression check. It is not merged, and no target-project state has changed.
+Current implementation checkpoint: `0efdca0` on
+`codex/track-g4-release-0.1.2` (G4.3 immutable recovery-release preparation;
+Tasks G4.0–G4.2 complete). Pull request #7 merged the reusable-publisher
+permission repair to `main` as `66e5fa2`; all 36 checks passed. The prior
+annotated tag `v0.1.1` remains immutable evidence of Release run #10's workflow
+validation failure before any job, artifact, GitHub release, registry package,
+or formula publication ran. The current branch synchronizes every Cargo/npm
+release surface to `0.1.2`. It is not merged or tagged, and no target-project
+state has changed.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -72,10 +73,12 @@ preparation was merged and tagged, but Release run #10 failed validation before
 jobs because the generated custom publisher calls omitted `contents: read`.
 Repair commit `bca901a` uses cargo-dist's supported custom-job permission
 configuration for both publishers and pins it in the release contract checker;
-its local matrix is green. Track G's operational rollout remains partial
-because the repair is not merged, no publisher has run successfully, a new
-immutable patch release is still required, and G4.4 public verification has not
-run, and
+PR #7 merged it to `main` as `66e5fa2` with all 36 checks passing. Recovery
+preparation `0efdca0` synchronizes every Cargo/npm release surface to `0.1.2`
+and passes the complete local release and architecture matrix. Track G's
+operational rollout remains partial because the recovery preparation is not
+merged or tagged, no publisher has run successfully, and G4.4 public
+verification has not run, and
 the literal instruction
 `cargo install vibescan` conflicts with the architecture-named
 `vibescan-cli` package (which installs the `vibescan` binary).
@@ -95,8 +98,9 @@ Use these three lenses when discussing completion:
   Track F's registry intelligence/corpus activation, Track G1–G3's repository
   implementation, G4.0's npm identity decision, and G4.1's external bootstrap
   plus G4.2's reversible preflight are complete; G4.3's first tagged attempt
-  failed before publication and its workflow-permission repair is locally
-  verified but unmerged. G4.3 publication, G4.4 verification, and
+  failed before publication, its workflow-permission repair is merged, and the
+  `0.1.2` recovery preparation is locally verified but unmerged. G4.3
+  publication, G4.4 verification, and
   other deferred tracks remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
@@ -161,6 +165,15 @@ merge. Release run #10 failed workflow validation before any job started, so
 no GitHub release, registry package, or formula was created. The implementation
 checkpoint `bca901a` on `codex/track-g4-release-permissions` repairs the caller
 permissions and was clean before this status-only follow-up edit.
+
+Pull request #7 merged the two permission-repair commits to `main` as
+`66e5fa2c3bbcf3b8fec41b8b1c7bc17cb3850f7b`; GitHub reported 27 successful
+checks, 9 expected skips, no failures, and no conflicts. Task G4.3 recovery
+preparation then began from that clean merge on
+`codex/track-g4-release-0.1.2`. Commit `0efdca0` contains only the synchronized
+`0.1.2` Cargo/npm version surface, lockfile update, npm publish-plan fixture,
+and immutable-recovery rationale. No pre-existing user change was present or
+modified.
 
 ## Track G4.0 verification observed on 2026-07-19
 
@@ -444,11 +457,70 @@ The hardening aggregate explicitly skipped its optional real-repository leg
 because no fixture was supplied. All tests used local fixtures and mocks. No
 credential was read, no live registry or target system was contacted, no
 publication was retried, and no tag was created, moved, deleted, or pushed by
-this repair. The ordered next steps are: merge the reviewed permission repair;
-prepare the next patch version because `v0.1.1` is immutable evidence of the
-failed attempt; have the release owner create and push the new annotated tag on
-its exact merge; require the tagged workflow to pass; then start G4.4 read-only
-verification. G4.3 and Track G remain **partial**.
+this repair. At that checkpoint, the ordered next steps were to merge the
+repair, prepare the next patch version because `v0.1.1` is immutable evidence,
+and require a new owner-pushed tagged workflow to pass. PR #7 and the `0.1.2`
+preparation recorded below advance the first two steps. G4.3 and Track G remain
+**partial**.
+
+## Track G4.3 `v0.1.2` recovery preparation observed on 2026-07-19
+
+Pull request #7 merged the reusable-publisher permission repair to `main` as
+`66e5fa2c3bbcf3b8fec41b8b1c7bc17cb3850f7b`; all 36 hosted checks passed.
+The release owner then authorized the next immutable patch preparation.
+Implementation commit `0efdca0` synchronizes all eight Cargo package versions,
+the seven version-bearing workspace dependency constraints, all six scoped npm
+package versions, the five exact npm optional dependencies, the npm publish-plan
+fixture, and the eight workspace entries in `Cargo.lock` to `0.1.2`.
+`RELEASING.md` records that this is a distribution-only recovery for the failed
+`v0.1.1` attempt and does not change scanner behavior, the crate DAG,
+LocalStatic/Network boundaries, target-project access, findings, or package
+identities.
+
+The following release and architecture checks passed on implementation commit
+`0efdca0` before this documentation-only status update:
+
+```sh
+cargo update --workspace
+cargo metadata --no-deps --format-version 1
+npm --prefix npm test
+python3 scripts/verify-release-publishing.py
+ruby -e 'require "yaml"; Dir[".github/workflows/*.yml"].sort.each { |file_name| YAML.load_file(file_name) }'
+bash scripts/publish-crates.sh --dry-run
+cargo run --locked -p vibescan-cli -- --version
+<previously-checksum-verified-dist-0.32.0>/dist --version
+<previously-checksum-verified-dist-0.32.0>/dist generate --check
+<previously-checksum-verified-dist-0.32.0>/dist plan --output-format=json
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The CLI reports `vibescan 0.1.2`; Cargo/npm metadata contains only the intended
+`0.1.2` workspace/package identities; the Cargo dry-run retains all eight crates
+in bottom-up dependency order; npm retains the five controlled platform
+packages before `@jiayanzeng/vibescan`; and the `dist` plan announces `v0.1.2`
+with exactly the five approved executable targets plus `vibescan.rb`.
+`dist generate --check` produced no workflow diff. The hardening aggregate
+passed and explicitly skipped its optional real-repository leg because no
+fixture was supplied.
+
+All tests used local fixtures and mocks. No credential was read, no live
+registry or target system was contacted, no tag was created, moved, deleted,
+or pushed, and no package, GitHub release, or formula was published. G4.3 is
+**prepared but not complete**: the reviewed `0.1.2` branch must merge, then the
+release owner must create and push a new annotated `v0.1.2` tag on that exact
+merge. The tagged workflow must pass before G4.3 can close; G4.4 remains
+unstarted.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -1444,7 +1516,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial; G1–G3 implemented, G4.0–G4.2 complete, G4.3 recovery pending | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. G3's fail-closed Cargo/npm publishers, OIDC provenance wiring, and prebuilt Homebrew formula are implemented and merged to `main`. G4.0 replaces the unavailable unscoped and organization-scope npm targets with controlled `@jiayanzeng/vibescan` plus its five platform packages and proves the six-identity scoped publish plan. G4.1 verifies all fourteen registry identities remain free, records owner-confirmed bootstrap credentials/account controls, and verifies the public tap plus `Formula/` layout. G4.2 passes the complete reversible engine/publisher/dist/negative-control preflight. G4.3's `v0.1.1` tag correctly targets its merge but Release run #10 failed validation before publication; `bca901a` locally repairs and pins the reusable-workflow permissions, but that repair and a new immutable patch release remain outstanding. G4.4 has not started. |
+| Security/nonfunctional | Partial; G1–G3 implemented, G4.0–G4.2 complete, G4.3 recovery prepared | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. G3's fail-closed Cargo/npm publishers, OIDC provenance wiring, and prebuilt Homebrew formula are implemented and merged to `main`. G4.0 replaces the unavailable unscoped and organization-scope npm targets with controlled `@jiayanzeng/vibescan` plus its five platform packages and proves the six-identity scoped publish plan. G4.1 verifies all fourteen registry identities remain free, records owner-confirmed bootstrap credentials/account controls, and verifies the public tap plus `Formula/` layout. G4.2 passes the complete reversible engine/publisher/dist/negative-control preflight. G4.3's `v0.1.1` tag correctly targets its merge but Release run #10 failed validation before publication; PR #7 merged the permission repair, and `0efdca0` prepares the fully verified immutable `0.1.2` recovery version. Its merge, owner-pushed tag, successful publication, and G4.4 remain outstanding. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -1521,7 +1593,7 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1–G3 implemented; G4.0–G4.2 complete, G4.3 startup recovery pending:** the release workspace, exact five-target
+- **Track G1–G3 implemented; G4.0–G4.2 complete, G4.3 recovery prepared:** the release workspace, exact five-target
   `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
   blocking static-link verification are locally validated and proven by the
   successful hosted `v0.1.0` release. The ships-only npm shim, five exact
@@ -1534,8 +1606,9 @@ secret-gated.
   completes the owner-controlled account/secret/tap bootstrap. G4.2 passes the
   complete reversible preflight. G4.3's synchronized `0.1.1` release commit was
   merged and tagged, but the workflow failed validation before publication.
-  Commit `bca901a` repairs the generated caller permissions and passes the full
-  local matrix; its merge, the next immutable patch release, and G4.4
+  PR #7 merged the generated caller-permission repair with all hosted checks
+  green. Commit `0efdca0` prepares and fully verifies the next immutable patch,
+  `0.1.2`; its merge, owner-pushed tag, successful publication, and G4.4
   post-publish checks remain outstanding, as does the CLI Cargo package naming
   decision.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
@@ -1669,9 +1742,10 @@ Tier 0 behavior.
   owner-controlled registry/account/tap bootstrap and read-only acceptance
   checks are complete. G4.2's complete reversible preflight is green. G4.3's
   `0.1.1` preparation was merged and correctly tagged, but Release run #10
-  failed validation before any job or publication. Permission repair `bca901a`
-  is locally verified and must be merged before preparing the next patch; the
-  release owner must create and push that new annotated tag before G4.3 can
+  failed validation before any job or publication. PR #7 merged the permission
+  repair to `main`; `0efdca0` prepares and fully verifies the synchronized
+  `0.1.2` recovery version. That branch must merge, then the release owner must
+  create and push annotated tag `v0.1.2` on its exact merge before G4.3 can
   close. G4.4 follows. Do not add a ninth crate
   or rename `vibescan-cli` merely to satisfy the instruction's literal Cargo
   command without first amending the architecture.
