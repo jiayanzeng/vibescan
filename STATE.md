@@ -1,9 +1,14 @@
 # vibescan State
 
-Reviewed: 2026-07-18
+Reviewed: 2026-07-19
 
-Current implementation baseline: `0ebca9b` (`main`, Task G2 close-out merge;
-pull request #4).
+Current committed checkout: `be615a0` on
+`codex/track-g4-release-0.1.1` (G4.3 release preparation; Tasks G4.0–G4.2
+complete). Its G3 implementation ancestor
+`330a3b2` was merged by pull request #5 to `main` as `cb048b9`. The current
+worktree records the verified `0.1.1` version bump. The branch has not been
+merged and no tag, registry package, release, formula, or target-project state
+has changed.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -45,14 +50,29 @@ architecture's five targets with musl-only Linux, the tagged `v0.1.0` release
 run produced all five archives plus checksums, the blocking custom job proved
 both Linux binaries are static, and all five GitHub Artifact Attestations
 verified against the release workflow and merge commit. Task G2 is complete:
-the unscoped `vibescan` npm package selects one of five exact-version optional
-platform packages, executes only the shipped binary, preserves its exit status,
-and has passed the hosted five-platform `npx` smoke matrix. Task G3's local
+the npm shim selects one of five exact-version optional platform packages,
+executes only the shipped binary, preserves its exit status, and has passed the
+hosted five-platform `npx` smoke matrix. Task G3's local
 implementation now wires bottom-up crates.io publication, platform-first npm
 publication with OIDC provenance, and cargo-dist's prebuilt Homebrew formula
-publisher, and provides an executable release runbook. Track G's operational
-rollout remains partial because no crates.io/npm package or public Homebrew tap
-has been created or published from this worktree, and the literal instruction
+publisher, and provides an executable release runbook. Task G4.0 is complete:
+the release owner selected the controlled personal-scope
+`@jiayanzeng/vibescan` entry point, the publisher plans only the six approved
+`@jiayanzeng/vibescan*` identities, and neither the third-party-owned unscoped
+`vibescan` package nor an unavailable `@vibescan` organization scope is a
+publication target.
+Task G4.1 is complete: all fourteen registry identities remain free to claim,
+the release owner confirmed the crates.io and npm bootstrap secrets plus npm
+two-factor authentication, and the public Homebrew tap and its `Formula/`
+layout exist with workflow push credentials configured. Task G4.2 is complete:
+all engine, boundary, Cargo/npm packaging, `dist` plan/formula, negative-control,
+and hardening gates pass on the current release commit. G4.3 preparation is
+complete on branch commit `be615a0`: every Cargo/npm package and exact internal
+version constraint is `0.1.1`, the release rationale is recorded, and the full
+release matrix is green. Track G's operational rollout remains partial because
+the owner-only merge/tag publication portion of G4.3 and G4.4 public
+verification have not run, and
+the literal instruction
 `cargo install vibescan` conflicts with the architecture-named
 `vibescan-cli` package (which installs the `vibescan` binary).
 Architecture §17.8 explicitly defers the noisy user-writable-metadata
@@ -68,9 +88,11 @@ Use these three lenses when discussing completion:
   real-repository, precision/recall, deterministic performance-counter, and
   resolved-decision ratification blockers are all covered by passing gates.
 - **Entire architecture document:** partial. Tier E's E1–E3 implementation,
-  Track F's registry intelligence/corpus activation, and Track G1/G2's binary
-  and npm distribution plumbing are complete, while G3 and other deferred
-  tracks remain incomplete.
+  Track F's registry intelligence/corpus activation, Track G1–G3's repository
+  implementation, G4.0's npm identity decision, and G4.1's external bootstrap
+  plus G4.2's reversible preflight and G4.3's release preparation are complete;
+  G4.3 publication, G4.4 verification, and
+  other deferred tracks remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
 returned row data after counting. Tier E1's Postgres transport accepts only
@@ -105,6 +127,257 @@ worktree intentionally contains only release metadata, generated workflow,
 publisher scripts/tests, npm manifest provenance, documentation, and this
 status update. It does not change Rust scanner behavior, dependencies, the
 eight-crate DAG, target-project access, or any runtime Network capability.
+
+Pull request #5 merged G3 to `main` as `cb048b9` with 26/26 checks green. The
+current branch then gained the user-authored documentation commit `4479cfb` and
+the user-owned untracked
+`docs/vibescan-trackG-closeout-instructions.md`. Task G4.0 began from that
+checkout; the untracked instruction file was read and preserved without edits.
+After the initial G4.0 commit, the release owner approved correcting the npm
+identity to the personal `@jiayanzeng` scope; that correction updates the
+instruction file as well. The current G4.0 worktree changes only npm package
+identity, publisher/package contract tests, release documentation,
+architecture §13.1's approved primary-channel wording, and this status record.
+It does not change Rust scanner behavior, the eight-crate DAG, runtime Network
+capability, or target-project access.
+
+The corrected G4.0 implementation was committed as `4b5fb87`. The worktree was
+clean and synchronized with `origin/codex/track-g3-release-publishing` when the
+final G4.1 checks began. G4.1 changes no source, manifest, workflow, crate edge,
+or architecture behavior; this status update records only the release owner's
+external bootstrap actions and the corresponding read-only acceptance checks.
+
+After G4.2 was committed as `d4daabd`, G4.3 preparation moved to
+`codex/track-g4-release-0.1.1`. Commit `be615a0` contains only the synchronized
+`0.1.1` Cargo/npm version surface, lockfile update, npm publish-plan fixture,
+and release rationale. The branch is not merged, `v0.1.1` does not exist, and
+the release owner has not yet performed the publication-triggering tag push.
+
+## Track G4.0 verification observed on 2026-07-19
+
+The release owner approved the controlled personal-scope identity
+`@jiayanzeng/vibescan`; `npx @jiayanzeng/vibescan` is the primary npm command.
+This corrects the earlier option-1 implementation, which wrongly treated a 404
+package lookup as proof that an `@vibescan` organization scope could be created.
+The npm user `jiayanzeng` owns the personal `@jiayanzeng` scope without an
+organization. The third-party-owned unscoped `vibescan` name and the unavailable
+`@vibescan` organization scope are explicitly excluded from the package
+manifests, publisher plan, architecture, runbook, and current user-facing
+distribution documentation.
+
+The source contract centralizes the main package name as
+`@jiayanzeng/vibescan`. `publish-packages.mjs --print-plan` emits the five exact
+`@jiayanzeng/vibescan-*` platform identities first and
+`@jiayanzeng/vibescan` last; a regression assertion requires every planned
+name to begin with `@jiayanzeng/vibescan` and separately rejects the exact
+unscoped `vibescan` name. All six planned publishes retain `--access public`
+and `--provenance`. The packed main tarball is
+`jiayanzeng-vibescan-0.1.0.tgz`, retains the `vibescan` binary name, and has no
+lifecycle fetch path.
+
+The following G4.0-specific checks passed without registry mutation:
+
+```sh
+npm --prefix npm test
+python3 scripts/verify-release-publishing.py
+node --check npm/scripts/platforms.mjs
+node --check npm/scripts/build-packages.mjs
+node --check npm/scripts/verify-packages.mjs
+node --check npm/scripts/publish-packages.mjs
+node --check npm/scripts/smoke-packages.mjs
+node --check npm/vibescan/bin/vibescan.js
+node npm/scripts/build-packages.mjs \
+  --artifacts target/distrib --out <temporary-directory>
+node npm/scripts/verify-packages.mjs --packages <temporary-directory>
+node npm/scripts/publish-packages.mjs \
+  --packages <temporary-directory> --print-plan
+node npm/scripts/smoke-packages.mjs \
+  --packages <temporary-directory> --target aarch64-apple-darwin
+ruby -e 'require "yaml"; YAML.load_file(".github/workflows/publish-npm.yml")'
+```
+
+The current architecture gate also passed: format; all four default,
+`network`, `registry`, and combined clippy matrices; all four workspace test
+matrices; the Network boundary checker; the local hardening aggregate; and
+`git diff --check`. The hardening aggregate explicitly skipped its optional
+real-repository leg because no fixture was supplied. The changed npm publisher
+workflow also parsed as YAML. A supplemental `dist generate --check` attempt could not
+run because the `dist` executable is not installed in the current environment;
+that command belongs to the later G4.2 preflight and is not a G4.0 acceptance
+criterion. No crate/package identity was claimed, no secret or credential was
+handled, no registry publication or tag push occurred, and no live target or
+target-project write was used.
+
+G4.0 is complete. G4.1's completed external bootstrap and acceptance checks are
+recorded below.
+
+## Track G4.1 bootstrap verification observed on 2026-07-19
+
+The eight official crates.io package endpoints return 404 when queried with an
+identifying user agent: `vibescan-types`, `vibescan-secrets`, `vibescan-git`,
+`vibescan-report`, `vibescan-supabase`, `vibescan-registry`, `vibescan-core`,
+and `vibescan-cli`. None currently resolves to a foreign owner, but all remain
+unclaimed. The initial anonymous requests returned a uniform 403; those denials
+were discarded as non-evidence and the identifying-user-agent results are the
+recorded status.
+
+The official npm registry endpoints for `@jiayanzeng/vibescan` and all five
+`@jiayanzeng/vibescan-*` platform packages return 404. None currently resolves
+to a foreign owner. The release owner confirms that the new npm username is
+`jiayanzeng`; npm automatically assigns that user the personal `@jiayanzeng`
+scope, so no organization creation or account conversion is required. The
+packages remain unpublished and will be created by their first authorized
+publication. The owner confirms that `npm whoami` returns `jiayanzeng`, account
+two-factor authentication is enabled, and a short-lived `NPM_TOKEN` bootstrap
+secret is present in the `vibescan` repository.
+
+The public `https://github.com/jiayanzeng/homebrew-tap` repository and its
+`Formula/` layout both return 200. The owner confirms that a least-privilege
+`HOMEBREW_TAP_TOKEN` secret capable of writing formula commits to that tap is
+present in the `vibescan` repository. The owner also confirms the earlier
+crates.io email/account verification and presence of the one-time
+`CARGO_REGISTRY_TOKEN` bootstrap secret. Secret values and secret-setting APIs
+were not read, logged, or exercised.
+
+The final acceptance check ran `git status --short --branch`, `git rev-parse
+--short HEAD`, and anonymous read-only HTTPS status requests against the
+official crates.io, npm, and GitHub endpoints. The initial crates.io requests
+without identification returned 403 and were repeated with an identifying user
+agent; only the resulting eight 404 responses are evidence. The six npm
+requests returned 404, and the tap plus `Formula/` requests returned 200.
+
+No crate, npm package, formula, or tag was published. The release owner created
+the public tap and configured account controls/secrets as the explicitly
+authorized G4.1 external mutations; Codex did not access credentials or perform
+those mutations. None of the fourteen registry targets resolves to a third
+party. G4.1 is **complete**. At its close, the next task was G4.2's fully
+reversible preflight; G4.3's immutable version/tag/publication work could not
+begin until G4.2 passed.
+After the first publication, configure trusted publishing for all eight crates
+and six npm packages, then remove both registry bootstrap secrets.
+
+## Track G4.2 preflight verification observed on 2026-07-19
+
+G4.2 ran against clean, synchronized commit `0781869`. It is release and
+distribution assurance under architecture §13.1; it changes no scanner phase,
+crate edge, LocalStatic/Network boundary, target-project behavior, package
+version, or publication identity. The pinned official `dist` 0.32.0 Apple
+Silicon archive was downloaded into an isolated temporary directory and matched
+SHA-256 `aa343b2ff78ec2981f17a65140250c5ad6062c74072163f68c5c2686d94763a7`.
+The temporary executable reported `cargo-dist 0.32.0`.
+
+The following prescribed commands passed on the release commit:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+bash scripts/check-network-boundary.sh
+bash scripts/publish-crates.sh --dry-run
+node npm/scripts/build-packages.mjs \
+  --artifacts target/distrib --out target/npm-packages
+node npm/scripts/verify-packages.mjs --packages target/npm-packages
+node npm/scripts/publish-packages.mjs \
+  --packages target/npm-packages --print-plan
+npm --prefix npm test
+python3 scripts/verify-release-publishing.py
+<temporary-dist>/dist generate --check
+<temporary-dist>/dist plan --output-format=json
+ruby -c target/distrib/vibescan.rb
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The Cargo plan listed all eight crates in the required bottom-up order: types,
+secrets, git, report, supabase, registry, core, then CLI. The npm print plan
+listed exactly the five `@jiayanzeng/vibescan-*` platform packages first and
+`@jiayanzeng/vibescan` last; it contained no unscoped `vibescan` publication.
+Every entry requests public provenance publication. A machine assertion over
+the `dist` JSON plan proved exactly the five architecture-approved executable
+archives (macOS arm64/x64, musl Linux arm64/x64, Windows x64) plus the
+`vibescan.rb` Homebrew installer. `dist generate --check` produced no workflow
+diff, and the formula passed Ruby syntax validation.
+
+The required negative control temporarily changed the Darwin-arm64 source
+manifest CPU selector from `arm64` to `x64`. `verify-packages.mjs` exited 1 and
+reported the exact `x64` versus `arm64` mismatch. The manifest was immediately
+restored; the same verifier then exited 0, and `git diff` proved no residual
+manifest change.
+
+The first npm packed-output verification encountered six stale, pre-G4.0
+tarballs in the ignored `target/npm-packages` directory and correctly rejected
+the extra files. That generated directory was preserved outside the workspace,
+the prescribed build/verify/print-plan sequence was rerun from an absent output
+path, and every command passed. This was local ignored-state contamination, not
+a release-source defect; the closeout instructions now explicitly require the
+generated output path to begin absent or empty.
+
+The hardening aggregate passed and explicitly skipped its optional real-repo
+leg because no fixture was supplied. Tests used mocks and local fixtures only.
+No registry credential was read or passed to a command; no live Supabase,
+Registry, npm, crates.io, or Homebrew publication action ran. No package,
+formula, version, tag, GitHub release, or target-project state was created or
+modified. G4.2 is **complete**. At its close, G4.3 was the next task; its
+release preparation is now recorded below, while its merge, annotated tag, and
+owner-only tag push remain incomplete.
+
+## Track G4.3 release preparation observed on 2026-07-19
+
+The release owner authorized the closeout document's recommended `0.1.1` patch
+release after G4.2 passed. Commit `be615a0` synchronizes all eight Cargo package
+versions, the seven version-bearing workspace dependency constraints, all six
+scoped npm package versions, the five exact npm optional dependencies, the npm
+publish-plan fixture, and the eight workspace entries in `Cargo.lock`.
+`RELEASING.md` records why this is distribution-only: it changes no scanner
+phase, dependency edge, LocalStatic/Network boundary, finding, target-project
+access, or public identity.
+
+The following release and architecture checks passed on the `0.1.1` worktree:
+
+```sh
+cargo update --workspace
+npm --prefix npm test
+python3 scripts/verify-release-publishing.py
+bash scripts/publish-crates.sh --dry-run
+cargo run --locked -p vibescan-cli -- --version
+<checksum-verified-dist-0.32.0>/dist --version
+<checksum-verified-dist-0.32.0>/dist generate --check
+<checksum-verified-dist-0.32.0>/dist plan --output-format=json
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The CLI reports `vibescan 0.1.1`; the Cargo dry-run retains all eight crates in
+bottom-up dependency order; npm tests retain the five controlled platform
+packages before `@jiayanzeng/vibescan`; and the `dist` plan announces `v0.1.1`
+with exactly the five approved executable targets and the Homebrew formula.
+`dist` warned about and ignored old `v0.1.0` manifests in generated
+`target/distrib` state; the emitted plan itself is consistently `0.1.1` and no
+generated workflow diff exists. Hardening passed and explicitly skipped its
+optional real-repository leg because no fixture was supplied.
+
+No registry credential was read, no tag was created or pushed, and no package,
+GitHub release, or formula was published. G4.3 is therefore **prepared but not
+complete**. Per the closeout authorization boundary, the release owner must
+merge the reviewed branch, create an annotated `v0.1.1` tag on that exact merge,
+and push only the tag. The tagged workflow must then pass before G4.3 can be
+called complete; G4.4 remains unstarted.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -483,7 +756,7 @@ will prove registry resolution after the one-time bootstrap.
 
 G3's repository implementation is locally verified, but its external
 acceptance remains partial until the release owner creates/controls the eight
-crates.io names, six npm identities and `@vibescan` scope, creates
+crates.io names and six npm identities in the approved personal scope, creates
 `jiayanzeng/homebrew-tap`, configures bootstrap secrets and then trusted
 publishers, and cuts a new immutable version tag. Those are explicit external
 mutations and were not inferred from approval to implement G3. After that tag,
@@ -1100,7 +1373,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial; G1/G2 complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. npm publication/provenance and the Homebrew formula remain G3 work. |
+| Security/nonfunctional | Partial; G1–G3 implemented, G4.0–G4.2 complete, G4.3 prepared (rollout pending) | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. G3's fail-closed Cargo/npm publishers, OIDC provenance wiring, and prebuilt Homebrew formula are implemented and merged to `main`. G4.0 replaces the unavailable unscoped and organization-scope npm targets with controlled `@jiayanzeng/vibescan` plus its five platform packages and proves the six-identity scoped publish plan. G4.1 verifies all fourteen registry identities remain free, records owner-confirmed bootstrap credentials/account controls, and verifies the public tap plus `Formula/` layout. G4.2 passes the complete reversible engine/publisher/dist/negative-control preflight. G4.3's verified `0.1.1` release commit is prepared; its owner-only merge/tag publication and G4.4 post-publish checks remain outstanding. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -1177,15 +1450,20 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1/G2 complete; G3 implementation verified, rollout pending:** the release workspace, exact five-target
+- **Track G1–G3 implemented; G4.0–G4.2 complete, G4.3 prepared, rollout pending:** the release workspace, exact five-target
   `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
   blocking static-link verification are locally validated and proven by the
   successful hosted `v0.1.0` release. The ships-only npm shim, five exact
   optional platform packages, release packaging job, and five-platform `npx`
   smoke matrix are also verified. G3 now has fail-closed Cargo/npm publishers,
   OIDC provenance wiring, a functional prebuilt Homebrew formula, and a release
-  runbook. Live crates.io/npm/tap bootstrap, publication, and post-publish
-  provenance/install checks remain outstanding, as does the CLI Cargo package
+  runbook. G4.0 selects controlled `@jiayanzeng/vibescan`, removes the unscoped
+  and unavailable organization-scope npm targets, and pins the six personal-
+  scope identities in tests. G4.1 verifies the free registry identities and
+  completes the owner-controlled account/secret/tap bootstrap. G4.2 passes the
+  complete reversible preflight. G4.3's synchronized `0.1.1` release commit and
+  complete local matrix are ready; its owner-only merge/tag publication and
+  G4.4 post-publish checks remain outstanding, as does the CLI Cargo package
   naming decision.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
@@ -1313,9 +1591,13 @@ Tier 0 behavior.
   `v0.1.0` release. G2's ships-only npm shim, five exact optional platform
   packages, release packaging integration, and cross-platform smoke matrix are
   complete. G3's local publishers, npm provenance contract, Homebrew formula,
-  and runbook are implemented and verified. The next step is an explicitly
-  authorized external bootstrap and a new-version release tag; afterward verify
-  registry provenance and all three public installs. Do not add a ninth crate
+  and runbook are implemented and verified. G4.0 is complete with
+  `@jiayanzeng/vibescan` as the controlled personal-scope entry point. G4.1's
+  owner-controlled registry/account/tap bootstrap and read-only acceptance
+  checks are complete. G4.2's complete reversible preflight is green. G4.3's
+  `0.1.1` version bump and local verification are prepared on commit `be615a0`;
+  the release owner must merge it, create the annotated tag on that merge, and
+  push only the tag before G4.3 can close. G4.4 follows. Do not add a ninth crate
   or rename `vibescan-cli` merely to satisfy the instruction's literal Cargo
   command without first amending the architecture.
 - Active DAST/write probes: prohibited in v1, not merely postponed.

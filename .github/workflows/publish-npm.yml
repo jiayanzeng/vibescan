@@ -42,7 +42,7 @@ jobs:
           node npm/scripts/verify-packages.mjs
           --packages target/npm-packages
 
-      - name: Publish platform packages, then the main package
+      - name: Publish platform packages, then @jiayanzeng/vibescan
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: >-

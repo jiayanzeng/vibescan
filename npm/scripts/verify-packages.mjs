@@ -4,7 +4,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { cliVersion, npmRoot, platforms, readJson } from "./platforms.mjs";
+import {
+  cliVersion,
+  mainPackageName,
+  npmRoot,
+  platforms,
+  readJson,
+} from "./platforms.mjs";
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -25,7 +31,7 @@ function verifySource() {
   const main = readJson(path.join(npmRoot, "vibescan", "package.json"));
   const shim = fs.readFileSync(path.join(npmRoot, "vibescan", "bin", "vibescan.js"), "utf8");
 
-  assert.equal(main.name, "vibescan");
+  assert.equal(main.name, mainPackageName);
   assert.equal(main.version, version);
   assert.deepEqual(main.bin, { vibescan: "bin/vibescan.js" });
   assert.deepEqual(main.publishConfig, { access: "public", provenance: true });
@@ -89,7 +95,7 @@ function verifyPacked(packagesRoot) {
       extractTarball(path.join(packagesRoot, file), extractRoot);
       const packageRoot = path.join(extractRoot, "package");
       const packageManifest = readJson(path.join(packageRoot, "package.json"));
-      if (packageManifest.name === "vibescan") {
+      if (packageManifest.name === mainPackageName) {
         const shim = fs.readFileSync(path.join(packageRoot, "bin", "vibescan.js"), "utf8");
         assertNoInstallFetch(packageManifest, shim);
       } else {

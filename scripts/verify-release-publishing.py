@@ -9,6 +9,7 @@ import tomllib
 
 REPOSITORY = "https://github.com/jiayanzeng/vibescan"
 TAP = "jiayanzeng/homebrew-tap"
+NPM_MAIN_PACKAGE = "@jiayanzeng/vibescan"
 PUBLISH_ORDER = [
     "vibescan-types",
     "vibescan-secrets",
@@ -115,6 +116,8 @@ def main():
         fail("the fetch-based built-in npm installer/publisher must remain disabled")
 
     npm_main = read_json(repository_root / "npm" / "vibescan" / "package.json")
+    if npm_main.get("name") != NPM_MAIN_PACKAGE:
+        fail(f"main npm package must be the approved scoped identity {NPM_MAIN_PACKAGE}")
     if npm_main.get("publishConfig") != {"access": "public", "provenance": True}:
         fail("main npm package must request public provenance publication")
     for package_dir in (repository_root / "npm" / "platforms").iterdir():

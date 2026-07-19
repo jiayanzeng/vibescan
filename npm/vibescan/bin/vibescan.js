@@ -6,23 +6,23 @@ const { spawnSync } = require("node:child_process");
 
 const PLATFORM_PACKAGES = Object.freeze({
   "darwin-arm64": {
-    packageName: "@vibescan/cli-darwin-arm64",
+    packageName: "@jiayanzeng/vibescan-darwin-arm64",
     binaryName: "vibescan",
   },
   "darwin-x64": {
-    packageName: "@vibescan/cli-darwin-x64",
+    packageName: "@jiayanzeng/vibescan-darwin-x64",
     binaryName: "vibescan",
   },
   "linux-arm64": {
-    packageName: "@vibescan/cli-linux-arm64-musl",
+    packageName: "@jiayanzeng/vibescan-linux-arm64-musl",
     binaryName: "vibescan",
   },
   "linux-x64": {
-    packageName: "@vibescan/cli-linux-x64-musl",
+    packageName: "@jiayanzeng/vibescan-linux-x64-musl",
     binaryName: "vibescan",
   },
   "win32-x64": {
-    packageName: "@vibescan/cli-win32-x64-msvc",
+    packageName: "@jiayanzeng/vibescan-win32-x64-msvc",
     binaryName: "vibescan.exe",
   },
 });
@@ -36,9 +36,9 @@ function missingOptionalDependency(packageName, cause) {
   const detail = cause && cause.code ? ` (${cause.code})` : "";
   fail(
     [
-      `vibescan could not find its platform package ${packageName}${detail}.`,
+      `@jiayanzeng/vibescan could not find its platform package ${packageName}${detail}.`,
       "The optional dependency was probably skipped because node_modules was cached across operating systems, optional dependencies were disabled, or the lockfile is stale.",
-      "Run `npm ci` on a clean tree and do not share node_modules across operating systems.",
+      "Reinstall `@jiayanzeng/vibescan` with `npm ci` on a clean tree and do not share node_modules across operating systems.",
       "If optional packages are intentionally disabled, use `cargo install vibescan-cli` or the shell installer from the GitHub release instead.",
       "vibescan will not download or execute a replacement binary automatically.",
     ].join("\n"),

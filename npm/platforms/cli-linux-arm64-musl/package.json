@@ -1,6 +1,6 @@
 {
-  "name": "@vibescan/cli-linux-arm64-musl",
-  "version": "0.1.0",
+  "name": "@jiayanzeng/vibescan-linux-arm64-musl",
+  "version": "0.1.1",
   "description": "statically linked vibescan binary for Linux arm64",
   "license": "MIT",
   "repository": {

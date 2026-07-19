@@ -35,13 +35,13 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.10.9"
 toml = "0.9.12"
-vibescan-core = { path = "crates/vibescan-core", version = "0.1.0" }
-vibescan-git = { path = "crates/vibescan-git", version = "0.1.0" }
-vibescan-registry = { path = "crates/vibescan-registry", version = "0.1.0" }
-vibescan-report = { path = "crates/vibescan-report", version = "0.1.0" }
-vibescan-secrets = { path = "crates/vibescan-secrets", version = "0.1.0" }
-vibescan-supabase = { path = "crates/vibescan-supabase", version = "0.1.0" }
-vibescan-types = { path = "crates/vibescan-types", version = "0.1.0" }
+vibescan-core = { path = "crates/vibescan-core", version = "0.1.1" }
+vibescan-git = { path = "crates/vibescan-git", version = "0.1.1" }
+vibescan-registry = { path = "crates/vibescan-registry", version = "0.1.1" }
+vibescan-report = { path = "crates/vibescan-report", version = "0.1.1" }
+vibescan-secrets = { path = "crates/vibescan-secrets", version = "0.1.1" }
+vibescan-supabase = { path = "crates/vibescan-supabase", version = "0.1.1" }
+vibescan-types = { path = "crates/vibescan-types", version = "0.1.1" }
 
 # The profile that 'dist' will build with
 [profile.dist]

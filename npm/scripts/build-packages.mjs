@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   cliVersion,
+  mainPackageName,
   npmRoot,
   platformForTarget,
   platforms,
@@ -110,6 +111,11 @@ if (selectedPlatforms.some((platform) => !platform)) {
 const version = cliVersion();
 const mainTemplate = path.join(npmRoot, "vibescan");
 const mainManifest = readJson(path.join(mainTemplate, "package.json"));
+assert.equal(
+  mainManifest.name,
+  mainPackageName,
+  "main npm package name is not the approved scoped identity",
+);
 assert.equal(mainManifest.version, version, "main npm package version must match vibescan-cli");
 
 const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibescan-npm-pack-"));

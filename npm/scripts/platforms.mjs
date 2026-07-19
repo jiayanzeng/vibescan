@@ -4,11 +4,12 @@ import { fileURLToPath } from "node:url";
 
 export const npmRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const repositoryRoot = path.resolve(npmRoot, "..");
+export const mainPackageName = "@jiayanzeng/vibescan";
 
 export const platforms = Object.freeze([
   {
     target: "aarch64-apple-darwin",
-    packageName: "@vibescan/cli-darwin-arm64",
+    packageName: "@jiayanzeng/vibescan-darwin-arm64",
     directory: "cli-darwin-arm64",
     os: "darwin",
     cpu: "arm64",
@@ -17,7 +18,7 @@ export const platforms = Object.freeze([
   },
   {
     target: "x86_64-apple-darwin",
-    packageName: "@vibescan/cli-darwin-x64",
+    packageName: "@jiayanzeng/vibescan-darwin-x64",
     directory: "cli-darwin-x64",
     os: "darwin",
     cpu: "x64",
@@ -26,7 +27,7 @@ export const platforms = Object.freeze([
   },
   {
     target: "aarch64-unknown-linux-musl",
-    packageName: "@vibescan/cli-linux-arm64-musl",
+    packageName: "@jiayanzeng/vibescan-linux-arm64-musl",
     directory: "cli-linux-arm64-musl",
     os: "linux",
     cpu: "arm64",
@@ -35,7 +36,7 @@ export const platforms = Object.freeze([
   },
   {
     target: "x86_64-unknown-linux-musl",
-    packageName: "@vibescan/cli-linux-x64-musl",
+    packageName: "@jiayanzeng/vibescan-linux-x64-musl",
     directory: "cli-linux-x64-musl",
     os: "linux",
     cpu: "x64",
@@ -44,7 +45,7 @@ export const platforms = Object.freeze([
   },
   {
     target: "x86_64-pc-windows-msvc",
-    packageName: "@vibescan/cli-win32-x64-msvc",
+    packageName: "@jiayanzeng/vibescan-win32-x64-msvc",
     directory: "cli-win32-x64-msvc",
     os: "win32",
     cpu: "x64",

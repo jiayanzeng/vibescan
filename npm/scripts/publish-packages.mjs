@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { platforms, readJson } from "./platforms.mjs";
+import { mainPackageName, platforms, readJson } from "./platforms.mjs";
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -39,7 +39,7 @@ const plannedPackages = platforms.map((platform) => {
   };
 });
 plannedPackages.push({
-  name: "vibescan",
+  name: mainPackageName,
   tarball: path.join(packagesRoot, manifest.main),
 });
 

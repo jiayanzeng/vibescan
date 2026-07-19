@@ -19,7 +19,8 @@ Build order (respect it — G1's release-ready workspace + `dist` scaffold is wh
 G2/G3 publish from):
 
 1. **G1 — Release-ready workspace + `dist` cross-compile matrix** (P1; §13.1)
-2. **G2 — The npm channel (`npx vibescan`), ships-not-downloads** (P1; §13.1, §13.4)
+2. **G2 — The npm channel (`npx @jiayanzeng/vibescan`), ships-not-downloads**
+   (P1; §13.1, §13.4)
 3. **G3 — Secondary channels (`cargo install`, Homebrew) + provenance + runbook** (P1; §13.1)
 
 **Verification surface (read this up front).** Unlike Tracks C–F, Track G **cannot
@@ -157,12 +158,12 @@ invariant and belongs in the release job, not left to trust.
 
 ---
 
-## Task G2 — The npm channel (`npx vibescan`), ships-not-downloads
+## Task G2 — The npm channel (`npx @jiayanzeng/vibescan`), ships-not-downloads
 
 ### Spec basis
 
-- **§13.1 primary channel:** an npm wrapper so `npx vibescan` works for the JS-native
-  audience.
+- **§13.1 primary channel:** an npm wrapper so
+  `npx @jiayanzeng/vibescan` works for the JS-native audience.
 - **§13.4 exit codes:** exit `0` when nothing meets the severity gate, non-zero
   otherwise, so CI can fail the build. **The npm shim must pass the child's exit code
   through faithfully** — a wrapper that swallows or remaps it silently breaks every
@@ -183,14 +184,16 @@ which the shim must handle with a clear message rather than a stack trace.
 
 ### File targets
 
-- **Edit:** the `dist` config — enable the `npm` installer; set the package name/scope
-  (recommend an unscoped `vibescan` for `npx vibescan`, with per-platform scoped
-  packages like `@vibescan/cli-linux-x64-musl`); pin exact versions.
+- **Edit:** the `dist` config — enable the `npm` installer; set the controlled
+  personal-scope main package to `@jiayanzeng/vibescan` (no organization is
+  required), with per-platform packages such as
+  `@jiayanzeng/vibescan-linux-x64-musl`; pin exact versions.
 - **Review (do not blindly accept):** the generated npm shim — confirm it uses the
   platform-package/`optionalDependencies` resolution and **not** a
   download-at-postinstall. If `dist`'s npm installer does any install-time fetch,
   **do not ship it as-is**: fall back to hand-rolled esbuild-style packages (a thin
-  `vibescan` main package + N `@vibescan/cli-<os>-<cpu>[-<libc>]` packages, each with
+  `@jiayanzeng/vibescan` main package + N
+  `@jiayanzeng/vibescan-<os>-<cpu>[-<libc>]` packages, each with
   `os`/`cpu`/`libc` and one binary; main shim does `require.resolve` +
   `spawnSync(bin, process.argv.slice(2))` and re-exits with the child code).
 - **New:** an npm smoke test in CI (matrix across the five platforms) that installs
@@ -200,7 +203,7 @@ which the shim must handle with a clear message rather than a stack trace.
 
 **The shim contract (whatever generates it):**
 1. Resolve the platform binary via the installed optional package
-   (`require.resolve("@vibescan/cli-<os>-<cpu>[-<libc>]/vibescan")`), honoring an
+   (`require.resolve("@jiayanzeng/vibescan-<os>-<cpu>[-<libc>]/vibescan")`), honoring an
    env override (e.g. `VIBESCAN_BINARY_PATH`) for advanced/air-gapped users.
 2. `spawnSync(binaryPath, process.argv.slice(2), { stdio: "inherit" })`.
 3. **Re-exit with the child's exit code** (`process.exit(result.status ?? 1)`), so
@@ -208,7 +211,7 @@ which the shim must handle with a clear message rather than a stack trace.
 4. If resolution fails, print an **esbuild-style actionable error** — name the likely
    cause (optional dependency skipped: cross-OS `node_modules` cache or stale
    lockfile) and the fixes (`npm ci` on a clean tree; don't share `node_modules`
-   across OSes; or use `cargo install vibescan` / the shell installer). Never fall
+   across OSes; or use `cargo install vibescan-cli` / the shell installer). Never fall
    back to a silent download.
 
 **Static-musl + the `libc` field.** Because the Linux binary is **static musl** (G1),
@@ -224,9 +227,9 @@ for these and it keeps installs reproducible).
 
 ### Acceptance criteria (self-verifiable / CI-observable)
 
-1. `npx vibescan@<version> --version` succeeds on **each** of the five platforms in a
-   CI smoke matrix (including at least one **glibc** Linux runner, proving the
-   static-musl binary installs and runs there).
+1. `npx @jiayanzeng/vibescan@<version> --version` succeeds on **each** of the
+   five platforms in a CI smoke matrix (including at least one **glibc** Linux
+   runner, proving the static-musl binary installs and runs there).
 2. **Exit-code passthrough:** a CI check runs the npm-installed `vibescan` against a
    fixture that trips the severity gate and asserts a **non-zero** exit, and against a
    clean fixture and asserts **zero** — proving the shim preserves §13.4 semantics.
@@ -254,7 +257,7 @@ for these and it keeps installs reproducible).
 
 ### Problem (root-caused)
 
-`cargo install vibescan` cannot work until the workspace is published to crates.io in
+`cargo install vibescan-cli` cannot work until the workspace is published to crates.io in
 dependency order, and there is no Homebrew formula, no npm-publish provenance, and no
 written release process — so releases would be ad hoc and unverifiable.
 
@@ -271,7 +274,7 @@ written release process — so releases would be ad hoc and unverifiable.
 **crates.io publish order.** Publish bottom-up so each crate's dependencies already
 exist on the registry: `vibescan-types` → `vibescan-secrets` → `vibescan-git` →
 `vibescan-report` → `vibescan-supabase` → (`vibescan-registry`, if Track F landed) →
-`vibescan-core` → `vibescan-cli`. `cargo install vibescan` then installs the CLI. The
+`vibescan-core` → `vibescan-cli`. `cargo install vibescan-cli` then installs the CLI. (**Package-name decision, ratified:** the Cargo package is `vibescan-cli` per the exact crate DAG and boundary checker, and it installs the `vibescan` binary. The instruction's earlier literal `cargo install vibescan` is corrected to `cargo install vibescan-cli` throughout; no ninth alias crate is added and the architecture DAG is unchanged.) The
 version-bearing deps from G1 are the prerequisite. Document this order in `RELEASING.md`
 and let `dist`/`cargo` enforce it where possible.
 
@@ -293,7 +296,7 @@ Keep it short and executable.
 
 1. On a test tag, the release job publishes (or dry-run-publishes) the crates in the
    documented dependency order without an unresolved-dependency error; `cargo install
-   vibescan` from crates.io installs a working CLI (verifiable post-publish, or via a
+   vibescan-cli` from crates.io installs a working CLI (verifiable post-publish, or via a
    `--dry-run`/`cargo publish -p ... --dry-run` chain in CI).
 2. A Homebrew formula is generated and `brew install vibescan/tap/vibescan` yields a
    working `vibescan` (CI or documented manual check).
@@ -309,9 +312,10 @@ Keep it short and executable.
 
 ## Completion status this track closes
 
-Track G makes vibescan installable the way its audience expects: `npx vibescan` via
-per-platform packages with no install-time fetch (the security-appropriate mechanism),
-`cargo install vibescan` from a crates.io-published workspace, and `brew install` from
+Track G makes vibescan installable the way its audience expects:
+`npx @jiayanzeng/vibescan` via per-platform packages with no install-time fetch
+(the security-appropriate mechanism),
+`cargo install vibescan-cli` from a crates.io-published workspace, and `brew install` from
 a tap — all built from a `dist`-orchestrated, tag-triggered release that cross-compiles
 **static musl** Linux binaries alongside macOS/Windows, with unified checksums and
 GitHub Artifact Attestations, and npm publish provenance. After Track G, the pure-Rust
