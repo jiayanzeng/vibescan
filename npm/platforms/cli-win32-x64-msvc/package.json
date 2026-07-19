@@ -1,6 +1,6 @@
 {
   "name": "@jiayanzeng/vibescan-win32-x64-msvc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "vibescan binary for Windows x64",
   "license": "MIT",
   "repository": {

@@ -14,7 +14,19 @@ The npm publisher must publish the five `@jiayanzeng/vibescan-*` platform
 packages first and `@jiayanzeng/vibescan` last; its print plan must contain only
 these six scoped identities.
 
-## `v0.1.1` release decision (G4.3)
+## `v0.1.2` recovery release decision (G4.3)
+
+After PR #7 merged the reusable-publisher permission repair to `main` as
+`66e5fa2`, the release owner authorized the next immutable patch preparation on
+2026-07-19. Version `0.1.2` replaces, but does not move or reuse, the failed
+`v0.1.1` attempt. It is a distribution-only recovery release: scanner behavior,
+the eight-crate dependency graph, LocalStatic/Network boundaries,
+target-project access, detection output, and the six approved npm identities
+are unchanged. The release exists to exercise the already-implemented
+crates.io, scoped npm, and Homebrew publishers with the repaired generated
+workflow.
+
+## `v0.1.1` failed-attempt record (G4.3)
 
 After the complete G4.2 preflight passed on 2026-07-19, the release owner
 authorized the recommended `0.1.1` patch release. This is a distribution-only
@@ -24,6 +36,9 @@ the eight-crate dependency graph, LocalStatic/Network boundaries, target-project
 access, or detection output. Its release notes are therefore the first public
 availability of the existing scanner through eight crates, six
 `@jiayanzeng/vibescan*` npm packages, and the prebuilt Homebrew formula.
+The annotated `v0.1.1` tag remains immutable evidence of a workflow-validation
+failure that occurred before any job or publication; it must not be moved or
+reused.
 
 ## One-time publisher setup
 
