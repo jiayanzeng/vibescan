@@ -787,6 +787,11 @@ workspace test matrices, the Network boundary checker, the hardening aggregate,
 and `git diff --check` passed. The hardening aggregate explicitly skipped only
 its optional real-repository leg because no fixture was supplied.
 
+Closeout commit `517dfa2` records the verified release facts in the README,
+runbook, Track G closeout, post-v1 roadmap, and this state file. The branch
+started from clean `main` at `6441cc7`; no pre-existing user change was present
+or modified, and the worktree was clean before this status-only follow-up.
+
 All six G4.4 acceptance criteria are satisfied. G4.4 and Track G are
 **complete**. The architecture-correct Cargo package remains `vibescan-cli` and
 installs the `vibescan` binary; no ninth alias crate or package rename is
