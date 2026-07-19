@@ -9,9 +9,14 @@ but its *publication rollout* is at 0%.
 This document specifies the remaining rollout as dependency-ordered tasks
 (G4.0–G4.4). G4.0 is resolved to `@jiayanzeng/vibescan`. G4.1's explicitly
 owner-controlled identity/credential/tap bootstrap and G4.2's reversible local
-preflight are complete as of 2026-07-19. G4.3's recommended `0.1.1` version bump
-and local gates are prepared at commit `be615a0`; the branch is not merged and
-no tag or publication has occurred.
+preflight are complete as of 2026-07-19. PR #6 merged the `0.1.1` preparation
+to `main` as `01f7f39`, and the release owner pushed annotated tag `v0.1.1` to
+that exact merge. Tagged Release run #10 failed workflow validation before any
+job, artifact, GitHub release, registry publication, or formula update ran:
+the generated caller denied `contents: read` to both reusable publisher
+workflows. Commit `bca901a` on `codex/track-g4-release-permissions` repairs the
+cargo-dist source configuration and adds a regression check; it is not yet
+merged. G4.3 remains incomplete.
 
 ---
 
@@ -23,7 +28,7 @@ no tag or publication has occurred.
 | npm unscoped `vibescan` (excluded) | not published by vibescan | **Taken**: `vibescan@0.0.5`, maintainer `tanayvk`, Nuxt-scaffold placeholder, published 2025‑04‑16, `bin.vibescan → dist/cli.js` | Not in the approved publish plan; no longer a blocker |
 | npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six return 404; npm user `jiayanzeng` owns the personal `@jiayanzeng` scope | First-ever publish creates the package identities; no organization is required |
 | `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | Public repo and `Formula/` layout return 200; formula awaits the release | Bootstrap complete; G4.3 writes the first formula |
-| release tag exercising G3 publishers | new immutable `v0.1.x` | `0.1.1` is prepared at `be615a0`, but no `v0.1.1` tag exists (`v0.1.0` predates G3) | Publishers have never run; owner-only merge/tag step remains |
+| release tag exercising G3 publishers | new immutable `v0.1.x` | `v0.1.1` points to `01f7f39`, but Release run #10 failed validation before jobs because the reusable publishers lacked caller-side `contents: read` | Nothing was published; merge the permission repair, then prepare a new immutable patch tag rather than moving `v0.1.1` |
 
 **Exact identities the publishers target:**
 
@@ -210,11 +215,15 @@ ruby -c target/distrib/vibescan.rb
 
 ## Task G4.3 — Version bump and tag (owner-authorized, irreversible)
 
-**Status:** prepared but incomplete as of 2026-07-19. Step 1 and the complete
-local release matrix pass at commit `be615a0` on
-`codex/track-g4-release-0.1.1`. Steps 2–3 remain owner-only: merge the reviewed
-branch, create annotated tag `v0.1.1` on that exact merge, push only the tag,
-and require the tagged workflow to pass before marking G4.3 complete.
+**Status:** recovery in progress as of 2026-07-19. PR #6 merged the `0.1.1`
+release preparation as `01f7f39`, and annotated tag `v0.1.1` points to that
+exact merge. Release run #10 failed workflow validation before any job or
+publication because both reusable publisher calls were denied
+`contents: read`. Repair commit `bca901a` adds cargo-dist's supported custom-job
+permission configuration and a deterministic regression check; its full local
+matrix is green, but the repair is not yet merged. Do not move or reuse
+`v0.1.1`; after the repair lands, prepare the next patch version and require its
+owner-pushed tagged workflow to pass before marking G4.3 complete.
 
 ### Spec basis
 `RELEASING.md` runbook; G3 acceptance #1–#3.
@@ -287,6 +296,10 @@ gh attestation verify <archive> \
 
 ## Fail-partial / rollback notes
 
+- If a tagged workflow fails validation before any job starts, publish nothing,
+  preserve the failed tag as immutable evidence, fix the workflow on `main`,
+  and use the next patch version. Re-running the old workflow or moving its tag
+  cannot incorporate the fixed workflow definition.
 - If a publisher fails **after** some crates/packages are live, do **not** retry the same version.
   Diagnose, bump to the next patch version, and re-run — published immutable versions stay as-is.
 - The single most likely failure is the unscoped `vibescan` publish; G4.0 removes that risk before

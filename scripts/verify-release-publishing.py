@@ -3,6 +3,7 @@
 
 import json
 import pathlib
+import re
 import sys
 import tomllib
 
@@ -21,6 +22,18 @@ PUBLISH_ORDER = [
     "vibescan-cli",
 ]
 REQUIRED_PUBLISH_JOBS = {"homebrew", "./publish-crates", "./publish-npm"}
+REQUIRED_CUSTOM_PUBLISH_PERMISSIONS = {
+    "publish-crates": {
+        "contents": "read",
+        "id-token": "write",
+        "packages": "write",
+    },
+    "publish-npm": {
+        "contents": "read",
+        "id-token": "write",
+        "packages": "write",
+    },
+}
 
 
 def fail(message):
@@ -49,6 +62,39 @@ def workspace_dependency_names(manifest, workspace_names):
                 if name in workspace_names:
                     names.add(name)
     return names
+
+
+def workflow_job_permissions(source, job_name):
+    lines = source.splitlines()
+    job_marker = f"  {job_name}:"
+    try:
+        start = lines.index(job_marker) + 1
+    except ValueError:
+        fail(f"release.yml is missing generated job {job_name}")
+
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if re.fullmatch(r"  [A-Za-z0-9_-]+:", lines[index]):
+            end = index
+            break
+
+    permission_marker = "    permissions:"
+    try:
+        permission_start = lines.index(permission_marker, start, end) + 1
+    except ValueError:
+        fail(f"release.yml job {job_name} is missing permissions")
+
+    permissions = {}
+    permission_pattern = re.compile(
+        r'^      ["\']?([^"\']+)["\']?: ["\']?([^"\']+)["\']?$'
+    )
+    for line in lines[permission_start:end]:
+        if not line.startswith("      "):
+            break
+        match = permission_pattern.fullmatch(line)
+        if match:
+            permissions[match.group(1)] = match.group(2)
+    return permissions
 
 
 def main():
@@ -114,6 +160,23 @@ def main():
         fail("dist publish jobs must include Homebrew, crates.io, and npm")
     if "npm" in dist.get("installers", []) or "npm" in dist.get("publish-jobs", []):
         fail("the fetch-based built-in npm installer/publisher must remain disabled")
+    if dist.get("github-custom-job-permissions") != REQUIRED_CUSTOM_PUBLISH_PERMISSIONS:
+        fail(
+            "dist custom publisher permissions must grant checkout plus "
+            "OIDC/package publication access"
+        )
+
+    release_workflow = (
+        repository_root / ".github" / "workflows" / "release.yml"
+    ).read_text(encoding="utf-8")
+    for job_suffix, expected_permissions in REQUIRED_CUSTOM_PUBLISH_PERMISSIONS.items():
+        job_name = f"custom-{job_suffix}"
+        actual_permissions = workflow_job_permissions(release_workflow, job_name)
+        if actual_permissions != expected_permissions:
+            fail(
+                f"release.yml job {job_name} permissions must be "
+                f"{expected_permissions}, found {actual_permissions}"
+            )
 
     npm_main = read_json(repository_root / "npm" / "vibescan" / "package.json")
     if npm_main.get("name") != NPM_MAIN_PACKAGE:

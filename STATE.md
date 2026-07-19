@@ -2,13 +2,14 @@
 
 Reviewed: 2026-07-19
 
-Current committed checkout: `be615a0` on
-`codex/track-g4-release-0.1.1` (G4.3 release preparation; Tasks G4.0–G4.2
-complete). Its G3 implementation ancestor
-`330a3b2` was merged by pull request #5 to `main` as `cb048b9`. The current
-worktree records the verified `0.1.1` version bump. The branch has not been
-merged and no tag, registry package, release, formula, or target-project state
-has changed.
+Current implementation checkpoint: `bca901a` on
+`codex/track-g4-release-permissions` (G4.3 tagged-workflow startup repair;
+Tasks G4.0–G4.2 complete). Pull request #6 merged the `0.1.1` preparation to
+`main` as `01f7f39`; annotated tag `v0.1.1` dereferences to that exact merge.
+Tagged Release run #10 failed workflow validation before any job, artifact,
+GitHub release, registry package, or formula publication ran. The current
+branch repairs the missing reusable-workflow caller permissions and adds a
+regression check. It is not merged, and no target-project state has changed.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -66,12 +67,15 @@ the release owner confirmed the crates.io and npm bootstrap secrets plus npm
 two-factor authentication, and the public Homebrew tap and its `Formula/`
 layout exist with workflow push credentials configured. Task G4.2 is complete:
 all engine, boundary, Cargo/npm packaging, `dist` plan/formula, negative-control,
-and hardening gates pass on the current release commit. G4.3 preparation is
-complete on branch commit `be615a0`: every Cargo/npm package and exact internal
-version constraint is `0.1.1`, the release rationale is recorded, and the full
-release matrix is green. Track G's operational rollout remains partial because
-the owner-only merge/tag publication portion of G4.3 and G4.4 public
-verification have not run, and
+and hardening gates pass on the current release commit. G4.3's `0.1.1`
+preparation was merged and tagged, but Release run #10 failed validation before
+jobs because the generated custom publisher calls omitted `contents: read`.
+Repair commit `bca901a` uses cargo-dist's supported custom-job permission
+configuration for both publishers and pins it in the release contract checker;
+its local matrix is green. Track G's operational rollout remains partial
+because the repair is not merged, no publisher has run successfully, a new
+immutable patch release is still required, and G4.4 public verification has not
+run, and
 the literal instruction
 `cargo install vibescan` conflicts with the architecture-named
 `vibescan-cli` package (which installs the `vibescan` binary).
@@ -90,8 +94,9 @@ Use these three lenses when discussing completion:
 - **Entire architecture document:** partial. Tier E's E1–E3 implementation,
   Track F's registry intelligence/corpus activation, Track G1–G3's repository
   implementation, G4.0's npm identity decision, and G4.1's external bootstrap
-  plus G4.2's reversible preflight and G4.3's release preparation are complete;
-  G4.3 publication, G4.4 verification, and
+  plus G4.2's reversible preflight are complete; G4.3's first tagged attempt
+  failed before publication and its workflow-permission repair is locally
+  verified but unmerged. G4.3 publication, G4.4 verification, and
   other deferred tracks remain incomplete.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
@@ -150,8 +155,12 @@ external bootstrap actions and the corresponding read-only acceptance checks.
 After G4.2 was committed as `d4daabd`, G4.3 preparation moved to
 `codex/track-g4-release-0.1.1`. Commit `be615a0` contains only the synchronized
 `0.1.1` Cargo/npm version surface, lockfile update, npm publish-plan fixture,
-and release rationale. The branch is not merged, `v0.1.1` does not exist, and
-the release owner has not yet performed the publication-triggering tag push.
+and release rationale. Pull request #6 merged that preparation to `main` as
+`01f7f39`; the release owner then pushed annotated `v0.1.1` to that exact
+merge. Release run #10 failed workflow validation before any job started, so
+no GitHub release, registry package, or formula was created. The implementation
+checkpoint `bca901a` on `codex/track-g4-release-permissions` repairs the caller
+permissions and was clean before this status-only follow-up edit.
 
 ## Track G4.0 verification observed on 2026-07-19
 
@@ -378,6 +387,68 @@ complete**. Per the closeout authorization boundary, the release owner must
 merge the reviewed branch, create an annotated `v0.1.1` tag on that exact merge,
 and push only the tag. The tagged workflow must then pass before G4.3 can be
 called complete; G4.4 remains unstarted.
+
+## Track G4.3 tagged-workflow startup recovery observed on 2026-07-19
+
+Pull request #6 merged the verified `0.1.1` preparation to `main` as merge
+commit `01f7f39c45a0016c952d5c1c8f276203dc73cf7f`; all 26 required pull-request
+checks passed. The release owner created annotated tag `v0.1.1`, whose peeled
+target is that exact merge. GitHub Actions Release run
+`29673995181` reached the terminal `Startup failure` state before any job ran.
+GitHub's workflow validator reported that the call to
+`.github/workflows/publish-crates.yml` requested `contents: read` while the
+caller granted `contents: none`. The npm reusable publisher had the same
+caller/callee permission mismatch. Because validation failed before job
+startup, no artifact, GitHub release, crate, npm package, or Homebrew formula
+was created.
+
+Implementation commit `bca901a` configures cargo-dist 0.32.0's supported
+`github-custom-job-permissions` surface for both `publish-crates` and
+`publish-npm`. Each generated caller now grants exactly `contents: read`,
+`id-token: write`, and `packages: write`. The reusable workflows still request
+only `contents: read` plus `id-token: write`; no broader permission, scanner
+runtime behavior, crate dependency, egress capability, credential handling, or
+target-project access was added. `scripts/verify-release-publishing.py` now
+requires the source configuration and both generated job blocks to carry that
+exact permission set. Before the repair, the new check failed on the missing
+configuration; after regeneration, it passed.
+
+The pinned official Apple Silicon cargo-dist 0.32.0 archive matched SHA-256
+`aa343b2ff78ec2981f17a65140250c5ad6062c74072163f68c5c2686d94763a7` and
+reported `cargo-dist 0.32.0`. The following commands passed on implementation
+commit `bca901a` (documentation-only status edits followed):
+
+```sh
+python3 scripts/verify-release-publishing.py
+python3 -m py_compile scripts/verify-release-publishing.py
+dist generate
+dist generate --check
+ruby -e 'require "yaml"; Dir[".github/workflows/*.yml"].sort.each { |path| YAML.load_file(path) }'
+npm --prefix npm test
+bash scripts/publish-crates.sh --dry-run
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+bash scripts/check-network-boundary.sh
+bash scripts/verify-hardening-checks.sh
+git diff --check
+```
+
+The hardening aggregate explicitly skipped its optional real-repository leg
+because no fixture was supplied. All tests used local fixtures and mocks. No
+credential was read, no live registry or target system was contacted, no
+publication was retried, and no tag was created, moved, deleted, or pushed by
+this repair. The ordered next steps are: merge the reviewed permission repair;
+prepare the next patch version because `v0.1.1` is immutable evidence of the
+failed attempt; have the release owner create and push the new annotated tag on
+its exact merge; require the tagged workflow to pass; then start G4.4 read-only
+verification. G4.3 and Track G remain **partial**.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -1373,7 +1444,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial; G1–G3 implemented, G4.0–G4.2 complete, G4.3 prepared (rollout pending) | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. G3's fail-closed Cargo/npm publishers, OIDC provenance wiring, and prebuilt Homebrew formula are implemented and merged to `main`. G4.0 replaces the unavailable unscoped and organization-scope npm targets with controlled `@jiayanzeng/vibescan` plus its five platform packages and proves the six-identity scoped publish plan. G4.1 verifies all fourteen registry identities remain free, records owner-confirmed bootstrap credentials/account controls, and verifies the public tap plus `Formula/` layout. G4.2 passes the complete reversible engine/publisher/dist/negative-control preflight. G4.3's verified `0.1.1` release commit is prepared; its owner-only merge/tag publication and G4.4 post-publish checks remain outstanding. |
+| Security/nonfunctional | Partial; G1–G3 implemented, G4.0–G4.2 complete, G4.3 recovery pending | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, SHA-256 checksums, five verified GitHub Artifact Attestations, and blocking static-link verification. G2 adds the ships-only npm wrapper, exact optional platform packages, release integration, no-fetch/no-postinstall contracts, and a green five-platform `npx` matrix. G3's fail-closed Cargo/npm publishers, OIDC provenance wiring, and prebuilt Homebrew formula are implemented and merged to `main`. G4.0 replaces the unavailable unscoped and organization-scope npm targets with controlled `@jiayanzeng/vibescan` plus its five platform packages and proves the six-identity scoped publish plan. G4.1 verifies all fourteen registry identities remain free, records owner-confirmed bootstrap credentials/account controls, and verifies the public tap plus `Formula/` layout. G4.2 passes the complete reversible engine/publisher/dist/negative-control preflight. G4.3's `v0.1.1` tag correctly targets its merge but Release run #10 failed validation before publication; `bca901a` locally repairs and pins the reusable-workflow permissions, but that repair and a new immutable patch release remain outstanding. G4.4 has not started. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -1450,7 +1521,7 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1–G3 implemented; G4.0–G4.2 complete, G4.3 prepared, rollout pending:** the release workspace, exact five-target
+- **Track G1–G3 implemented; G4.0–G4.2 complete, G4.3 startup recovery pending:** the release workspace, exact five-target
   `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
   blocking static-link verification are locally validated and proven by the
   successful hosted `v0.1.0` release. The ships-only npm shim, five exact
@@ -1461,10 +1532,12 @@ secret-gated.
   and unavailable organization-scope npm targets, and pins the six personal-
   scope identities in tests. G4.1 verifies the free registry identities and
   completes the owner-controlled account/secret/tap bootstrap. G4.2 passes the
-  complete reversible preflight. G4.3's synchronized `0.1.1` release commit and
-  complete local matrix are ready; its owner-only merge/tag publication and
-  G4.4 post-publish checks remain outstanding, as does the CLI Cargo package
-  naming decision.
+  complete reversible preflight. G4.3's synchronized `0.1.1` release commit was
+  merged and tagged, but the workflow failed validation before publication.
+  Commit `bca901a` repairs the generated caller permissions and passes the full
+  local matrix; its merge, the next immutable patch release, and G4.4
+  post-publish checks remain outstanding, as does the CLI Cargo package naming
+  decision.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
   the two confirmed checks and bounded privacy-aware caching; F3 activates the
@@ -1595,9 +1668,11 @@ Tier 0 behavior.
   `@jiayanzeng/vibescan` as the controlled personal-scope entry point. G4.1's
   owner-controlled registry/account/tap bootstrap and read-only acceptance
   checks are complete. G4.2's complete reversible preflight is green. G4.3's
-  `0.1.1` version bump and local verification are prepared on commit `be615a0`;
-  the release owner must merge it, create the annotated tag on that merge, and
-  push only the tag before G4.3 can close. G4.4 follows. Do not add a ninth crate
+  `0.1.1` preparation was merged and correctly tagged, but Release run #10
+  failed validation before any job or publication. Permission repair `bca901a`
+  is locally verified and must be merged before preparing the next patch; the
+  release owner must create and push that new annotated tag before G4.3 can
+  close. G4.4 follows. Do not add a ninth crate
   or rename `vibescan-cli` merely to satisfy the instruction's literal Cargo
   command without first amending the architecture.
 - Active DAST/write probes: prohibited in v1, not merely postponed.
