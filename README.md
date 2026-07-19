@@ -61,12 +61,14 @@ a `libc` restriction, so npm can install them on both glibc and musl hosts.
 
 Release CI locally packs and tests all five platform combinations with
 `--ignore-scripts`, exercises `npx @jiayanzeng/vibescan --version`, and proves
-that clean and severity-gated scans preserve the Rust CLI's exit codes. Stable
-tags are wired to
-publish the five platform packages first and the main package last with npm
-provenance. Public availability still depends on the one-time registry ownership
-and trusted-publisher setup in [RELEASING.md](RELEASING.md); this repository does
-not claim publication until a tagged run proves it.
+that clean and severity-gated scans preserve the Rust CLI's exit codes. The
+`v0.1.3` release published the five platform packages first and the main package
+last with npm provenance; all six provenance statements verify to the tagged
+release workflow. Install the published release with:
+
+```sh
+npx @jiayanzeng/vibescan@0.1.3 --version
+```
 
 Run the source package and shim contract tests locally with:
 
@@ -86,6 +88,12 @@ The release plan generates a prebuilt-binary Homebrew formula for
 `cargo install vibescan-cli` installs the `vibescan` command. The exact publisher
 order, bootstrap credentials, trusted-publisher setup, checksum and attestation
 commands, and release gates are documented in [RELEASING.md](RELEASING.md).
+Both secondary channels are live at `0.1.3`:
+
+```sh
+cargo install vibescan-cli --version 0.1.3 --locked
+brew install jiayanzeng/tap/vibescan
+```
 
 ## Test
 

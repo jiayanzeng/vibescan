@@ -4,8 +4,8 @@
 formula, and `RELEASING.md` to `main` at `cb048b9` (26/26 checks green). Its
 initial rollout was 0% because publishers fire only on a tag. G4.3 is now
 complete through immutable tag `v0.1.3` and green Release run #29676514551.
-Track G remains **partially complete** only because G4.4's install/provenance
-verification is separate and still outstanding.
+G4.4's install, provenance, checksum, attestation, and negative-control
+verification passed on 2026-07-19. Track G is **complete**.
 
 This document specifies the remaining rollout as dependency-ordered tasks
 (G4.0–G4.4). G4.0 is resolved to `@jiayanzeng/vibescan`. G4.1's explicitly
@@ -25,7 +25,7 @@ immutable, so PR #9 prepared synchronized `0.1.3`, bounded 429-only Cargo retry,
 and strict crates.io → npm → Homebrew sequencing. PR #9 merged as `e788b1c`;
 annotated tag `v0.1.3` peels to that merge. Release run #29676514551 passed all
 19 jobs end to end, and the unchanged-tag re-push was a no-op. G4.3 is complete;
-G4.4 is next.
+G4.4 subsequently passed every post-publish acceptance check and closes Track G.
 
 ---
 
@@ -38,6 +38,7 @@ G4.4 is next.
 | npm `@jiayanzeng/vibescan` + 5 platform packages | published, provenance | All six resolve at `0.1.3` | Published only after the complete crates.io job succeeded |
 | `jiayanzeng/homebrew-tap` | tap repo + `Formula/vibescan.rb` | `Formula/vibescan.rb` is live at `0.1.3` | Updated only after npm succeeded |
 | release tag exercising G3 publishers | new immutable `v0.1.x` | `v0.1.3` points to `e788b1c`; Release run #29676514551 passed all 19 jobs | G4.3 complete; retain `v0.1.1`/`v0.1.2` as immutable failure evidence |
+| post-publish verification | all three installs, npm provenance, checksums, five attestations, two rejection controls | All passed for `v0.1.3` on 2026-07-19 | G4.4 and Track G complete |
 
 **Exact identities the publishers target:**
 
@@ -329,6 +330,32 @@ gh attestation verify <archive> \
 6. Negative controls: a tampered archive fails `gh attestation verify`; a wrong checksum fails
    `shasum -c`.
 
+### Completion evidence (2026-07-19)
+
+- An isolated `npx @jiayanzeng/vibescan@0.1.3 --version` returned
+  `vibescan 0.1.3`. A temporary all-platform audit project installed the six
+  exact scoped packages and `npm audit signatures` reported six verified
+  registry signatures and six verified attestations. Each decoded SLSA
+  statement names `jiayanzeng/vibescan`, `.github/workflows/release.yml`,
+  `refs/tags/v0.1.3`, merge `e788b1c`, and Release run #29676514551.
+- `cargo install vibescan-cli --version 0.1.3 --locked` in an isolated Cargo
+  home/root produced `vibescan 0.1.3`. A second install with the optional
+  `registry` feature resolved and compiled all eight `vibescan-*` crates at
+  `0.1.3`, proving the complete published workspace graph.
+- `brew install jiayanzeng/tap/vibescan` installed the prebuilt arm64 archive
+  and returned `vibescan 0.1.3`. The live formula declares `version "0.1.3"`,
+  has no dependencies, and installs the shipped binary without Cargo or a Rust
+  toolchain. The verification-only local install and tap were removed afterward.
+- All six entries in `sha256.sum` verified. macOS `shasum` also warned about
+  cargo-dist's trailing blank line, but returned zero and marked every listed
+  archive `OK`.
+- A checksum-verified GitHub CLI verified all five platform archives against
+  GitHub's public Sigstore bundles while enforcing `release.yml`,
+  `refs/tags/v0.1.3`, and source digest `e788b1c`.
+- The required negative controls passed: a one-byte temporary archive was
+  rejected by `gh attestation verify`, and a deliberately wrong checksum was
+  rejected by `shasum -c`.
+
 ---
 
 ## Fail-partial / rollback notes
@@ -351,10 +378,9 @@ gh attestation verify <archive> \
 
 ## What closes Track G
 
-Track G is fully closed only when, for a single new immutable `v<version>` tag: the engine
-matrices are green, all eight crates.io versions resolve and `cargo install vibescan-cli` works,
-the npm entry point installs via `npx` with verified provenance, `brew install
-jiayanzeng/tap/vibescan` works, and the release carries a verifying `sha256.sum` plus five
-verifying Artifact Attestations. Until then, keep Track G marked **partial**. The deferred
-DAST/write-probe track (I) remains the only post-v1 work after this, behind the §7.4 ownership
-gate.
+Track G is fully closed for immutable tag `v0.1.3`: the engine matrices are
+green, all eight crates.io versions resolve, `cargo install vibescan-cli`
+works, the npm entry point installs via `npx` with six verified provenance
+statements, `brew install jiayanzeng/tap/vibescan` works, and the release has a
+verifying `sha256.sum` plus five verifying Artifact Attestations. The deferred
+DAST/write-probe track (I) remains behind the §7.4 ownership gate.

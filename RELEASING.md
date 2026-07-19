@@ -43,6 +43,32 @@ npm identities at `0.1.3`; the tap formula is `0.1.3`. Re-pushing the unchanged
 tag returned `Everything up-to-date`, so it created no duplicate release or
 publication.
 
+## `v0.1.3` post-publish verification (G4.4)
+
+Post-publish verification completed on 2026-07-19 and closes Track G. An
+isolated `npx @jiayanzeng/vibescan@0.1.3 --version` and the architecture-named
+`cargo install vibescan-cli --version 0.1.3 --locked` both returned
+`vibescan 0.1.3`. An all-platform temporary npm project verified registry
+signatures and provenance for all six scoped packages. Every SLSA statement
+names `.github/workflows/release.yml`, `refs/tags/v0.1.3`, source merge
+`e788b1c`, and Release run #29676514551.
+
+The Cargo install resolved the default published graph; a second isolated
+install with `--features registry` resolved and compiled all eight workspace
+crates at `0.1.3`. `brew install jiayanzeng/tap/vibescan` installed the
+prebuilt arm64 archive, reported `vibescan 0.1.3`, and used a zero-dependency
+formula with no Rust build. The verification-only formula and tap were removed
+afterward.
+
+All six entries in `sha256.sum` passed. macOS `shasum` warns about the
+cargo-dist-generated trailing blank line but exits zero after marking every
+listed archive `OK`. A checksum-verified GitHub CLI verified all five platform
+archives while enforcing the release workflow, tag ref, and source merge. A
+truncated archive copy failed attestation verification and a deliberately
+wrong checksum failed checksum verification, satisfying both rejection
+controls. No registry, release, tag, tap-repository, or target-project state
+was mutated by these checks.
+
 ## `v0.1.2` partial-release record (G4.3)
 
 After PR #7 merged the reusable-publisher permission repair to `main` as

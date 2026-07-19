@@ -3,15 +3,17 @@
 Reviewed: 2026-07-19
 
 Current released implementation checkpoint: `e788b1c` on `main`, with annotated
-tag `v0.1.3` peeling to that exact merge (G4.3 complete; Tasks G4.0–G4.2 also
-complete). Release run #29676514551 passed all 19 jobs: five builds and
+tag `v0.1.3` peeling to that exact merge (Tasks G4.0–G4.4 and Track G complete).
+Release run #29676514551 passed all 19 jobs: five builds and
 attestations, static Linux verification, five-platform npm smoke, GitHub
 hosting, and the ordered crates.io → npm → Homebrew publishers. Public reads
 resolve all eight crates and all six scoped npm identities at `0.1.3`; the tap
 formula is `0.1.3`. An unchanged-tag re-push returned `Everything up-to-date`.
 Documentation closeout checkpoint `a9507b2` is on
-`codex/track-g4-release-0.1.3-closeout`. G4.4 remains outstanding, and no
-target-project state changed.
+`codex/track-g4-release-0.1.3-closeout`; PR #10 merged that record to `main` as
+`6441cc7`. G4.4 subsequently passed all three install paths, six npm provenance
+checks, the eight-crate Cargo graph, six checksums, five Artifact Attestations,
+and both rejection controls. No target-project state changed.
 
 Prior architecture-audit baseline: `e7e9263`.
 
@@ -87,11 +89,11 @@ local release and architecture matrix. PR #9 merged it as `e788b1c`; annotated
 tag `v0.1.3` peels to that merge, and Release run #29676514551 passed all 19
 jobs. All eight crates and all six npm identities now resolve publicly at
 `0.1.3`, the formula is `0.1.3`, and the required same-tag push was a no-op.
-G4.3 is complete. Track G remains partial because G4.4's install/provenance
-verification has not run, and
-the literal instruction
-`cargo install vibescan` conflicts with the architecture-named
-`vibescan-cli` package (which installs the `vibescan` binary).
+G4.3 is complete. G4.4 then verified all three public install channels, all six
+npm provenance statements, all eight crates, all six checksum entries, all
+five platform attestations, and both tamper controls. The architecture-named
+Cargo package remains `vibescan-cli`, which installs the `vibescan` binary.
+Track G is complete.
 Architecture §17.8 explicitly defers the noisy user-writable-metadata
 heuristic, so its absence is not an E2 gap. The verdict for the entire
 architecture document is therefore partial.
@@ -110,8 +112,9 @@ Use these three lenses when discussing completion:
   plus G4.2's reversible preflight are complete; G4.3's first tagged attempt
   failed before publication, and its `0.1.2` recovery partially published
   before crates.io rate-limited the sixth new identity. The `v0.1.3` recovery
-  then passed end to end and completes G4.3. G4.4 verification and
-  other deferred tracks remain incomplete.
+  then passed end to end, and G4.4 verified every public channel and provenance
+  path. Track G is complete; other deferred tracks keep the full architecture
+  verdict partial.
 
 No target-project write path was found. Tier 0 exposes GET only and discards
 returned row data after counting. Tier E1's Postgres transport accepts only
@@ -698,6 +701,96 @@ tag object and peeled merge remained unchanged, and no duplicate workflow or
 publication ran. G4.3 is therefore **complete**. G4.4 remains a distinct
 post-publish install, signature/provenance, checksum, and tamper-control task;
 this completion record does not claim it.
+
+## Track G4.4 post-publish verification observed on 2026-07-19
+
+G4.4 began from a clean `main` at `6441cc7`, which includes PR #10's G4.3
+closeout. The task is release/distribution verification under architecture
+§13.1 and G3 acceptance #1–#3. It changed no scanner code, dependency edge,
+runtime Network capability, package version, registry publication, release
+tag, or target-project state.
+
+An isolated npm cache and install root ran
+`npx @jiayanzeng/vibescan@0.1.3 --version` and received `vibescan 0.1.3`. A
+second temporary project installed the main package plus all five platform
+packages at the exact version. `npm audit signatures` reported six verified
+registry signatures and six verified attestations. The Homebrew Node build's
+bundled CA set did not initially trust Sigstore's current TUF certificate
+chain; retrying with the host `/etc/ssl/cert.pem` retained TLS verification and
+passed. Decoding each verified SLSA statement proved the exact subject and
+named `https://github.com/jiayanzeng/vibescan`,
+`.github/workflows/release.yml`, `refs/tags/v0.1.3`, source digest
+`e788b1c139556f979a23fc6e97705bc54fce1cc7`, and Release run
+#29676514551 attempt 1.
+
+An isolated Cargo home/root ran
+`cargo install vibescan-cli --version 0.1.3 --locked`; the installed binary
+reported `vibescan 0.1.3` and downloaded the complete seven-crate default
+graph from crates.io. A second install with `--features registry` resolved and
+compiled `vibescan-registry` as well. The registry source directory therefore
+contained all eight exact `vibescan-*` workspace crates at `0.1.3`, proving the
+optional eighth crate and the default graph both resolve from the public
+registry.
+
+The machine had neither `vibescan` nor `jiayanzeng/tap` installed before the
+Homebrew check. `brew install jiayanzeng/tap/vibescan` cloned the public tap,
+fetched formula `0.1.3`, installed five files from the prebuilt arm64 archive
+in one second, and produced `vibescan 0.1.3`. `brew deps` was empty; the live
+formula has no Rust dependency or Cargo invocation and uses `bin.install` on
+the release archive. The verification-only formula and tap were then removed,
+restoring their absent state. Homebrew's automatic cleanup also removed its
+stale cached `vibescan` `0.1.0` archive; no installed user package was removed.
+
+The release's `sha256.sum` contains the source archive plus the exact five
+platform archives. All six entries returned `OK` and `shasum` exited zero.
+macOS `shasum` warns about one improperly formatted line because cargo-dist
+emitted a trailing blank line; this is a non-blocking formatting note, not a
+digest failure. GitHub CLI 2.94.0 was downloaded from its official release,
+its macOS arm64 archive matched the official checksum, and it verified all
+five platform archives against their one-record public Sigstore bundles.
+Verification enforced signer workflow
+`jiayanzeng/vibescan/.github/workflows/release.yml`, source ref
+`refs/tags/v0.1.3`, source digest `e788b1c`, and the SLSA provenance predicate.
+
+Both required rejection controls passed. Truncating a temporary archive copy
+to one byte made `gh attestation verify` fail; changing the first checksum in a
+temporary manifest made `shasum -c` fail while the other five entries remained
+`OK`. The real release files were never modified.
+
+The observed command forms were:
+
+```sh
+npx --yes @jiayanzeng/vibescan@0.1.3 --version
+npm install --ignore-scripts --force --save-exact \
+  @jiayanzeng/vibescan@0.1.3 \
+  @jiayanzeng/vibescan-darwin-arm64@0.1.3 \
+  @jiayanzeng/vibescan-darwin-x64@0.1.3 \
+  @jiayanzeng/vibescan-linux-arm64-musl@0.1.3 \
+  @jiayanzeng/vibescan-linux-x64-musl@0.1.3 \
+  @jiayanzeng/vibescan-win32-x64-msvc@0.1.3
+NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem npm audit signatures
+cargo install vibescan-cli --version 0.1.3 --locked
+cargo install vibescan-cli --version 0.1.3 --locked --features registry
+brew install jiayanzeng/tap/vibescan
+shasum -a 256 -c sha256.sum
+gh attestation verify <archive> \
+  --repo jiayanzeng/vibescan \
+  --bundle <public-bundle> \
+  --signer-workflow jiayanzeng/vibescan/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.3 \
+  --source-digest e788b1c139556f979a23fc6e97705bc54fce1cc7
+```
+
+After the documentation update, `npm --prefix npm test`, the release
+publishing contract verifier, format, all four clippy matrices, all four
+workspace test matrices, the Network boundary checker, the hardening aggregate,
+and `git diff --check` passed. The hardening aggregate explicitly skipped only
+its optional real-repository leg because no fixture was supplied.
+
+All six G4.4 acceptance criteria are satisfied. G4.4 and Track G are
+**complete**. The architecture-correct Cargo package remains `vibescan-cli` and
+installs the `vibescan` binary; no ninth alias crate or package rename is
+needed.
 
 The prior Track F baseline commits Tasks F1–F3 and CF1. F1 adds the
 architecture-authorized eighth crate, `vibescan-registry`, with only the allowed
@@ -1693,7 +1786,7 @@ After the documentation changes, the closeout pass also reran and passed:
 | Dependency integrity | v1 §11.0 + Track F complete | Offline npm/Python structural checks remain unchanged. F1 adds deterministic parsed inputs, the separate rustls Registry boundary, explicit consent, and scope vocabulary. F2 adds exact-version local OSV matching, guarded public existence resolution, a nonfatal failure taxonomy, and 24-hour public-data caches. F3 activates the mocked nonexistent-package golden and metrics coverage. The newcomer heuristic remains an explicitly separate deferred follow-up. |
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
-| Security/nonfunctional | Partial; G1–G3 and G4.0–G4.3 complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, checksums, attestations, and static-link verification. G2 adds the ships-only npm wrapper and green five-platform `npx` matrix. G3 implements fail-closed Cargo/npm publishers, OIDC provenance, and the prebuilt formula. G4.0 selects controlled `@jiayanzeng/vibescan`; G4.1 records the owner-controlled bootstrap; G4.2 passes the reversible preflight. After immutable `v0.1.1` and partial `v0.1.2` evidence, PR #9's `v0.1.3` recovery passed all 19 jobs with strict crates.io → npm → Homebrew sequencing. All eight crates and all six npm packages resolve at `0.1.3`, the formula is `0.1.3`, five attestation records exist, and the same-tag push was a no-op. G4.4 remains outstanding. |
+| Security/nonfunctional | Partial overall; Track G complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, checksums, attestations, and static-link verification. G2 adds the ships-only npm wrapper and green five-platform `npx` matrix. G3 implements fail-closed Cargo/npm publishers, OIDC provenance, and the prebuilt formula. G4.0 selects controlled `@jiayanzeng/vibescan`; G4.1 records the owner-controlled bootstrap; G4.2 passes the reversible preflight. After immutable `v0.1.1` and partial `v0.1.2` evidence, PR #9's `v0.1.3` recovery passed all 19 jobs with strict crates.io → npm → Homebrew sequencing. G4.4 then verified all three installs, six npm provenance statements, all eight crates, six checksums, five attestations, and both rejection controls. Track G is complete. |
 | Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
@@ -1770,7 +1863,7 @@ secret-gated.
 
 ### P2 — assurance and product-depth gaps
 
-- **Track G1–G3 implemented; G4.0–G4.3 complete:** the release workspace, exact five-target
+- **Track G complete (G1–G3 and G4.0–G4.4):** the release workspace, exact five-target
   `cargo-dist` matrix, musl Linux cross-builds, checksums, attestations, and
   blocking static-link verification are locally validated and proven by the
   successful hosted `v0.1.0` release. The ships-only npm shim, five exact
@@ -1790,8 +1883,10 @@ secret-gated.
   `v0.1.3` triggered green Release run #29676514551. All eight crates and all
   six npm packages resolve at `0.1.3`, the formula is current, all five archive
   digests have attestation records, and the unchanged-tag push was a no-op.
-  G4.3 is complete. G4.4 post-publish install/provenance checks remain
-  outstanding, as does the CLI Cargo package naming decision.
+  G4.4 then passed all three public install paths, all six npm provenance
+  statements, the complete eight-crate graph, all checksums and attestations,
+  and both rejection controls. The architecture-named `vibescan-cli` package
+  installs the `vibescan` binary; no alias crate or rename is required.
 - **Track F complete:** F1 establishes Registry ownership, feature/runtime
   consent, parsing, transport isolation, and auditable output shapes; F2 adds
   the two confirmed checks and bounded privacy-aware caching; F3 activates the
@@ -1930,9 +2025,11 @@ Tier 0 behavior.
   Homebrew publication, merged as `e788b1c`, and passed all 19 tagged release
   jobs. All registry identities and the formula are live at `0.1.3`; five
   attestation records exist; the unchanged-tag push was a no-op. G4.3 is
-  complete and G4.4 follows. Do not add a ninth crate
-  or rename `vibescan-cli` merely to satisfy the instruction's literal Cargo
-  command without first amending the architecture.
+  complete. G4.4 then passed all three public installs, verified provenance for
+  all six npm packages, resolved all eight crates, verified the checksum file
+  and five attestations, and proved both tamper controls reject. Track G is
+  complete. The architecture-named `vibescan-cli` remains the Cargo install
+  package and exposes the `vibescan` binary; no ninth alias crate is needed.
 - Active DAST/write probes: prohibited in v1, not merely postponed.
 
 ## Closeout gate for future milestone claims

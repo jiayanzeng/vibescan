@@ -209,15 +209,15 @@ concrete user demand.
 2. **Track H** as a fast-follow — cheap, evidence-gated on data Tier D already
    produced, directly improves the coverage metric. Resolve §6.2's `src/api/`
    question *from the evidence*.
-3. **Track E (Tier 1) is complete.** Track G remains the independent
-   distribution track and touches no scan logic.
+3. **Tracks E (Tier 1) and G (distribution) are complete.** Track G touched no
+   scan logic.
 4. **Track F (registry) is complete:** the resolved §11.1–§11.2 mechanism is
    implemented and the last corpus fixture is live.
 5. **Track I (DAST)** much later, security-design-first, only on real demand.
 
-With F complete, the last gated corpus fixture is live and the precision/recall
-corpus covers the full v1+ detection surface. After G, the tool reaches its
-intended audience. That is the natural "v2" line.
+With F and G complete, the last gated corpus fixture is live, the
+precision/recall corpus covers the full v1+ detection surface, and the tool
+reaches its intended audience. That is the natural "v2" line.
 
 ## Available implementation documents
 
