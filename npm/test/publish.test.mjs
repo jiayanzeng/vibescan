@@ -15,13 +15,13 @@ test("publish plan sends platform packages before the main package with provenan
   const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "vibescan-publish-plan-"));
   try {
     const manifest = {
-      main: "jiayanzeng-vibescan-0.1.0.tgz",
+      main: "jiayanzeng-vibescan-0.1.1.tgz",
       platforms: {},
     };
     fs.writeFileSync(path.join(packagesRoot, manifest.main), "main");
 
     for (const platform of platforms) {
-      const file = `${platform.directory}-0.1.0.tgz`;
+      const file = `${platform.directory}-0.1.1.tgz`;
       manifest.platforms[platform.target] = {
         package: platform.packageName,
         file,

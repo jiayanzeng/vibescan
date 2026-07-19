@@ -14,6 +14,17 @@ The npm publisher must publish the five `@jiayanzeng/vibescan-*` platform
 packages first and `@jiayanzeng/vibescan` last; its print plan must contain only
 these six scoped identities.
 
+## `v0.1.1` release decision (G4.3)
+
+After the complete G4.2 preflight passed on 2026-07-19, the release owner
+authorized the recommended `0.1.1` patch release. This is a distribution-only
+release: it exercises the already-implemented crates.io, scoped npm, and
+Homebrew publishers for the first time and does not change scanner behavior,
+the eight-crate dependency graph, LocalStatic/Network boundaries, target-project
+access, or detection output. Its release notes are therefore the first public
+availability of the existing scanner through eight crates, six
+`@jiayanzeng/vibescan*` npm packages, and the prebuilt Homebrew formula.
+
 ## One-time publisher setup
 
 1. Confirm the eight crates.io names and all six scoped npm names are controlled
