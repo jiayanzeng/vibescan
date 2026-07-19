@@ -1,6 +1,6 @@
 {
   "name": "@jiayanzeng/vibescan-darwin-arm64",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "vibescan binary for macOS arm64",
   "license": "MIT",
   "repository": {
