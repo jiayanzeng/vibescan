@@ -1,8 +1,8 @@
 {
   "name": "@jiayanzeng/vibescan-win32-x64-msvc",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "vibescan binary for Windows x64",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jiayanzeng/vibescan.git"
