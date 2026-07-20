@@ -1,8 +1,8 @@
 {
   "name": "@jiayanzeng/vibescan",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Local-first security scanner for vibe-coded web applications",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jiayanzeng/vibescan.git"
@@ -22,10 +22,10 @@
     "provenance": true
   },
   "optionalDependencies": {
-    "@jiayanzeng/vibescan-darwin-arm64": "0.1.3",
-    "@jiayanzeng/vibescan-darwin-x64": "0.1.3",
-    "@jiayanzeng/vibescan-linux-arm64-musl": "0.1.3",
-    "@jiayanzeng/vibescan-linux-x64-musl": "0.1.3",
-    "@jiayanzeng/vibescan-win32-x64-msvc": "0.1.3"
+    "@jiayanzeng/vibescan-darwin-arm64": "0.2.0",
+    "@jiayanzeng/vibescan-darwin-x64": "0.2.0",
+    "@jiayanzeng/vibescan-linux-arm64-musl": "0.2.0",
+    "@jiayanzeng/vibescan-linux-x64-musl": "0.2.0",
+    "@jiayanzeng/vibescan-win32-x64-msvc": "0.2.0"
   }
 }

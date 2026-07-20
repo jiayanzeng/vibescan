@@ -9,6 +9,11 @@ tree and local git object store, classifies Supabase keys, renders local reports
 and keeps network probing disabled unless the binary is built with the `network`
 feature and the user explicitly opts in.
 
+> **Licensing:** vibescan is **source-available, not open source**. It is free
+> for **noncommercial use** under the PolyForm Noncommercial License 1.0.0.
+> **Commercial (for-profit) use requires a separate commercial license.** See
+> [License](#license) below.
+
 ## Safety Model
 
 - LocalStatic crates do not use network clients.
@@ -41,6 +46,9 @@ The project is a Cargo workspace with these crates:
 - `vibescan-git`: LocalStatic working-tree and git-history collection.
 - `vibescan-secrets`: LocalStatic secret-detection substrate.
 - `vibescan-supabase`: Supabase key classification and domain intelligence.
+- `vibescan-registry`: independent Registry-egress dependency-integrity class
+  (post-v1, opt-in under the `registry` feature; nearest parent of its own
+  transport).
 - `vibescan-report`: JSON, SARIF, TTY, and HTML rendering.
 - `vibescan-types`: shared data contracts.
 
@@ -274,6 +282,46 @@ setting is `true`, the current process remains LocalStatic unless a feature-
 enabled binary is invoked with the corresponding explicit
 `--rls-tier0-read-probe`, `--rls-tier1-introspect`, or `--registry-checks` flag.
 The newcomer setting remains inert because that heuristic is deferred.
+
+## License
+
+Copyright (c) 2026 Yanzeng Jia. All rights reserved.
+
+vibescan is **source-available software, not open source.** The source is
+published so anyone can read, audit, learn from, and use it for **noncommercial
+purposes**, but it may **not** be used commercially for profit without a separate
+commercial license.
+
+- **License:** [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+  (SPDX: `PolyForm-Noncommercial-1.0.0`). Full text in [LICENSE](LICENSE).
+- **Plain-language guide:** see the [Licensing FAQ](FAQ.md) for who is free vs.
+  who needs a commercial license, in everyday terms.
+- **Free for noncommercial use.** You may use, copy, modify, and redistribute
+  vibescan for any noncommercial purpose — personal projects, study, research,
+  and use by charitable, educational, public-research, public-safety, and
+  government organizations — under the terms in [LICENSE](LICENSE).
+- **Commercial use requires a commercial license.** Using vibescan for
+  for-profit commercial advantage (including inside a business, in a paid product
+  or service, or as part of paid consulting) requires a separate commercial
+  license from the copyright holder. To obtain one, open an issue or contact the
+  maintainer via the project's GitHub page:
+  <https://github.com/jiayanzeng/vibescan>.
+- **This CLI is free; a future desktop application is a separate paid product.**
+  The command-line tool in this repository is offered under the noncommercial
+  terms above. A planned desktop version is a separate, commercially-licensed
+  product and is not covered by this license.
+
+### Note on older versions and "open source"
+
+The PolyForm Noncommercial license is intentionally **not** an OSI-approved
+open-source license: the Open Source Definition forbids restricting commercial
+use, so a license that requires a commercial license for for-profit use cannot
+be called "open source." "Source-available" is the accurate term.
+
+Versions **0.1.0 through 0.1.3** were published under the **MIT License**. An MIT
+grant cannot be revoked, so those versions remain usable under MIT by anyone who
+already has them. The PolyForm Noncommercial terms apply to versions released
+**after 0.1.3**.
 
 ## Repository Notes
 
