@@ -40,3 +40,7 @@ Thumbs.db
 *.tar.gz
 *.tgz
 *.zip
+
+# Documentation files
+docs/vibescan-relicensing-guide.md
+docs/vibescan-relicensing-tasks.md
