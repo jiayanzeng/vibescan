@@ -101,3 +101,29 @@ Versions **0.1.0 through 0.1.3** were published under the **MIT License**, and a
 grant can't be taken back — so those specific versions stay usable under MIT for
 anyone who already has them, including commercially. The PolyForm Noncommercial terms
 apply to versions released **after 0.1.3**.
+
+## What counts as "commercial use"? (Detailed definition)
+
+Commercial use is about who benefits and in what context — not whether you resell the
+software. You do not have to sell, sublicense, host, or make money from vibescan itself for
+your use to be commercial. Use is commercial if it is in furtherance of, or provides a
+commercial advantage to, a for-profit business or other commercial activity.
+
+Commercial use includes, without limitation:
+- Running vibescan on a for-profit company's own code or infrastructure — including
+  internal security audits, secret-exposure scans, and CI/CD checks — to support that
+  company's business or operations.
+- Any use by an employee, contractor, or agent of a for-profit entity in the course of
+  their work for that entity.
+- Using vibescan to perform paid work (security audits, consulting, managed services) for
+  a third party.
+- Building vibescan into a product or service you provide to others, whether or not for a
+  fee.
+
+Personal, hobby, study, and research use with no anticipated commercial application, and
+use by charitable, educational, public-research, public-safety/health, environmental, and
+government organizations, remain free under the noncommercial license.
+
+"We only use it internally and don't monetize the software" is not a noncommercial use:
+internal use by a for-profit company to protect or improve its commercial systems is a
+commercial application and requires a commercial license.

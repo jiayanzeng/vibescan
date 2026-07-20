@@ -42,5 +42,9 @@ Thumbs.db
 *.zip
 
 # Documentation files
+vibescan-codex-release-workflow.md
 docs/vibescan-relicensing-guide.md
 docs/vibescan-relicensing-tasks.md
+
+# Shelved legal drafts (kept local, not in force)
+/legal/
