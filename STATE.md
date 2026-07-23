@@ -1,6 +1,6 @@
 # vibescan State
 
-Reviewed: 2026-07-19
+Reviewed: 2026-07-23
 
 Current released implementation checkpoint: `e788b1c` on `main`, with annotated
 tag `v0.1.3` peeling to that exact merge (Tasks G4.0–G4.4 and Track G complete).
@@ -125,6 +125,27 @@ transport-free.
 
 ## Current worktree context
 
+Track H began on `main` at `c707ce6`. The working tree contains the
+uncommitted H1–H3 implementation, fixtures, specification, and status updates.
+The user-owned untracked documents `docs/moltbook-teardown.md`,
+`docs/vibescan-trackH-instructions.md`, and
+`docs/vibescan-trackI-security-design.md` were present at task start. The
+Track H instruction document was updated only after the user's explicit
+closeout request; the other two remain untouched. H1 makes only `src/api/`
+content-sensitive: explicit server markers classify it as `ServerOnly`, while
+their absence classifies it as `ClientReachable`; bare `api/` and Next.js
+route-handler roots keep their established server behavior. H2 adds the
+no-server-signal `src/api/` corpus fixture, synchronizes the independent
+real-repository oracle, and records 15 TP, 0 FP, 0 FN, precision 1.0, recall
+1.0, and classification coverage 7/9. A mocked Network golden proves that the
+uncommitted
+client-reachable key drives rule 1 with same-project anonymous read exposure
+and that the composite absorbs both constituents. No live Network request or
+target-project write occurred. H3 now aligns §6.2 with that implementation and
+records the evidence-backed resolution in §17.9. Track H is complete; Track I
+remains a separate security-design-first follow-up behind the §7.4 ownership
+gate.
+
 The checkout was clean at `1dfa85c` when Task G1 began. Pull request
 [#1](https://github.com/jiayanzeng/vibescan/pull/1) merged the initial G1
 implementation (`1225975`) and its test-fixture portability correction
@@ -229,7 +250,7 @@ history file, and this file's matrix, gaps, and next-step sections updated to ma
 | Shared data model | Phase 1 identity complete | `ContentId`, `UnitLocation`, `ScannableUnit.locations`, and `UnitRef.locations` form one canonical occurrence model; singular competing fields were removed. |
 | Content handling | Substantially implemented | Binary/size skips, ignore layers, forced real-env/client-bundle scanning, inline allow, and commit allowlists exist. Historical paths intentionally use current ignore state. |
 | Scan pipeline | Partial | All five phases exist and exact `ContentId` lookup now binds enrichment to the candidate revision. Units/candidates/findings remain materialized rather than streamed. |
-| Location classification | Verified for covered Tier C and Phase 1 cases | Whole-segment monorepo matching, server-first precedence, substring controls, and identical-content server/browser occurrence retention are tested. |
+| Location classification | Track H complete | Whole-segment monorepo matching, server-first precedence, substring controls, and identical-content server/browser occurrence retention remain tested. Only `src/api/` is content-sensitive: explicit server markers produce `ServerOnly`, and no marker produces `ClientReachable`; bare `api/` and Next.js route roots remain server-only. The independent real-repository oracle treats ambiguous `src/api/` as non-inferable from path alone. Architecture §6.2 and resolution §17.9 now match the H1 classifier, H2 fixture, and rule-1 regression. |
 | Generic secret substrate | Phase 5 application contract verified | Keyword prefilter, regex, entropy, allowlists, attribution, and required provider families exist. Repository-configured custom rules now append to embedded rules/allowlists; duplicate IDs are rejected and mandatory defaults remain active. |
 | Git walker | Partial | Discovery, all refs, budgets, changed blobs, working tree, edge warnings, and full SHA-256 `ContentId` grouping exist. Cross-path locations/classes and same-path provenance are retained deterministically; output remains a `Vec`, not a stream. |
 | Supabase key classification | Partial | New/legacy classes, exact-revision project extraction, and conservative same-fingerprint project enrichment exist. Initial new-format project discovery remains same-unit only, and no user-supplied project/key pair exists. |
@@ -240,7 +261,7 @@ history file, and this file's matrix, gaps, and next-step sections updated to ma
 | Reporting | Verified through F2 scope | JSON, SARIF, TTY, and HTML include redacted findings, Network action scope evidence, Registry name-egress disclosure, locations, history context, collection/dedup counters, a derived dedup ratio, exit gates, and deterministic snapshots. A full-pipeline integration test proves raw candidate material reaches neither any renderer nor serialized `ScanResult`; §17.3 permits no full-match mode. Protected actions do not affect finding statistics or gates. |
 | CLI/config | Phase 5 + F1 complete | LocalStatic precedence remains defaults < repository TOML < explicitly supplied CLI values. The independent feature-gated `--registry-checks` runtime confirmation cannot be enabled by repository config and does not enable Tier 0 or Tier 1. Named paths retain repository-root handling and operational failures. |
 | Security/nonfunctional | Partial overall; Track G complete | Pure-Rust/default transport boundaries remain enforced. The hosted `v0.1.0` release proves the exact five-target matrix, musl-only Linux artifacts, checksums, attestations, and static-link verification. G2 adds the ships-only npm wrapper and green five-platform `npx` matrix. G3 implements fail-closed Cargo/npm publishers, OIDC provenance, and the prebuilt formula. G4.0 selects controlled `@jiayanzeng/vibescan`; G4.1 records the owner-controlled bootstrap; G4.2 passes the reversible preflight. After immutable `v0.1.1` and partial `v0.1.2` evidence, PR #9's `v0.1.3` recovery passed all 19 jobs with strict crates.io → npm → Homebrew sequencing. G4.4 then verified all three installs, six npm provenance statements, all eight crates, six checksums, five attestations, and both rejection controls. Track G is complete. |
-| Testing strategy | v1 closeout + Tier E + Track F complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the Track F corpus records 14 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 0.75. No capability-gated corpus fixture remains. |
+| Testing strategy | Track H complete | Exact goldens, clean control, report snapshots, four-way boundary checks, mocked Tier 0/Tier 1/Registry fixtures, source/cache mocks, the Tier D1 scripted real-repository path, committed metrics, deterministic performance counters, and end-to-end redaction pins exist. AstroScout supplied the first genuine D1 coverage record (100.00%, 3 findings, 1 project); the H2 corpus records 15 TP, 0 FP, 0 FN, precision 1.0, recall 1.0, and classification coverage 7/9. The new fixture is live in the offline corpus and has a separate mocked Network rule-1 regression; §17.9 explains why coverage alone cannot detect a wrong non-`Unknown` class. No capability-gated corpus fixture remains. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner was found. |
 
 ## Tier C status
@@ -440,10 +461,12 @@ Tier 0 behavior.
 2. **Tier D3 complete:** the generated fixture gates exact paths, blobs, unique
    contents, materialized units, truncation, and the derived dedup ratio while
    recording but never gating `duration_ms`.
-3. **Tier D4 complete:** every output format and serialized `ScanResult` is
-   pinned to redacted evidence; §17 status debt is retired; gated fixtures name
-   their actual capability. The `src/api/` classification remains unchanged
-   pending stronger real-repository evidence.
+3. **Tier D4 and Track H complete:** every
+   output format and serialized `ScanResult` is pinned to redacted evidence;
+   §17 status debt is retired; gated fixtures name their actual capability.
+   H1's content-sensitive `src/api/` classifier and H2's fixture, independent
+   oracle, metrics baseline, and mocked rule-1 branch are implemented. H3 aligns
+   authoritative §6.2 and resolves the former open question in §17.9.
 4. Add a canonical full-verification script or prominently document the exact
    root `AGENTS.md` matrix. Keep Tier D1's real-repository leg separate and
    explicitly fixture/Network-gated.

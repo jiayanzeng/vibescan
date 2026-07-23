@@ -151,7 +151,9 @@ Evaluate in this order (first match wins), so that server-side signals override 
 1. **`ServerOnly` (decisive server signals):**
    - basename is `.env` or `.env.*` at any depth (a co-located `.env.example` / `.env.sample` is still allowlisted by §5 and never reaches here);
    - an `api/` segment nested directly under an app/pages root (`app/api/`, `pages/api/`, `src/app/api/`, `src/pages/api/`) — a Next.js route handler is server code even though `app/` is otherwise client;
-   - a `server/` segment, `.next/server/`, `supabase/functions/`, or a top-of-package `api/`/`src/api/` server root, at any depth.
+   - a `server/` segment, `.next/server/`, or `supabase/functions/`;
+   - a **bare** top-of-package `api/` root (`api/…` or `apps|packages|services/<pkg>/api/…`), at any depth;
+   - a `src/api/` root (`src/api/…` or `apps|packages|services/<pkg>/src/api/…`) **only when the file content carries a server-runtime signal**: a `"use server"` or `'use server'` directive, a `next/server` import/require specifier, or a `node:` import/require specifier. This is the one location-classification rule that reads file content rather than path alone. Without one of those signals, a `src/api/` module under a frontend `src/` tree is a browser-shipped client wrapper and is `ClientReachable`. Next.js route handlers (`app/api/`, `pages/api/`, `src/app/api/`, and `src/pages/api/`) remain unconditionally `ServerOnly` under the preceding rule.
 2. **`ClientReachable` (browser-shipped roots):** `public/`, `app/`, `pages/`, `src/app/`, `src/pages/`, `src/components/`, `dist/`, `build/`, `out/`, `.next/static/`, `.svelte-kit/`, or a `/client/` segment / `.client.` infix — at any depth.
 3. Otherwise `Unknown`.
 
@@ -627,15 +629,31 @@ base severity: an exposed key reaching an RLS-off table **annotates an
 already-Critical finding rather than escalating it** — which is what E3's chain
 assertion must check.
 
-### Open question (deliberately not resolved here)
+**17.9 — `src/api/` uses content-signal disambiguation (§6.2, resolved
+2026-07-23).** The former open question offered option 3: keep bare
+top-of-package `api/` roots decisively `ServerOnly`, but classify each
+`src/api/` file from affirmative server-runtime content signals. That option is
+now adopted. A `src/api/` file carrying `"use server"`/`'use server'`, a
+`next/server` import/require, or a `node:` import/require is `ServerOnly`;
+without those signals it is `ClientReachable`. Per-file measurement replaces
+population-frequency guessing, satisfying the original “measure it, don't
+guess” requirement without pretending one repository can establish how all
+frameworks use the directory.
 
-**§6.2 `src/api/` → `ServerOnly`.** The segment rules treat a package-level
-`api/` or `src/api/` root as a decisive server signal. In many Vite/Next
-frontends, `src/api/` is instead a *client-side* wrapper module — it ships to the
-browser and is exactly where a publishable key and a table name live together.
-The rule is spec-conformant as written and the `(or committed)` branch of §12
-rule 1 keeps the chain firing for committed source, but the reported
-`location_class` would be wrong, and the classification-coverage metric would look
-healthier than it is. Do not change the rule on intuition. Measure it: the real-
-repository validation (§14) and the coverage metric exist precisely to produce the
-evidence, and this question is revisited when that evidence lands.
+AstroScout remains the first genuine real-repository validation record, but it
+exercises `.env` and browser-bundle locations rather than `src/api/`; using it
+to justify a blanket path-only flip would therefore have been intuition, not
+evidence. The decision is instead pinned by the
+`src-api-client-wrapper` live fixture, the complete classifier truth table, and
+the mocked §12 rule-1 classification-branch regression, while additional real
+repositories continue to feed the §14 D1 validation path. The Rust classifier
+and the independent Python real-repository oracle are the two sites of this
+truth and must move in lockstep: the classifier reads content, while the
+path-only oracle treats `src/api/` as ambiguous and declines to assert a class.
+
+Classification coverage alone cannot reveal the former defect because
+`ServerOnly` was a wrong class, not `Unknown`. That is why the rule-1
+regression separately proves that an uncommitted, no-server-signal `src/api/`
+publishable key is `ClientReachable` and can drive the same-project exposed-read
+composite. §6.2 is the normative rule; the fixture, truth table, oracle
+self-tests, and Network mock are its executable evidence.

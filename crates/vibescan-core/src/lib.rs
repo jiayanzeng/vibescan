@@ -2762,6 +2762,48 @@ mod tests {
     }
 
     #[test]
+    fn coalescing_prefers_bundle_over_signal_bearing_src_api_copy() {
+        let repo = TestRepo::new();
+        repo.git(["init"]);
+        let url = "https://abcdefghijklmnopqrst.supabase.co";
+        let key = "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        repo.write(
+            "src/api/server.ts",
+            &format!("\"use server\";\nconst url = '{url}';\nconst key = '{key}';\n"),
+        );
+        repo.write(
+            "dist/bundle.js",
+            &format!("const url = '{url}';\nconst key = '{key}';\n"),
+        );
+
+        let result = scan(
+            repo.path(),
+            ScanConfig {
+                include_history: false,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .expect("scan succeeds");
+        let findings = publishable_key_findings(&result);
+
+        assert_eq!(findings.len(), 1);
+        let finding = findings[0];
+        assert!(finding.locations.iter().any(|location| {
+            location.path.0 == "src/api/server.ts"
+                && location.location_class == LocationClass::ServerOnly
+        }));
+        assert!(finding.locations.iter().any(|location| {
+            location.path.0 == "dist/bundle.js"
+                && location.location_class == LocationClass::ClientReachable
+        }));
+        assert_eq!(
+            max_location_class(&finding.locations),
+            LocationClass::ClientReachable
+        );
+    }
+
+    #[test]
     fn identical_content_at_server_and_browser_paths_retains_both_locations() {
         let repo = TestRepo::new();
         repo.git(["init"]);

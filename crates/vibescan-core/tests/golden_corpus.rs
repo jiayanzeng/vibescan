@@ -301,6 +301,94 @@ fn monorepo_bundle_key_can_drive_exposed_public_key_chain() {
     ));
 }
 
+#[test]
+#[cfg(feature = "network")]
+fn src_api_client_wrapper_drives_rule_one_without_commit_provenance() {
+    let fixture = LiveFixture {
+        name: "src-api-client-wrapper",
+        history: false,
+    };
+    let repo = materialize_fixture(&fixture);
+    let result = scan(
+        &repo,
+        ScanConfig {
+            include_history: false,
+            severity_gate: Severity::Info,
+            ..ScanConfig::default()
+        },
+    )
+    .expect("src/api client-wrapper fixture scans");
+    let key = result
+        .findings
+        .iter()
+        .find(|finding| matches!(finding.evidence, Evidence::SupabaseKey { .. }))
+        .cloned()
+        .expect("fixture emits Supabase key finding");
+
+    assert_eq!(key.severity, Severity::Info);
+    assert!(key.locations.iter().any(|location| {
+        location.path.0 == "src/api/supabase-client.ts"
+            && location.location_class == LocationClass::ClientReachable
+    }));
+    assert!(key.locations.iter().all(|location| {
+        matches!(&location.provenance, Provenance::WorkingTree)
+            && location
+                .additional_provenance
+                .iter()
+                .all(|provenance| matches!(provenance, Provenance::WorkingTree))
+    }));
+
+    let client = MockPostgrest::new([
+        (
+            "https://abcdefghijklmnopqrst.supabase.co/rest/v1/",
+            RlsHttpResponse {
+                status: 403,
+                body: r#"{"message":"root forbidden"}"#.to_owned(),
+            },
+        ),
+        (
+            "https://abcdefghijklmnopqrst.supabase.co/rest/v1/profiles?select=*&limit=1",
+            RlsHttpResponse {
+                status: 200,
+                body: r#"[{}]"#.to_owned(),
+            },
+        ),
+    ]);
+    let output = probe_tier0_read_with_client(
+        &client,
+        &Tier0RlsProbeInput {
+            project: synthetic_project(),
+            public_key: "sb_publishable_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789".to_owned(),
+            key_location: key.locations[0].clone(),
+            candidate_tables: BTreeSet::from(["profiles".to_owned()]),
+        },
+    )
+    .expect("mocked probe succeeds");
+    assert_eq!(output.findings.len(), 1);
+    let rls = output.findings[0].clone();
+
+    let correlation = correlate_findings(&[key.clone(), rls.clone()])
+        .into_iter()
+        .find(|finding| {
+            matches!(
+                &finding.evidence,
+                Evidence::Correlation { rule_id, .. }
+                    if rule_id == &CorrelationRuleId("exposed-public-key-chain".to_owned())
+            )
+        })
+        .expect("client classification fires rule 1 without commit provenance");
+    assert_eq!(correlation.severity, Severity::Critical);
+    assert_eq!(
+        correlation.related.iter().cloned().collect::<BTreeSet<_>>(),
+        BTreeSet::from([key.id.clone(), rls.id.clone()])
+    );
+
+    let mut findings = vec![key, rls, correlation];
+    absorb_exposed_public_key_constituents_for_test(&mut findings);
+    assert_eq!(findings.len(), 1, "the composite absorbs both constituents");
+    assert_eq!(findings[0].category, Category::Correlation);
+}
+
 #[cfg(any(not(feature = "network"), not(feature = "registry")))]
 fn ignored_feature_fixture(name: &str) {
     let manifest = fixture_dir(name).join("expected.json");
@@ -329,7 +417,7 @@ fn assert_tier1_fixture(name: &str) {
 }
 
 fn include_location_classes(fixture: &LiveFixture) -> bool {
-    fixture.name == "monorepo-layout"
+    matches!(fixture.name, "monorepo-layout" | "src-api-client-wrapper")
 }
 
 fn manifest_from_result(result: &ScanResult, include_location_classes: bool) -> GoldenManifest {

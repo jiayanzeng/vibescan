@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, scan};
 use vibescan_types::{Category, Evidence, Finding, LocationClass, Severity};
 
-const CORPUS_VERSION: &str = "tier-f3-live-v1";
+const CORPUS_VERSION: &str = "tier-h2-live-v1";
 const CLEAN_CONTROL: &str = "clean-control";
 const OFFLINE_COMPOSITE: &str = "offline-composite-exposed-public-key-chain";
 #[cfg(not(feature = "registry"))]
@@ -110,8 +110,8 @@ struct FixtureMetrics {
 fn live_corpus_metrics_match_committed_baseline() {
     let report = compute_report();
     assert_eq!(
-        report.totals.coverage, 0.75,
-        "classification coverage should be exactly 6/8: Tier 1 adds three classified policy advisories while the two Unknown findings remain the intentionally generic src/history.ts and packages/nested/ignored-but-scanned/secret.ts paths"
+        report.totals.coverage, 0.777_777_777_777_777_8,
+        "classification coverage should be exactly 7/9: the src/api client-wrapper adds one classified key while the two Unknown findings remain the intentionally generic src/history.ts and packages/nested/ignored-but-scanned/secret.ts paths"
     );
 
     let path = baseline_path();

@@ -1,12 +1,12 @@
 {
-  "corpus_version": "tier-f3-live-v1",
+  "corpus_version": "tier-h2-live-v1",
   "totals": {
-    "tp": 14,
+    "tp": 15,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
     "recall": 1.0,
-    "coverage": 0.75
+    "coverage": 0.7777777777777778
   },
   "per_fixture": {
     "clean-control": {
@@ -73,6 +73,13 @@
       "fn": 0
     },
     "rls-off-table": {
+      "expected": 1,
+      "observed": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0
+    },
+    "src-api-client-wrapper": {
       "expected": 1,
       "observed": 1,
       "tp": 1,

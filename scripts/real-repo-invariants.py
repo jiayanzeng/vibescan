@@ -147,7 +147,7 @@ def _has_segments(segments: list[str], needle: tuple[str, ...]) -> bool:
 
 
 def _has_package_server_root(segments: list[str]) -> bool:
-    if segments[:1] == ["api"] or segments[:2] == ["src", "api"]:
+    if segments[:1] == ["api"]:
         return True
     package_roots = {"apps", "packages", "services"}
     for index, segment in enumerate(segments):
@@ -157,12 +157,19 @@ def _has_package_server_root(segments: list[str]) -> bool:
             return True
         if index + 2 < len(segments) and segments[index + 2] == "api":
             return True
-        if (
-            index + 3 < len(segments)
-            and segments[index + 2 : index + 4] == ["src", "api"]
-        ):
-            return True
     return False
+
+
+def _is_src_api_root(segments: list[str]) -> bool:
+    if segments[:2] == ["src", "api"]:
+        return True
+    package_roots = {"apps", "packages", "services"}
+    return any(
+        segment in package_roots
+        and index + 3 < len(segments)
+        and segments[index + 2 : index + 4] == ["src", "api"]
+        for index, segment in enumerate(segments)
+    )
 
 
 def _expected_location_class(path: str) -> str | None:
@@ -181,6 +188,8 @@ def _expected_location_class(path: str) -> str | None:
         or _has_package_server_root(segments)
     ):
         return "server_only"
+    if _is_src_api_root(segments):
+        return None
     if (
         any(segment in segments for segment in ("public", "app", "pages"))
         or _has_segments(segments, ("src", "app"))
@@ -421,6 +430,17 @@ def run_self_tests() -> None:
     unknown["locations"][0]["location_class"] = "unknown"
     _expect_failure("classifiable Unknown", {"findings": [unknown]}, "classifiable path")
 
+    assert _expected_location_class("src/api/client.ts") is None
+    assert _expected_location_class("packages/web/src/api/client.ts") is None
+    assert _expected_location_class("api/handler.ts") == "server_only"
+
+    ambiguous = copy.deepcopy(sample)
+    ambiguous["locations"][0] = {
+        "path": "packages/web/src/api/client.ts",
+        "location_class": "unknown",
+    }
+    validate({"findings": [ambiguous]})
+
     duplicate_probe = {
         "findings": [],
         "scope": {
@@ -458,7 +478,7 @@ def run_self_tests() -> None:
         {"findings": [sample]}, require_classification_coverage=True
     )
     assert summary.coverage_percent == 100.0
-    print("REALREPO_INVARIANTS self-test ok cases=7")
+    print("REALREPO_INVARIANTS self-test ok cases=9")
 
 
 def _parser() -> argparse.ArgumentParser:

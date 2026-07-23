@@ -631,17 +631,17 @@ fn push_content(
     let content_id = content_id(&content);
     collector.push(ScannableUnit {
         content_id,
-        content,
         locations: vec![UnitLocation {
-            location_class: classify_location(&path.0),
+            location_class: classify_location(&path.0, &content),
             path,
             provenance,
             additional_provenance: Vec::new(),
         }],
+        content,
     });
 }
 
-fn classify_location(path: &str) -> LocationClass {
+fn classify_location(path: &str, content: &[u8]) -> LocationClass {
     let lower = path.to_ascii_lowercase();
     let segments = lower
         .split('/')
@@ -657,7 +657,8 @@ fn classify_location(path: &str) -> LocationClass {
         || segments.contains(&"server")
         || path_has_segments(&segments, &[".next", "server"])
         || path_has_segments(&segments, &["supabase", "functions"])
-        || path_has_package_server_root(&segments)
+        || is_bare_api_package_root(&segments)
+        || (is_src_api_root(&segments) && has_server_runtime_signal(content))
     {
         return LocationClass::ServerOnly;
     }
@@ -675,6 +676,7 @@ fn classify_location(path: &str) -> LocationClass {
         || segments.contains(&".svelte-kit")
         || segments.contains(&"client")
         || basename.contains(".client.")
+        || is_src_api_root(&segments)
     {
         return LocationClass::ClientReachable;
     }
@@ -692,20 +694,94 @@ fn path_has_segments(path: &[&str], needle: &[&str]) -> bool {
         && path.windows(needle.len()).any(|window| window == needle)
 }
 
-fn path_has_package_server_root(path: &[&str]) -> bool {
+fn is_bare_api_package_root(path: &[&str]) -> bool {
     path.starts_with(&["api"])
-        || path.starts_with(&["src", "api"])
         || path.windows(2).any(|window| {
             matches!(window[0], "apps" | "packages" | "services") && window[1] == "api"
         })
         || path.windows(3).any(|window| {
             matches!(window[0], "apps" | "packages" | "services") && window[2] == "api"
         })
+}
+
+fn is_src_api_root(path: &[&str]) -> bool {
+    path.starts_with(&["src", "api"])
         || path.windows(4).any(|window| {
             matches!(window[0], "apps" | "packages" | "services")
                 && window[2] == "src"
                 && window[3] == "api"
         })
+}
+
+fn has_server_runtime_signal(content: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(content);
+    text.contains("\"use server\"")
+        || text.contains("'use server'")
+        || quoted_module_specifiers(&text).any(|specifier| {
+            is_import_or_require_specifier(&text, specifier.start)
+                && (specifier.value == "next/server" || specifier.value.starts_with("node:"))
+        })
+}
+
+struct QuotedSpecifier<'a> {
+    start: usize,
+    value: &'a str,
+}
+
+fn quoted_module_specifiers(text: &str) -> impl Iterator<Item = QuotedSpecifier<'_>> {
+    let bytes = text.as_bytes();
+    let mut offset = 0;
+    std::iter::from_fn(move || {
+        while offset < bytes.len() {
+            let quote = bytes[offset];
+            if quote != b'\'' && quote != b'"' {
+                offset += 1;
+                continue;
+            }
+
+            let start = offset;
+            offset += 1;
+            let value_start = offset;
+            while offset < bytes.len() {
+                match bytes[offset] {
+                    b'\\' => offset = (offset + 2).min(bytes.len()),
+                    byte if byte == quote => {
+                        let value_end = offset;
+                        offset += 1;
+                        return Some(QuotedSpecifier {
+                            start,
+                            value: &text[value_start..value_end],
+                        });
+                    }
+                    _ => offset += 1,
+                }
+            }
+        }
+        None
+    })
+}
+
+fn is_import_or_require_specifier(text: &str, quote_start: usize) -> bool {
+    let prefix = text[..quote_start].trim_end();
+    if ends_with_identifier(prefix, "from") || ends_with_identifier(prefix, "import") {
+        return true;
+    }
+
+    let Some(call_prefix) = prefix.strip_suffix('(') else {
+        return false;
+    };
+    let call_prefix = call_prefix.trim_end();
+    ends_with_identifier(call_prefix, "import") || ends_with_identifier(call_prefix, "require")
+}
+
+fn ends_with_identifier(text: &str, identifier: &str) -> bool {
+    let Some(prefix) = text.strip_suffix(identifier) else {
+        return false;
+    };
+    prefix
+        .chars()
+        .next_back()
+        .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '$')
 }
 
 fn is_file_entry(entry: &DirEntry) -> bool {
@@ -1505,74 +1581,152 @@ mod tests {
         let cases = [
             (
                 "apps/web/.next/static/chunks/x.js",
+                "",
                 LocationClass::ClientReachable,
             ),
-            ("apps/api/.env", LocationClass::ServerOnly),
-            ("apps/web/.env.local", LocationClass::ServerOnly),
+            ("apps/api/.env", "", LocationClass::ServerOnly),
+            ("apps/web/.env.local", "", LocationClass::ServerOnly),
             (
                 "packages/ui/src/components/Btn.tsx",
+                "",
                 LocationClass::ClientReachable,
             ),
-            ("services/api/index.ts", LocationClass::ServerOnly),
-            ("services/api/src/api/handler.ts", LocationClass::ServerOnly),
-            ("apps/web/app/api/route.ts", LocationClass::ServerOnly),
-            ("apps/web/app/page.tsx", LocationClass::ClientReachable),
+            ("services/api/index.ts", "", LocationClass::ServerOnly),
+            (
+                "services/api/src/api/handler.ts",
+                "import { NextRequest } from \"next/server\";",
+                LocationClass::ServerOnly,
+            ),
+            (
+                "packages/web/src/api/client.ts",
+                "export const load = () => fetch('/rest/v1/profiles');",
+                LocationClass::ClientReachable,
+            ),
+            ("apps/web/app/api/route.ts", "", LocationClass::ServerOnly),
+            ("apps/web/app/page.tsx", "", LocationClass::ClientReachable),
             (
                 "apps/web/.next/server/vendor-chunks/x.js",
+                "",
                 LocationClass::ServerOnly,
             ),
         ];
 
-        for (path, expected) in cases {
-            assert_eq!(classify_location(path), expected, "{path}");
+        for (path, content, expected) in cases {
+            assert_eq!(
+                classify_location(path, content.as_bytes()),
+                expected,
+                "{path}"
+            );
         }
     }
 
     #[test]
     fn classify_location_uses_segments_not_substrings() {
         let cases = [
-            ("staticassets/x.js", LocationClass::Unknown),
-            ("apps/web/src/myenv.ts", LocationClass::Unknown),
-            ("apps/foo/api-docs/readme.md", LocationClass::Unknown),
+            ("staticassets/x.js", "", LocationClass::Unknown),
+            ("apps/web/src/myenv.ts", "", LocationClass::Unknown),
+            ("apps/foo/api-docs/readme.md", "", LocationClass::Unknown),
             (
                 "apps/web/app/foo/api/route.ts",
+                "",
                 LocationClass::ClientReachable,
             ),
         ];
 
-        for (path, expected) in cases {
-            assert_eq!(classify_location(path), expected, "{path}");
+        for (path, content, expected) in cases {
+            assert_eq!(
+                classify_location(path, content.as_bytes()),
+                expected,
+                "{path}"
+            );
         }
     }
 
     #[test]
     fn classify_location_preserves_flat_repo_behavior() {
         let cases = [
-            ("public/config.js", LocationClass::ClientReachable),
-            ("app/page.tsx", LocationClass::ClientReachable),
-            ("pages/index.tsx", LocationClass::ClientReachable),
-            ("src/app/page.tsx", LocationClass::ClientReachable),
-            ("src/pages/index.tsx", LocationClass::ClientReachable),
-            ("src/components/Button.tsx", LocationClass::ClientReachable),
-            ("src/client/widget.ts", LocationClass::ClientReachable),
-            ("src/Button.client.tsx", LocationClass::ClientReachable),
-            ("dist/bundle.js", LocationClass::ClientReachable),
-            ("build/assets/app.js", LocationClass::ClientReachable),
-            (".next/static/chunks/x.js", LocationClass::ClientReachable),
-            (".env", LocationClass::ServerOnly),
-            (".env.local", LocationClass::ServerOnly),
-            ("server/index.ts", LocationClass::ServerOnly),
+            ("public/config.js", "", LocationClass::ClientReachable),
+            ("app/page.tsx", "", LocationClass::ClientReachable),
+            ("pages/index.tsx", "", LocationClass::ClientReachable),
+            ("src/app/page.tsx", "", LocationClass::ClientReachable),
+            ("src/pages/index.tsx", "", LocationClass::ClientReachable),
+            (
+                "src/components/Button.tsx",
+                "",
+                LocationClass::ClientReachable,
+            ),
+            ("src/client/widget.ts", "", LocationClass::ClientReachable),
+            ("src/Button.client.tsx", "", LocationClass::ClientReachable),
+            ("dist/bundle.js", "", LocationClass::ClientReachable),
+            ("build/assets/app.js", "", LocationClass::ClientReachable),
+            (
+                ".next/static/chunks/x.js",
+                "",
+                LocationClass::ClientReachable,
+            ),
+            (".env", "", LocationClass::ServerOnly),
+            (".env.local", "", LocationClass::ServerOnly),
+            ("server/index.ts", "", LocationClass::ServerOnly),
             (
                 "supabase/functions/ping/index.ts",
+                "",
                 LocationClass::ServerOnly,
             ),
-            ("api/handler.ts", LocationClass::ServerOnly),
-            ("src/api/handler.ts", LocationClass::ServerOnly),
-            ("src/lib/util.ts", LocationClass::Unknown),
+            ("api/handler.ts", "", LocationClass::ServerOnly),
+            (
+                "apps/api/index.ts",
+                "export const client = true;",
+                LocationClass::ServerOnly,
+            ),
+            (
+                "src/api/supabase.ts",
+                "export const load = () => fetch('/rest/v1/profiles');",
+                LocationClass::ClientReachable,
+            ),
+            (
+                "src/api/handler.ts",
+                "import { NextRequest } from \"next/server\";",
+                LocationClass::ServerOnly,
+            ),
+            (
+                "src/api/db.ts",
+                "import \"node:fs\";",
+                LocationClass::ServerOnly,
+            ),
+            (
+                "src/api/actions.ts",
+                "'use server';",
+                LocationClass::ServerOnly,
+            ),
+            (
+                "src/api/require-db.ts",
+                "const crypto = require('node:crypto');",
+                LocationClass::ServerOnly,
+            ),
+            (
+                "src/api/env-client.ts",
+                "const url = process.env.NEXT_PUBLIC_SUPABASE_URL;",
+                LocationClass::ClientReachable,
+            ),
+            (
+                "src/api/node-label.ts",
+                "const runtime = 'node:fs';",
+                LocationClass::ClientReachable,
+            ),
+            (
+                "src/api/helper.ts",
+                "const runtime = myrequire('node:fs');",
+                LocationClass::ClientReachable,
+            ),
+            ("src/lib/util.ts", "", LocationClass::Unknown),
         ];
 
-        for (path, expected) in cases {
-            assert_eq!(classify_location(path), expected, "{path}");
+        for (path, content, expected) in cases {
+            assert_eq!(
+                classify_location(path, content.as_bytes()),
+                expected,
+                "{path}"
+            );
         }
     }
 

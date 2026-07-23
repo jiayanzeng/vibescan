@@ -41,6 +41,10 @@ pub(crate) const LIVE_FIXTURES: &[LiveFixture] = &[
         history: false,
     },
     LiveFixture {
+        name: "src-api-client-wrapper",
+        history: false,
+    },
+    LiveFixture {
         name: "vendor-chunks-noise",
         history: false,
     },

@@ -8,6 +8,82 @@ matching the order they were recorded in the original log.
 
 ---
 
+## Track H H3 architecture closeout observed on 2026-07-23
+
+H3 changes the authoritative architecture in exactly two hunks. §6.2 now keeps
+bare top-of-package `api/` and Next.js route roots unconditionally
+`ServerOnly`, makes only `src/api/` content-sensitive, names the three exact
+server-runtime signal families, and routes a no-signal `src/api/` file to
+`ClientReachable`. §17.9 adopts option 3 and records why per-file signals are
+the evidence mechanism, why AstroScout could not justify a blanket flip, why
+coverage alone misses a wrong non-`Unknown` class, and why the Rust classifier
+and path-only Python oracle must move together.
+
+Before editing, fixed-string searches proved that both the old §6.2 sentence and
+the former open-question heading occurred exactly once. The reviewed unified
+diff contains only the §6.2 and §17 hunks; all other architecture lines are
+unchanged. The unchanged H1–H2 source state had already passed the full default,
+`network`, `registry`, and combined Clippy and workspace-test matrix. After
+the specification patch, the following focused evidence passed:
+
+```sh
+cargo fmt --all -- --check
+cargo test -p vibescan-git --locked
+cargo test -p vibescan-core --test golden_corpus --features network --locked
+cargo test -p vibescan-core --test precision_recall --features registry --locked
+python3 scripts/real-repo-invariants.py --self-test
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+No capability, crate edge, egress path, live request, credential handling, or
+target-project action changed. Track H is complete. Track I remains the ordered
+security-design-first follow-up behind the §7.4 ownership gate.
+
+## Track H H1–H2 verification observed on 2026-07-23
+
+Track H began from `c707ce6` on `main`. H1 changes only `src/api/` path
+classification: explicit `"use server"`, `next/server`, or `node:`
+import/require markers classify content as `ServerOnly`; no such marker
+classifies it as `ClientReachable`. Bare `api/` and `routes/` retain their
+established server classification. H2 adds the live
+`src-api-client-wrapper` fixture and exact one-finding oracle, updates the
+independent real-repository oracle so `src/api/` cannot be inferred from path
+alone, and records a harness-derived corpus baseline of 15 TP, 0 FP, 0 FN,
+precision 1.0, recall 1.0, and classification coverage 7/9. Its mocked Network
+regression proves that a working-tree-only client-reachable key plus
+same-project anonymous read exposure produces the Critical rule-1 composite
+and absorbs both constituents.
+
+The following passed on the combined H1–H2 working tree:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network --locked -- -D warnings
+cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
+cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --features network --locked
+cargo test --workspace --features registry --locked
+cargo test --workspace --features network,registry --locked
+cargo test -p vibescan-core --test golden_corpus --locked
+cargo test -p vibescan-core --test golden_corpus --features network --locked
+cargo test -p vibescan-core --test precision_recall --locked
+cargo test -p vibescan-core --test precision_recall --features registry --locked
+python3 scripts/real-repo-invariants.py --self-test
+bash scripts/check-network-boundary.sh
+git diff --check
+```
+
+The fixture expectation and metrics baseline were regenerated only after the
+new behavior was implemented, inspected, and rerun without update variables.
+No raw secret appears in expected output, the mock retains no application-row
+fields, no live Network action ran, and no target-project data was modified.
+The user-owned untracked documentation present at task start was preserved.
+H3's architecture-only patch remains the ordered next step, so this record does
+not claim Track H complete.
+
 ## Track G4.0 verification observed on 2026-07-19
 
 The release owner approved the controlled personal-scope identity
@@ -1568,4 +1644,3 @@ After the documentation changes, the closeout pass also reran and passed:
 - the network golden corpus (**5 passed, 3 intentionally ignored**);
 - report snapshots (**1 passed**); and
 - `git diff --check`.
-
