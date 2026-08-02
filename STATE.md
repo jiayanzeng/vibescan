@@ -212,6 +212,12 @@ controls rejected a false `merged` claim and a wrong branch while printing the
 claimed and observed Git facts; both edits were reverted byte-for-byte. A
 depth-one local clone with no `origin/main` exited successfully and printed
 explicit skip messages for the branch and integration truth checks.
+Post-merge reconciliation at `2b3ef82` exposed the distinct CI case where
+`origin/main` resolved but the recorded reconciliation commit was absent from
+the depth-one checkout. The status-consistency job now checks out full history
+so it can assert ancestry as designed; the checker's logic remains unchanged.
+The complete offline closeout matrix and focused status check passed locally
+after this correction.
 
 J12's release-publishing verifier now runs in the canonical matrix and pull-
 request CI. Its preflight exposed a stale mutable-tag assertion left by J8; the
