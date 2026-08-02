@@ -138,7 +138,6 @@ from the repository — never from prior prose:
 # vibescan:current-state
 reviewed: <ISO date>
 head_commit: <full SHA at time of writing>
-branch: <branch>
 worktree: clean | dirty
 workspace_version: <from crate manifests>
 license: <SPDX id from workspace manifest>
@@ -688,6 +687,15 @@ Requirements:
 ---
 
 ## Track J closure record
+
+The final Track J closeout authorizes removing `branch` from the current-state
+contract as a correction to J1/J11, not a weakening. The field was true only
+on the checkout where status was written, so comparing it with the active
+checkout made PR-based reconciliation fail and forced direct-to-`main`
+commits. Git already supplies the active branch, so the field added no durable
+status information. `integration_status` is unchanged: it describes the
+recorded `head_commit` relative to `origin/main`, not relative to `HEAD`, and
+therefore remains valid across feature branches and after merge.
 
 J12 instructed the implementer not to modify
 `scripts/verify-release-publishing.py` and to report a failure rather than

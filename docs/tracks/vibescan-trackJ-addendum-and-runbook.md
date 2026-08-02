@@ -117,35 +117,36 @@ convert status drift from an audit finding into a machine gate.
 `check-status-consistency.py` validates `workspace_version`, `license`, the
 corpus metrics, `head_commit` ancestry, banned terms, and that
 `integration_status` is one of three permitted **tokens** — but it never checks
-that the token is *true*, and it never checks `branch` at all.
+that the token is *true*.
 
-Those are precisely the two fields that motivated the gate. Today
-`STATE.md` says `branch: codex/track-j-assurance-hygiene` and
-`integration_status: committed-not-merged`. Both become false the moment the
-branch merges, and every check in the suite will still pass. The gate has a
-hole exactly where the last two status-drift incidents occurred.
+That field motivated the gate. Today `STATE.md` says
+`integration_status: committed-not-merged`; it becomes false the moment the
+recorded commit merges, and every earlier check in the suite will still pass.
+The gate has a hole at the post-merge transition it is meant to enforce.
+
+The final Track J closeout removed J11's original `branch` assertion as an
+authorized correction. A branch name is contextual checkout state rather than
+durable status, and comparing it with the active checkout prevented this
+reconciliation from passing on a pull-request branch. Git already exposes the
+active branch; `integration_status` retains the durable ancestry assertion.
 
 ### File targets
 - `scripts/check-status-consistency.py`
 
 ### Implementation guidance
-Add two checks, both skipping cleanly when git metadata or `origin` is
-unavailable:
+Add an **`integration_status` truth** check, skipping cleanly when git metadata
+or `origin` is unavailable:
 
-1. **`branch`** equals `git rev-parse --abbrev-ref HEAD`, except when HEAD is
-   detached — in that case require the literal token `detached` and report a
-   mismatch otherwise.
-2. **`integration_status` truth:**
-   - `merged` requires `git merge-base --is-ancestor <head_commit> origin/main`
-     to succeed;
-   - `committed-not-merged` requires that same command to **fail** while
-     `git cat-file -e <head_commit>` succeeds;
-   - `working-tree-only` requires `head_commit` not to resolve, or a dirty tree.
+- `merged` requires `git merge-base --is-ancestor <head_commit> origin/main`
+  to succeed;
+- `committed-not-merged` requires that same command to **fail** while
+  `git cat-file -e <head_commit>` succeeds;
+- `working-tree-only` requires `head_commit` not to resolve, or a dirty tree.
 
-   A token that contradicts the repository is an error naming both the claim
-   and the observed fact.
+A token that contradicts the repository is an error naming both the claim and
+the observed fact.
 
-Extend `--self-test` with a pass and a fail case for each. Keep the checker
+Extend `--self-test` with pass and fail cases. Keep the checker
 offline: `git merge-base` reads local refs only; do not add a fetch.
 
 ### Acceptance criteria (self-verifiable)
@@ -154,11 +155,9 @@ offline: `git merge-base` reads local refs only; do not add a fetch.
    `integration_status: committed-not-merged`.
 3. **Negative control A:** set `integration_status: merged` while unmerged;
    the checker exits 1 and names the contradiction. Revert.
-4. **Negative control B:** set `branch:` to a wrong value; the checker exits 1
-   and prints both values. Revert.
-5. In a shallow checkout with no `origin/main`, the checker skips both new
-   checks with an explicit message and exits 0.
-6. No network access is performed.
+4. In a shallow checkout with no `origin/main`, the checker skips the new
+   truth check with an explicit message and exits 0.
+5. No network access is performed.
 
 ---
 
@@ -234,8 +233,8 @@ output is benign.
 
 ### Step 3 — Refresh the status block
 `head_commit` in `STATE.md` still points at `b08f693`. Update it to the new tip
-and re-run `check-status-consistency.py`. With J11 in place, a stale `branch`
-or a false `integration_status` now fails the gate rather than passing quietly.
+and re-run `check-status-consistency.py`. With J11 in place, a false
+`integration_status` now fails the gate rather than passing quietly.
 
 ### Step 4 — Push and open the PR
 ```sh
@@ -250,9 +249,9 @@ Review and merge through the GitHub UI. This is the one irreversible action in
 the runbook and stays with the release owner.
 
 ### Step 6 — Post-merge status reconciliation
-On `main`, set `integration_status: merged`, `branch: main`, and `head_commit`
-to the merge commit; re-run `check-status-consistency.py`. J11 makes this step
-enforced rather than remembered — the gate now fails if it is skipped.
+Set `integration_status: merged` and `head_commit` to the merge commit; re-run
+`check-status-consistency.py`. J11 makes this step enforced rather than
+remembered — the gate now fails if it is skipped.
 
 ### Step 7 — Convert one remaining assumption into evidence *(optional)*
 `STATE.md` states plainly that `released_version: 0.2.0` was taken from the
