@@ -26,7 +26,6 @@ STATE_MARKER = "# vibescan:current-state"
 STATE_FIELDS = (
     "reviewed",
     "head_commit",
-    "branch",
     "worktree",
     "workspace_version",
     "license",
@@ -241,27 +240,6 @@ def check_tracked_repomix_files(
     return check_tracked_repomix_paths(tracked.stdout.split("\0")), []
 
 
-def evaluate_branch_claim(
-    state: dict[str, str],
-    *,
-    git_available: bool,
-    origin_available: bool,
-    observed_branch: str,
-) -> tuple[list[str], list[str]]:
-    if not git_available:
-        return [], ["branch truth check skipped: git metadata is unavailable"]
-    if not origin_available:
-        return [], ["branch truth check skipped: origin/main is unavailable"]
-
-    observed = "detached" if observed_branch == "HEAD" else observed_branch
-    if state["branch"] == observed:
-        return [], []
-    return [
-        f"branch: STATE.md={state['branch']!r} but "
-        f"git rev-parse --abbrev-ref HEAD={observed!r}"
-    ], []
-
-
 def evaluate_integration_truth(
     state: dict[str, str],
     *,
@@ -303,12 +281,6 @@ def check_git_status_truth(
     inside = run_git(["rev-parse", "--is-inside-work-tree"], root)
     git_available = inside.returncode == 0 and inside.stdout.strip() == "true"
     if not git_available:
-        branch_errors, branch_notes = evaluate_branch_claim(
-            state,
-            git_available=False,
-            origin_available=False,
-            observed_branch="",
-        )
         integration_errors, integration_notes = evaluate_integration_truth(
             state,
             git_available=False,
@@ -317,18 +289,12 @@ def check_git_status_truth(
             merged_into_origin=False,
             worktree_dirty=False,
         )
-        return branch_errors + integration_errors, branch_notes + integration_notes
+        return integration_errors, integration_notes
 
     origin_available = (
         run_git(["cat-file", "-e", "origin/main^{commit}"], root).returncode == 0
     )
     if not origin_available:
-        branch_errors, branch_notes = evaluate_branch_claim(
-            state,
-            git_available=True,
-            origin_available=False,
-            observed_branch="",
-        )
         integration_errors, integration_notes = evaluate_integration_truth(
             state,
             git_available=True,
@@ -337,12 +303,9 @@ def check_git_status_truth(
             merged_into_origin=False,
             worktree_dirty=False,
         )
-        return branch_errors + integration_errors, branch_notes + integration_notes
+        return integration_errors, integration_notes
 
-    branch_result = run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
     status_result = run_git(["status", "--porcelain"], root)
-    if branch_result.returncode != 0:
-        return [f"branch truth check failed: {branch_result.stderr.strip()}"], []
     if status_result.returncode != 0:
         return [f"integration_status truth check failed: {status_result.stderr.strip()}"], []
 
@@ -355,12 +318,6 @@ def check_git_status_truth(
     ).returncode == 0
     worktree_dirty = bool(status_result.stdout)
 
-    branch_errors, branch_notes = evaluate_branch_claim(
-        state,
-        git_available=True,
-        origin_available=True,
-        observed_branch=branch_result.stdout.strip(),
-    )
     integration_errors, integration_notes = evaluate_integration_truth(
         state,
         git_available=True,
@@ -369,7 +326,7 @@ def check_git_status_truth(
         merged_into_origin=merged_into_origin,
         worktree_dirty=worktree_dirty,
     )
-    return branch_errors + integration_errors, branch_notes + integration_notes
+    return integration_errors, integration_notes
 
 
 def check_banned_terms(documents: dict[str, str]) -> list[str]:
@@ -483,7 +440,6 @@ def sample_state() -> dict[str, str]:
     return {
         "reviewed": "2026-08-02",
         "head_commit": "a" * 40,
-        "branch": "main",
         "worktree": "clean",
         "workspace_version": "0.2.0",
         "license": "PolyForm-Noncommercial-1.0.0",
@@ -608,34 +564,6 @@ def run_self_tests() -> None:
         "tools/.repomix/cache.json",
     )
 
-    branch_errors, branch_notes = evaluate_branch_claim(
-        state,
-        git_available=True,
-        origin_available=True,
-        observed_branch="main",
-    )
-    if branch_errors or branch_notes:
-        raise AssertionError(
-            f"branch positive control was rejected: {branch_errors!r} {branch_notes!r}"
-        )
-    wrong_branch = {**state, "branch": "wrong-branch"}
-    branch_errors, _ = evaluate_branch_claim(
-        wrong_branch,
-        git_available=True,
-        origin_available=True,
-        observed_branch="main",
-    )
-    require_error("branch mismatch", branch_errors, "wrong-branch")
-    detached_state = {**state, "branch": "detached"}
-    branch_errors, _ = evaluate_branch_claim(
-        detached_state,
-        git_available=True,
-        origin_available=True,
-        observed_branch="HEAD",
-    )
-    if branch_errors:
-        raise AssertionError(f"detached branch token was rejected: {branch_errors!r}")
-
     integration_errors, integration_notes = evaluate_integration_truth(
         state,
         git_available=True,
@@ -677,12 +605,6 @@ def run_self_tests() -> None:
             f"working-tree-only dirty control was rejected: {integration_errors!r}"
         )
 
-    branch_errors, branch_notes = evaluate_branch_claim(
-        state,
-        git_available=True,
-        origin_available=False,
-        observed_branch="main",
-    )
     integration_errors, integration_notes = evaluate_integration_truth(
         state,
         git_available=True,
@@ -691,8 +613,8 @@ def run_self_tests() -> None:
         merged_into_origin=False,
         worktree_dirty=False,
     )
-    if branch_errors or integration_errors or not branch_notes or not integration_notes:
-        raise AssertionError("missing origin/main did not skip both truth checks cleanly")
+    if integration_errors or not integration_notes:
+        raise AssertionError("missing origin/main did not skip integration truth check cleanly")
 
 
 def repository_root() -> Path:
@@ -722,7 +644,7 @@ def main(argv: list[str]) -> int:
 
     print(
         "status-consistency: version, license, corpus, git, terminology, "
-        "Repomix, branch, and integration fields agree"
+        "Repomix and integration fields agree"
     )
     return 0
 

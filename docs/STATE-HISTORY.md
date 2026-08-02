@@ -9,6 +9,99 @@ Errata notes are inline, dated, and never replace the historical record they ann
 
 ---
 
+## Track J final closeout observed on 2026-08-02
+
+Track J was assurance and repository hygiene in the `LocalStatic` capability
+class; it did not change scanner behavior, the crate DAG, product egress, or
+target-project access. J0 re-established Git, version, license, corpus, and
+distribution ground truth. J1 introduced the fixed machine-readable current-
+state block; J2 preserved a dated erratum for the historical `routes/` claim;
+J3 normalized terminology and document authority; J4 reconciled the document
+layout and tracking state; J5 pinned the exact two-member `Unknown`
+classification remainder; J6 added the offline status checker and CI gate; J7
+completed the four Cargo feature graphs; J8 hardened workflow permissions and
+pinned third-party actions; and J9 made `scripts/verify-all.sh` the canonical
+offline closeout matrix. The addendum's J10 made Repomix bundles ignored and
+forbidden from the index, J11 made `integration_status` an assertion about the
+recorded `head_commit` relative to `origin/main`, and J12 put the release-
+publishing structural verifier on the matrix and pull-request paths.
+
+The final closeout made two authorized corrections. First, it removed
+`branch` from the current-state contract and deleted only its evaluator, call
+sites, and self-test cases. A branch name describes the checkout where status
+was written, so comparing it with the active checkout made every PR-based
+reconciliation fail and forced direct-to-`main` commits; Git already carries
+that contextual fact. This does not weaken `integration_status`, whose meaning
+remains `head_commit` ancestry relative to `origin/main`, independent of
+`HEAD`. Second, J12's prohibition on changing
+`scripts/verify-release-publishing.py` was under-specified: its enumerated
+failure causes omitted the actual stale assertion, which still expected the
+pre-J8 mutable `rust-lang/crates-io-auth-action@v1` after J8 had replaced it
+with a SHA pin. The authorized correction required the same action identity at
+a 40-character SHA plus a version comment;
+`PUBLISH_ORDER` and `REQUIRED_CUSTOM_PUBLISH_PERMISSIONS` stayed unchanged.
+
+The following commands and controls were actually run:
+
+```sh
+git fetch origin
+git status --porcelain=v1 --branch
+git rev-list --left-right --count main...origin/main
+git merge-base --is-ancestor b2438c2fe60b0268c6d733250f972aae608a455e origin/main
+gh pr view 13 --json state,mergedAt,mergeCommit,url
+python3 scripts/check-status-consistency.py --self-test
+python3 scripts/check-status-consistency.py
+cargo metadata --no-deps --format-version 1
+jq '{corpus_version, totals}' tests/fixtures/corpus-metrics-baseline.json
+dist generate --check
+shellcheck scripts/verify-all.sh
+bash scripts/verify-all.sh
+NPM_CONFIG_USERCONFIG=/dev/null NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem \
+  npx --yes repomix@1.17.0
+git diff --check
+```
+
+Before the correction, the real checker on
+`codex/track-j-final-closeout` exited 1 solely because `STATE.md='main'` did
+not equal the checked-out feature branch. After the branch contract was
+removed, `--self-test` passed with every non-branch case intact and the real
+checker passed on the feature branch. The required integration negative
+control temporarily set `integration_status: committed-not-merged`; the
+checker exited 1 and reported
+`head_commit_resolves=true, merged_into_origin/main=true,
+worktree_dirty=true`. Restoring `merged` reproduced the exact pre-control
+`STATE.md` SHA-256 and the checker passed. The Repomix negative control force-
+staged `repomix-output.xml`; the checker exited 1 and named that path. Removing
+it from the index left the bundle present only as an ignored local file and
+restored an empty index.
+
+On 2026-08-02, fourteen anonymous read-only HTTPS GETs used identifying user
+agent `vibescan-release-verification/0.2.0
+(+https://github.com/jiayanzeng/vibescan)`. The crates.io API reported maximum
+version `0.2.0` and an exact `0.2.0` release for `vibescan-types`,
+`vibescan-secrets`, `vibescan-git`, `vibescan-report`, `vibescan-supabase`,
+`vibescan-registry`, `vibescan-core`, and `vibescan-cli`. The npm `latest`
+endpoints reported `0.2.0` for `@jiayanzeng/vibescan` and its Darwin arm64,
+Darwin x64, Linux arm64 musl, Linux x64 musl, and Windows x64 MSVC packages.
+No credential was read, no npm or Cargo login/publish path ran, and no mutating
+request was issued.
+
+`dist generate --check` passed with only its established old-manifest and
+disabled-Homebrew-job warnings. `shellcheck scripts/verify-all.sh` passed. The
+canonical offline matrix passed all four Clippy graphs, all four test graphs,
+status and release-structure checks, Network-boundary checks, and hardening;
+its optional real-repository leg was skipped because no fixture was supplied.
+Repomix v1.17.0 generated the pinned ignored bundle with its documented
+security-check exception and excluded the binary Git-history fixture.
+
+Intentional limitations remain explicit. `head_commit` is the commit at which
+status was last reconciled, not current `HEAD`; because a commit cannot contain
+its own SHA, the checker proves ancestry rather than equality. The registry
+observations are a dated public-channel snapshot, not a continuous guarantee.
+No Homebrew installation, real-repository scan, Tier 0/Supabase probe,
+Registry-class vibescan probe, credentialed test, tag push, publication, or
+target-project write was performed.
+
 ## Track H H3 architecture closeout observed on 2026-07-23
 
 H3 changes the authoritative architecture in exactly two hunks. §6.2 now keeps

@@ -23,8 +23,12 @@ matrix. It must parse the fixed `STATE.md` current-state block, compare only
 repository-owned source artifacts, report field-level drift, and retain
 synthetic pass/fail controls in `--self-test` mode. It must not query release
 channels or substitute for `verify-all.sh`.
-The block's `head_commit` is the last status-reconciliation commit, so the
-checker requires it to resolve as an ancestor of `HEAD`, never to equal `HEAD`.
+The current-state contract intentionally has no `branch` field: a checkout's
+branch is contextual Git state, while `integration_status` describes
+`head_commit` ancestry relative to `origin/main` and remains portable across
+branches. Because a commit cannot contain its own SHA, `head_commit` is
+structurally behind the tip and records the last status-reconciliation commit;
+the checker therefore asserts ancestry, never equality with `HEAD`.
 
 `verify-all.sh` is the canonical full closeout matrix. Its default invocation
 is offline and composes every graph and assurance gate required by root

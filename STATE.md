@@ -4,7 +4,6 @@
 # vibescan:current-state
 reviewed: 2026-08-02
 head_commit: c423ef50ae4bdbfae390094ac9c003cb2261cc60
-branch: main
 worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
@@ -33,10 +32,11 @@ Historical verification evidence is preserved in
 The current repository checkpoint is `0.2.0`, tagged by the annotated
 `v0.2.0` tag. Track H is merged to `main` at `e9390be`; Track J and its
 J10–J12 addendum are merged to `main` at `c423ef5`. The six npm
-packages and all eight Cargo crates declare version `0.2.0`. Public release
-channels were not queried during J0, so `released_version` uses the workspace
-version and must not be read as fresh proof that every registry channel
-currently resolves.
+packages and all eight Cargo crates declare version `0.2.0`. On 2026-08-02,
+identified anonymous read-only HTTPS GETs confirmed that all eight crates.io
+identities have maximum published version `0.2.0` and all six npm `latest`
+endpoints resolve to `0.2.0`. No credential was read and no mutating request
+was issued.
 
 The workspace is licensed under SPDX identifier
 `PolyForm-Noncommercial-1.0.0`. PolyForm Noncommercial is source-available,
@@ -115,7 +115,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 | Dependency integrity | Offline plus Track F complete | LocalStatic structural checks remain available; Registry egress is independent, opt-in, cached, redacted, and failure-distinguishable. The noisy newcomer heuristic remains deferred. |
 | Reporting and gates | Implemented | JSON, SARIF, TTY, and HTML are redacted and deterministic; baseline-suppressed findings do not affect stats or exit policy. |
 | Configuration and CLI | Implemented | Defaults < repository TOML < explicit CLI precedence and repository-root relative paths are tested; repository config alone cannot enable Network work. |
-| Distribution | Track G complete | The static five-target build, ships-only npm wrapper, crates.io/npm/Homebrew publishers, checksums, and attestations are implemented. Live channel state was not re-verified in Track J J0. |
+| Distribution | Track G complete | The static five-target build, ships-only npm wrapper, crates.io/npm/Homebrew publishers, checksums, and attestations are implemented. The final Track J closeout verified all eight crates.io and six npm identities at `0.2.0` with identified read-only GETs. |
 | Assurance | Track J plus addendum merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency now verifies Repomix hygiene and Git truth, four-graph CI and release structure run on pull requests, immutable workflow actions remain enforced, and the canonical offline matrix covers these controls without changing scanner results. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner is authorized here. |
 
@@ -134,8 +134,8 @@ machine-readable current-state contract and offline consistency checker,
 pinned the corpus's exact Unknown classification set, added explicit combined
 `network,registry` clippy and test jobs, SHA-pinned every third-party workflow
 action, and made `scripts/verify-all.sh` the canonical full offline matrix. The
-J10–J12 addendum prevents Repomix bundles from being tracked, verifies branch
-and integration claims against local Git state, and puts the release-channel
+J10–J12 addendum prevents Repomix bundles from being tracked, verifies the
+integration claim against local Git state, and puts the release-channel
 structural verifier on both the canonical matrix and pull-request CI path.
 
 ### P2 — measured product depth
