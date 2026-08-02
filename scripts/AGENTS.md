@@ -30,6 +30,13 @@ is offline and composes every graph and assurance gate required by root
 `verify-hardening-checks.sh` is the narrower hardening composition used by CI
 and by that full matrix. It does not replace `verify-all.sh`.
 
+`repomix.config.json` deliberately disables Repomix's security check because
+the default ruleset and committed fixtures contain synthetic credential-shaped
+strings that must remain byte-exact in an audit bundle. Repomix redaction would
+corrupt that evidence. The compensating control is that full-source bundles are
+ignored and `check-status-consistency.py` rejects any tracked
+`repomix-output.*` file or `.repomix/` artifact.
+
 ## Boundary checker
 
 `check-network-boundary.sh` is a security control. It must inspect exact Cargo

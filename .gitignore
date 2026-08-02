@@ -41,6 +41,10 @@ Thumbs.db
 *.tgz
 *.zip
 
+# Repomix audit bundles (full-source dumps; never committed)
+repomix-output.*
+.repomix/
+
 # Documentation files
 vibescan-codex-release-workflow.md
 docs/vibescan-relicensing-guide.md

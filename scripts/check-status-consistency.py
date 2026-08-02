@@ -12,6 +12,7 @@ not a publishable package, and intentionally has no version or license field.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 import subprocess
@@ -53,6 +54,7 @@ CURRENT_STATUS_DOCUMENTS = (
     "README.md",
     "FAQ.md",
 )
+REPOMIX_BUNDLE_PATTERN = "repomix-output.*"
 
 
 def parse_state_block(content: str) -> dict[str, str]:
@@ -212,6 +214,164 @@ def check_head_commit(
     )
 
 
+def check_tracked_repomix_paths(paths: Iterable[str]) -> list[str]:
+    errors = []
+    for path in sorted(paths):
+        parts = Path(path).parts
+        if (
+            fnmatch.fnmatchcase(Path(path).name, REPOMIX_BUNDLE_PATTERN)
+            or ".repomix" in parts
+        ):
+            errors.append(
+                f"tracked Repomix audit bundle is forbidden: {path}"
+            )
+    return errors
+
+
+def check_tracked_repomix_files(
+    root: Path,
+) -> tuple[list[str], list[str]]:
+    inside = run_git(["rev-parse", "--is-inside-work-tree"], root)
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return [], ["tracked Repomix audit-bundle check skipped: git metadata is unavailable"]
+
+    tracked = run_git(["ls-files", "-z"], root)
+    if tracked.returncode != 0:
+        return [f"tracked Repomix audit-bundle check failed: {tracked.stderr.strip()}"], []
+    return check_tracked_repomix_paths(tracked.stdout.split("\0")), []
+
+
+def evaluate_branch_claim(
+    state: dict[str, str],
+    *,
+    git_available: bool,
+    origin_available: bool,
+    observed_branch: str,
+) -> tuple[list[str], list[str]]:
+    if not git_available:
+        return [], ["branch truth check skipped: git metadata is unavailable"]
+    if not origin_available:
+        return [], ["branch truth check skipped: origin/main is unavailable"]
+
+    observed = "detached" if observed_branch == "HEAD" else observed_branch
+    if state["branch"] == observed:
+        return [], []
+    return [
+        f"branch: STATE.md={state['branch']!r} but "
+        f"git rev-parse --abbrev-ref HEAD={observed!r}"
+    ], []
+
+
+def evaluate_integration_truth(
+    state: dict[str, str],
+    *,
+    git_available: bool,
+    origin_available: bool,
+    head_resolves: bool,
+    merged_into_origin: bool,
+    worktree_dirty: bool,
+) -> tuple[list[str], list[str]]:
+    if not git_available:
+        return [], ["integration_status truth check skipped: git metadata is unavailable"]
+    if not origin_available:
+        return [], ["integration_status truth check skipped: origin/main is unavailable"]
+
+    claim = state["integration_status"]
+    if claim not in INTEGRATION_STATUSES:
+        return [], []
+    matches = {
+        "merged": head_resolves and merged_into_origin,
+        "committed-not-merged": head_resolves and not merged_into_origin,
+        "working-tree-only": not head_resolves or worktree_dirty,
+    }[claim]
+    if matches:
+        return [], []
+
+    observed = (
+        f"head_commit_resolves={str(head_resolves).lower()}, "
+        f"merged_into_origin/main={str(merged_into_origin).lower()}, "
+        f"worktree_dirty={str(worktree_dirty).lower()}"
+    )
+    return [
+        f"integration_status: STATE.md={claim!r} contradicts git: {observed}"
+    ], []
+
+
+def check_git_status_truth(
+    state: dict[str, str], root: Path
+) -> tuple[list[str], list[str]]:
+    inside = run_git(["rev-parse", "--is-inside-work-tree"], root)
+    git_available = inside.returncode == 0 and inside.stdout.strip() == "true"
+    if not git_available:
+        branch_errors, branch_notes = evaluate_branch_claim(
+            state,
+            git_available=False,
+            origin_available=False,
+            observed_branch="",
+        )
+        integration_errors, integration_notes = evaluate_integration_truth(
+            state,
+            git_available=False,
+            origin_available=False,
+            head_resolves=False,
+            merged_into_origin=False,
+            worktree_dirty=False,
+        )
+        return branch_errors + integration_errors, branch_notes + integration_notes
+
+    origin_available = (
+        run_git(["cat-file", "-e", "origin/main^{commit}"], root).returncode == 0
+    )
+    if not origin_available:
+        branch_errors, branch_notes = evaluate_branch_claim(
+            state,
+            git_available=True,
+            origin_available=False,
+            observed_branch="",
+        )
+        integration_errors, integration_notes = evaluate_integration_truth(
+            state,
+            git_available=True,
+            origin_available=False,
+            head_resolves=False,
+            merged_into_origin=False,
+            worktree_dirty=False,
+        )
+        return branch_errors + integration_errors, branch_notes + integration_notes
+
+    branch_result = run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
+    status_result = run_git(["status", "--porcelain"], root)
+    if branch_result.returncode != 0:
+        return [f"branch truth check failed: {branch_result.stderr.strip()}"], []
+    if status_result.returncode != 0:
+        return [f"integration_status truth check failed: {status_result.stderr.strip()}"], []
+
+    commit = state["head_commit"]
+    head_resolves = (
+        run_git(["cat-file", "-e", f"{commit}^{{commit}}"], root).returncode == 0
+    )
+    merged_into_origin = head_resolves and run_git(
+        ["merge-base", "--is-ancestor", commit, "origin/main"], root
+    ).returncode == 0
+    worktree_dirty = bool(status_result.stdout)
+
+    branch_errors, branch_notes = evaluate_branch_claim(
+        state,
+        git_available=True,
+        origin_available=True,
+        observed_branch=branch_result.stdout.strip(),
+    )
+    integration_errors, integration_notes = evaluate_integration_truth(
+        state,
+        git_available=True,
+        origin_available=True,
+        head_resolves=head_resolves,
+        merged_into_origin=merged_into_origin,
+        worktree_dirty=worktree_dirty,
+    )
+    return branch_errors + integration_errors, branch_notes + integration_notes
+
+
 def check_banned_terms(documents: dict[str, str]) -> list[str]:
     errors = []
     for source, content in sorted(documents.items()):
@@ -310,6 +470,12 @@ def check_repository(root: Path) -> tuple[list[str], list[str]]:
     notes.extend(git_notes)
     errors.extend(check_banned_terms(documents))
     errors.extend(check_integration_status(state))
+    repomix_errors, repomix_notes = check_tracked_repomix_files(root)
+    errors.extend(repomix_errors)
+    notes.extend(repomix_notes)
+    truth_errors, truth_notes = check_git_status_truth(state, root)
+    errors.extend(truth_errors)
+    notes.extend(truth_notes)
     return errors, notes
 
 
@@ -429,6 +595,105 @@ def run_self_tests() -> None:
         "permitted values",
     )
 
+    if check_tracked_repomix_paths(["src/main.rs", "docs/STATE-HISTORY.md"]):
+        raise AssertionError("Repomix tracked-file positive control was rejected")
+    require_error(
+        "tracked Repomix output",
+        check_tracked_repomix_paths(["sub/dir/repomix-output.xml"]),
+        "sub/dir/repomix-output.xml",
+    )
+    require_error(
+        "tracked Repomix state",
+        check_tracked_repomix_paths(["tools/.repomix/cache.json"]),
+        "tools/.repomix/cache.json",
+    )
+
+    branch_errors, branch_notes = evaluate_branch_claim(
+        state,
+        git_available=True,
+        origin_available=True,
+        observed_branch="main",
+    )
+    if branch_errors or branch_notes:
+        raise AssertionError(
+            f"branch positive control was rejected: {branch_errors!r} {branch_notes!r}"
+        )
+    wrong_branch = {**state, "branch": "wrong-branch"}
+    branch_errors, _ = evaluate_branch_claim(
+        wrong_branch,
+        git_available=True,
+        origin_available=True,
+        observed_branch="main",
+    )
+    require_error("branch mismatch", branch_errors, "wrong-branch")
+    detached_state = {**state, "branch": "detached"}
+    branch_errors, _ = evaluate_branch_claim(
+        detached_state,
+        git_available=True,
+        origin_available=True,
+        observed_branch="HEAD",
+    )
+    if branch_errors:
+        raise AssertionError(f"detached branch token was rejected: {branch_errors!r}")
+
+    integration_errors, integration_notes = evaluate_integration_truth(
+        state,
+        git_available=True,
+        origin_available=True,
+        head_resolves=True,
+        merged_into_origin=True,
+        worktree_dirty=False,
+    )
+    if integration_errors or integration_notes:
+        raise AssertionError(
+            "integration positive control was rejected: "
+            f"{integration_errors!r} {integration_notes!r}"
+        )
+    committed_state = {**state, "integration_status": "committed-not-merged"}
+    integration_errors, _ = evaluate_integration_truth(
+        committed_state,
+        git_available=True,
+        origin_available=True,
+        head_resolves=True,
+        merged_into_origin=True,
+        worktree_dirty=False,
+    )
+    require_error(
+        "integration contradiction",
+        integration_errors,
+        "merged_into_origin/main=true",
+    )
+    working_tree_state = {**state, "integration_status": "working-tree-only"}
+    integration_errors, _ = evaluate_integration_truth(
+        working_tree_state,
+        git_available=True,
+        origin_available=True,
+        head_resolves=True,
+        merged_into_origin=False,
+        worktree_dirty=True,
+    )
+    if integration_errors:
+        raise AssertionError(
+            f"working-tree-only dirty control was rejected: {integration_errors!r}"
+        )
+
+    branch_errors, branch_notes = evaluate_branch_claim(
+        state,
+        git_available=True,
+        origin_available=False,
+        observed_branch="main",
+    )
+    integration_errors, integration_notes = evaluate_integration_truth(
+        state,
+        git_available=True,
+        origin_available=False,
+        head_resolves=True,
+        merged_into_origin=False,
+        worktree_dirty=False,
+    )
+    if branch_errors or integration_errors or not branch_notes or not integration_notes:
+        raise AssertionError("missing origin/main did not skip both truth checks cleanly")
+
 
 def repository_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -455,7 +720,10 @@ def main(argv: list[str]) -> int:
             print(f"status-consistency: {error}", file=sys.stderr)
         return 1
 
-    print("status-consistency: version, license, corpus, git, terminology, and integration fields agree")
+    print(
+        "status-consistency: version, license, corpus, git, terminology, "
+        "Repomix, branch, and integration fields agree"
+    )
     return 0
 
 

@@ -89,20 +89,23 @@ echo "note: cargo-dist-style shasum warnings from the boundary leg are benign; j
 run_step "5b. Network-boundary metadata matrix" \
   bash scripts/check-network-boundary.sh
 
-run_step "6a. status-consistency self-tests" \
+run_step "6. release-publishing structure" \
+  python3 scripts/verify-release-publishing.py
+
+run_step "7a. status-consistency self-tests" \
   python3 scripts/check-status-consistency.py --self-test
-run_step "6b. status-consistency repository gate" \
+run_step "7b. status-consistency repository gate" \
   python3 scripts/check-status-consistency.py
 
 # This deliberately re-runs the oracle self-test, default workspace tests, and
 # boundary checker. The legacy helper is itself a composed hardening contract;
 # exercising it end to end proves that its public offline entry point remains
 # operational in addition to proving each constituent above.
-echo "note: step 7 deliberately re-runs the legacy hardening composition"
-run_step "7. hardening helper (offline composition)" \
+echo "note: step 8 deliberately re-runs the legacy hardening composition"
+run_step "8. hardening helper (offline composition)" \
   bash scripts/verify-hardening-checks.sh --offline-only
 
-run_step "8. whitespace errors" git diff --check
+run_step "9. whitespace errors" git diff --check
 
 if [[ -z "$real_repo" ]]; then
   echo
@@ -113,6 +116,6 @@ else
   else
     echo "real-repo leg is LocalStatic; live Network work remains disabled"
   fi
-  run_step "9. optional real-repository hardening leg" \
+  run_step "10. optional real-repository hardening leg" \
     bash scripts/verify-hardening-checks.sh --real-repo-only "$real_repo"
 fi

@@ -29,6 +29,11 @@ REQUIRED_CUSTOM_PUBLISH_PERMISSIONS = {
         "packages": "write",
     },
 }
+PINNED_CRATES_AUTH_ACTION = re.compile(
+    r"^\s*uses:\s*rust-lang/crates-io-auth-action@[0-9a-f]{40}"
+    r"\s+#\s+v1(?:\.\d+){2}\s*$",
+    re.MULTILINE,
+)
 
 
 def fail(message):
@@ -205,7 +210,6 @@ def main():
 
     required_files = {
         ".github/workflows/publish-crates.yml": [
-            "rust-lang/crates-io-auth-action@v1",
             "BOOTSTRAP_CARGO_REGISTRY_TOKEN",
             "CARGO_REGISTRY_TOKEN",
             "scripts/publish-crates.sh",
@@ -241,6 +245,11 @@ def main():
     crates_workflow = (
         repository_root / ".github" / "workflows" / "publish-crates.yml"
     ).read_text(encoding="utf-8")
+    if not PINNED_CRATES_AUTH_ACTION.search(crates_workflow):
+        fail(
+            "publish-crates.yml must pin rust-lang/crates-io-auth-action "
+            "to an immutable 40-character SHA with its v1.x.y release comment"
+        )
     if "if: ${{ secrets." in crates_workflow:
         fail("publish-crates.yml must route secret-dependent conditions through env")
 
