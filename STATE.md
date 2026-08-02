@@ -204,6 +204,8 @@ required force-stage negative control made the status checker fail with the
 tracked bundle path, after which the bundle was removed from the index and
 remained only as an ignored local artifact. JSON parsing confirmed that
 `content/**` remains excluded and the security-check setting is unchanged.
+Repomix v1.17.0 was fetched through `npx` solely to generate this local audit
+artifact; that package fetch was not a vibescan scan or release-channel check.
 
 J11's self-tests and real repository check passed. Independent negative
 controls rejected a false `merged` claim and a wrong branch while printing the
@@ -220,5 +222,6 @@ permission fail with precise messages, then restored the source hashes.
 
 On `e899d4f`, `bash scripts/verify-all.sh`, `dist generate --check`, and
 `shellcheck scripts/verify-all.sh` passed. The optional real-repository leg was
-skipped because no fixture was supplied. No live probe, public registry query,
-credentialed test, or target-project write was performed.
+skipped because no fixture was supplied. No live probe, credentialed test, or
+target-project write was performed. No vibescan Registry-class or public
+release-channel verification request ran.
