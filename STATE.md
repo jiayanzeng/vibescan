@@ -3,13 +3,13 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-02
-head_commit: c423ef50ae4bdbfae390094ac9c003cb2261cc60
+head_commit: 5c2f2965e0ef0e95931d70dabf1e0ed2b0256964
 worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
 released_version: 0.2.0
 released_tag: v0.2.0
-integration_status: merged
+integration_status: committed-not-merged
 corpus_version: tier-h2-live-v1
 corpus_tp: 15
 corpus_fp: 0
@@ -17,7 +17,7 @@ corpus_fn: 0
 corpus_precision: 1.0
 corpus_recall: 1.0
 classification_coverage: 0.7777777777777778
-open_tracks: none
+open_tracks: Track K
 ```
 
 `head_commit` records the commit at which status was last reconciled; because a
@@ -30,8 +30,9 @@ Historical verification evidence is preserved in
 [`docs/STATE-HISTORY.md`](docs/STATE-HISTORY.md).
 
 The current repository checkpoint is `0.2.0`, tagged by the annotated
-`v0.2.0` tag. Track H is merged to `main` at `e9390be`; Track J and its
-J10–J12 addendum are merged to `main` at `c423ef5`. The six npm
+`v0.2.0` tag. Track H is merged to `main` at `e9390be`; Track J final
+closeout is merged to `main` at `e1acd83`. Track K is committed on its
+feature branch through `5c2f296` and is not yet merged. The six npm
 packages and all eight Cargo crates declare version `0.2.0`. On 2026-08-02,
 identified anonymous read-only HTTPS GETs confirmed that all eight crates.io
 identities have maximum published version `0.2.0` and all six npm `latest`
@@ -44,10 +45,10 @@ not open source: its use restriction is incompatible with the Open Source
 Definition. Historical releases `0.1.0`–`0.1.3` remain available under MIT to
 anyone who already received them under that license.
 
-No Track J task changes scanner behavior, a detection or correlation rule, a
-crate edge, an egress path, credential handling, or target-project access.
-Track J is repository hygiene and assurance infrastructure in the
-`LocalStatic` capability class.
+Track K changes source layout only. It does not change scanner behavior, a
+detection or correlation rule, serialization, a crate edge, a feature gate,
+an egress path, credential handling, or target-project access. It remains in
+the `LocalStatic` capability class.
 
 ## Executive verdict
 
@@ -75,6 +76,16 @@ Use these three lenses when discussing completion:
   remain outside the completed product surface.
 
 ## Current integration context
+
+Track K began from clean `origin/main` at `e1acd835`. The six crates whose
+`src/lib.rs` exceeded 800 lines were decomposed largest-first in six commits.
+The final scoped source file maximum is 667 lines. The normalized 144-item
+public inventory, the sorted 199-test inventory, and the SHA-256 manifest of
+all 32 fixture/snapshot/metrics files are byte-identical before and after.
+Each final crate commit passed `bash scripts/verify-all.sh` before work
+advanced to the next crate. The detailed layout, architecture citations, and
+negative-control evidence are recorded in
+[`docs/tracks/vibescan-trackK-instructions.md`](docs/tracks/vibescan-trackK-instructions.md).
 
 Track J began from `main` at `e9390beeb5bc8bbdb8550da3c58434d63d62faf7`,
 which equals refreshed `origin/main`. J0 found one pre-existing change: the
@@ -106,6 +117,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 |---|---|---|
 | Design and privacy invariants | Safety core verified | LocalStatic is the default; raw secrets do not cross the candidate-to-finding boundary; Network actions are separately gated and read-only or catalog-read-only. |
 | Crate graph | Verified eight-crate post-v1 graph | The only post-v1 crate is `vibescan-registry`; the exact dependency and transport-parent boundaries are machine-checked. |
+| Workspace structure | Track K committed, pending merge | Every crate whose pre-track `src/lib.rs` exceeded 800 lines is decomposed into architecture-owned private modules; all scoped source files are at most 667 lines, while the 144-item public surface and 199 test names remain identical. |
 | Collection and identity | Implemented | Full-content identity retains all distinct paths, provenances, and location classes; the pipeline remains materialized rather than streamed. |
 | Location classification | Track H complete | Segment-aware precedence, monorepo depth, content-sensitive `src/api/`, and independent oracle behavior are pinned by fixtures and truth-table tests. |
 | Detection and Supabase semantics | Implemented | The embedded generic substrate, exact-revision enrichment, new/legacy key classes, and conservative project-aware coalescing are covered. |
@@ -152,11 +164,13 @@ structural verifier on both the canonical matrix and pull-request CI path.
 
 ## Detailed next steps
 
-1. Keep real-repository validation explicit and sanitized; never point the
+1. Review and merge Track K through its pull request, then reconcile this
+   status record against merged `origin/main`.
+2. Keep real-repository validation explicit and sanitized; never point the
    optional leg at user data without authorization.
-2. Continue clean-control and planted-positive real-repository sampling before
+3. Continue clean-control and planted-positive real-repository sampling before
    expanding generic detection breadth.
-3. Keep Track I gated on explicit user demand, ownership-proof ratification,
+4. Keep Track I gated on explicit user demand, ownership-proof ratification,
    and a non-persisting design. No Track J work enters that deferred track.
 
 ## Closeout gate for future milestone claims
