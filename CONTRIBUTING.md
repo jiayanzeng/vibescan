@@ -25,5 +25,5 @@ permission first, since many employment agreements assign work you create to you
 - Keep the safety invariants intact: no new network egress outside the sanctioned
   feature-gated transports, and nothing that weakens secret redaction or the
   own-assets-only boundary.
-- Run `cargo test --workspace` and `bash scripts/check-network-boundary.sh` before
-  submitting.
+- Run the canonical offline closeout matrix with `bash scripts/verify-all.sh`
+  before submitting.

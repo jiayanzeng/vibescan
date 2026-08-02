@@ -5,6 +5,7 @@ to keep that file focused on current state. Authority remains `vibescan-architec
 These records document observed status at the time noted; they do not override the
 architecture or prove completion by themselves. Newest records are toward the top,
 matching the order they were recorded in the original log.
+Errata notes are inline, dated, and never replace the historical record they annotate.
 
 ---
 
@@ -46,7 +47,14 @@ Track H began from `c707ce6` on `main`. H1 changes only `src/api/` path
 classification: explicit `"use server"`, `next/server`, or `node:`
 import/require markers classify content as `ServerOnly`; no such marker
 classifies it as `ClientReachable`. Bare `api/` and `routes/` retain their
-established server classification. H2 adds the live
+established server classification.
+
+> **Errata (2026-08-01):** the sentence above names a `routes/` rule. No
+> such rule exists in §6.2 or in `classify_location`; the intended wording
+> is "Next.js route-handler roots." The original text is retained because
+> this archive is append-only. Classifier behavior was never affected.
+
+H2 adds the live
 `src-api-client-wrapper` fixture and exact one-finding oracle, updates the
 independent real-repository oracle so `src/api/` cannot be inferred from path
 alone, and records a harness-derived corpus baseline of 15 TP, 0 FP, 0 FN,

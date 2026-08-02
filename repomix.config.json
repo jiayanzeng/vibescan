@@ -1,4 +1,12 @@
 {
+    "output": {
+        "filePath": "repomix-output.xml"
+    },
+    "ignore": {
+        "customPatterns": [
+            "content/**"
+        ]
+    },
     "security": {
         "enableSecurityCheck": false
     }

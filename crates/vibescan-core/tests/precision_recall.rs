@@ -1,6 +1,6 @@
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -144,6 +144,34 @@ fn live_corpus_metrics_match_committed_baseline() {
         baseline_content.trim_end(),
         actual_content.trim_end()
     );
+}
+
+#[test]
+fn classification_coverage_unknown_set_is_pinned() {
+    let expected = BTreeSet::from([
+        (
+            "history-only-elevated-key".to_owned(),
+            StableIdentity {
+                rule_id: "supabase-key:secret_new".to_owned(),
+                fingerprint: "17afcc2c725ab14552f500d40004120e".to_owned(),
+                project: String::new(),
+            },
+        ),
+        (
+            "nested-gitignore".to_owned(),
+            StableIdentity {
+                rule_id: "generic-secret".to_owned(),
+                fingerprint: "d242499e7d98ddca031df8fc89907b8d".to_owned(),
+                project: String::new(),
+            },
+        ),
+    ]);
+
+    // history-only-elevated-key exists to exercise commit provenance at the
+    // intentionally framework-neutral src/history.ts path. nested-gitignore
+    // exists to exercise ignore layering at another path with no framework
+    // signal. Both should remain Unknown unless the corpus changes deliberately.
+    assert_eq!(unknown_classification_set(), expected);
 }
 
 #[test]
@@ -459,6 +487,52 @@ fn classification_coverage(findings: &[Finding]) -> (u64, u64) {
                 .any(|location| location.location_class != LocationClass::Unknown);
             (classified + u64::from(has_classified_location), total + 1)
         })
+}
+
+fn unknown_classification_set() -> BTreeSet<(String, StableIdentity)> {
+    let mut unknown = BTreeSet::new();
+
+    for fixture in LIVE_FIXTURES {
+        let repo = materialize_fixture(fixture);
+        let result = scan(
+            &repo,
+            ScanConfig {
+                include_history: fixture.history,
+                severity_gate: Severity::Info,
+                ..ScanConfig::default()
+            },
+        )
+        .unwrap_or_else(|error| panic!("{} scan failed: {error}", fixture.name));
+        collect_unknown_classifications(fixture.name, &result.findings, &mut unknown);
+    }
+
+    let composite_findings = offline_composite_findings();
+    collect_unknown_classifications(OFFLINE_COMPOSITE, &composite_findings, &mut unknown);
+
+    for name in TIER1_FIXTURES {
+        let findings = tier1_fixture_findings(name);
+        collect_unknown_classifications(name, &findings, &mut unknown);
+    }
+
+    unknown
+}
+
+fn collect_unknown_classifications(
+    fixture: &str,
+    findings: &[Finding],
+    unknown: &mut BTreeSet<(String, StableIdentity)>,
+) {
+    for finding in findings.iter().filter(|finding| {
+        matches!(
+            finding.category,
+            Category::SecretExposure | Category::KeyClassification | Category::Rls
+        ) && finding
+            .locations
+            .iter()
+            .all(|location| location.location_class == LocationClass::Unknown)
+    }) {
+        unknown.insert((fixture.to_owned(), observed_identity(finding)));
+    }
 }
 
 fn assert_hard_gates(report: &MetricsReport, baseline: &MetricsReport) -> Result<(), String> {
