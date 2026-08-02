@@ -3,14 +3,14 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-02
-head_commit: e9390beeb5bc8bbdb8550da3c58434d63d62faf7
+head_commit: b08f693912a932ba6f4d9a3d64de985262a60e53
 branch: codex/track-j-assurance-hygiene
-worktree: dirty
+worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
 released_version: 0.2.0
 released_tag: v0.2.0
-integration_status: working-tree-only
+integration_status: committed-not-merged
 corpus_version: tier-h2-live-v1
 corpus_tp: 15
 corpus_fp: 0
@@ -18,7 +18,7 @@ corpus_fn: 0
 corpus_precision: 1.0
 corpus_recall: 1.0
 classification_coverage: 0.7777777777777778
-open_tracks: Track J
+open_tracks: none
 ```
 
 Authority: `vibescan-architecture.md`. This file records observed current
@@ -28,8 +28,8 @@ Historical verification evidence is preserved in
 
 The current repository checkpoint is `0.2.0`, tagged by the annotated
 `v0.2.0` tag. Track H is merged to `main` at `e9390be`, and the Track J
-implementation is complete in the branch working tree named above. J0
-refreshed `origin` and confirmed that local
+implementation is committed at `b08f693` on the branch named above but is not
+merged. J0 refreshed `origin` and confirmed that local
 `main`, `origin/main`, and the Track H closeout commit agree. The six npm
 packages and all eight Cargo crates declare version `0.2.0`. Public release
 channels were not queried during J0, so `released_version` uses the workspace
@@ -114,7 +114,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 | Reporting and gates | Implemented | JSON, SARIF, TTY, and HTML are redacted and deterministic; baseline-suppressed findings do not affect stats or exit policy. |
 | Configuration and CLI | Implemented | Defaults < repository TOML < explicit CLI precedence and repository-root relative paths are tested; repository config alone cannot enable Network work. |
 | Distribution | Track G complete | The static five-target build, ships-only npm wrapper, crates.io/npm/Homebrew publishers, checksums, and attestations are implemented. Live channel state was not re-verified in Track J J0. |
-| Assurance | Track J complete in working tree | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency, four-graph CI, immutable workflow actions, and the canonical offline matrix are enforced without changing scanner results. |
+| Assurance | Track J committed, not merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency, four-graph CI, immutable workflow actions, and the canonical offline matrix are enforced without changing scanner results. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner is authorized here. |
 
 ## Strict gaps and known risks
@@ -176,11 +176,11 @@ claim completion from historical pass counts.
 
 ## Track J verification observed on 2026-08-02
 
-The complete default `bash scripts/verify-all.sh` matrix passed on the current
-working tree. `dist generate --check`, the status checker's self-test and real
-repository check, workflow YAML parsing, immutable-action and permission
-sweeps, Markdown relative-link validation, `shellcheck scripts/verify-all.sh`,
-and `git diff --check` also passed.
+The complete default `bash scripts/verify-all.sh` matrix passed before the
+Track J implementation commit `b08f693`. `dist generate --check`, the status
+checker's self-test and repository check, workflow YAML parsing, immutable-
+action and permission sweeps, Markdown relative-link validation,
+`shellcheck scripts/verify-all.sh`, and `git diff --check` also passed.
 
 Required negative controls were observed before being reverted byte-for-byte:
 the exact Unknown-set test rejected both an extra member and a missing member;
