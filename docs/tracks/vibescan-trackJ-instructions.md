@@ -687,6 +687,23 @@ Requirements:
 
 ---
 
+## Track J closure record
+
+J12 instructed the implementer not to modify
+`scripts/verify-release-publishing.py` and to report a failure rather than
+silently adjust the verifier. That instruction was under-specified: it named a
+real workflow regression and an unjustified script adjustment as the two
+possible causes, but omitted the cause actually observed. The verifier still
+encoded the pre-J8 mutable `rust-lang/crates-io-auth-action@v1` expectation
+after J8 had superseded it with a commit-SHA pin. With explicit user
+authorization, Track J corrected that stale assertion to require the same
+action identity at a 40-character SHA plus a version comment. This was an
+authorized correction to an obsolete assertion, not a deviation from a
+still-valid instruction; `PUBLISH_ORDER` and
+`REQUIRED_CUSTOM_PUBLISH_PERMISSIONS` were unchanged.
+
+---
+
 ## Out of scope for Track J
 
 Named so the plan is complete, and deliberately **not** authorized here:

@@ -21,6 +21,10 @@ classification_coverage: 0.7777777777777778
 open_tracks: none
 ```
 
+`head_commit` records the commit at which status was last reconciled; because a
+commit cannot contain its own SHA, the value is expected to be an ancestor of
+current `HEAD`, not an equality guarantee.
+
 Authority: `vibescan-architecture.md`. This file records observed current
 status; it does not override the architecture or prove completion by itself.
 Historical verification evidence is preserved in
@@ -218,7 +222,9 @@ request CI. Its preflight exposed a stale mutable-tag assertion left by J8; the
 user authorized replacing that assertion with a requirement for the same
 action identity at an immutable 40-character SHA with its `v1.x.y` comment.
 Negative controls proved that both a mutable action tag and a missing publish
-permission fail with precise messages, then restored the source hashes.
+permission fail with precise messages, then restored the source hashes. The
+authorized correction is recorded in the
+[Track J closure record](docs/tracks/vibescan-trackJ-instructions.md#track-j-closure-record).
 
 On `e899d4f`, `bash scripts/verify-all.sh`, `dist generate --check`, and
 `shellcheck scripts/verify-all.sh` passed. The optional real-repository leg was
