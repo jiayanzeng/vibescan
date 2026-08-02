@@ -21,8 +21,9 @@ Use repository documents in this order:
 5. `STATE.md`, `README.md`, and task instruction files as status/history only.
 
 `STATE.md` is never proof that an item is complete. Re-check the current
-checkout and run the relevant gates. `vibescan-tierC-instructions.md` records a
-completed implementation tier; it does not supersede the architecture.
+checkout and run the relevant gates.
+`docs/tracks/vibescan-tierC-instructions.md` records a completed implementation
+tier; it does not supersede the architecture.
 Existing code may predate this contract; known mismatches are recorded in
 `STATE.md`. Do not treat their presence as permission to repeat or normalize
 them. Fix them within the authorized task scope or report them explicitly.

@@ -18,6 +18,18 @@ that enforce architecture or hardening gates.
   matrix in root `AGENTS.md`; do not imply that a partial script proves all CI
   gates.
 
+`check-status-consistency.py` is an offline status gate, not a full closeout
+matrix. It must parse the fixed `STATE.md` current-state block, compare only
+repository-owned source artifacts, report field-level drift, and retain
+synthetic pass/fail controls in `--self-test` mode. It must not query release
+channels or substitute for `verify-all.sh`.
+
+`verify-all.sh` is the canonical full closeout matrix. Its default invocation
+is offline and composes every graph and assurance gate required by root
+`AGENTS.md`; a real-repository leg remains explicit and opt-in.
+`verify-hardening-checks.sh` is the narrower hardening composition used by CI
+and by that full matrix. It does not replace `verify-all.sh`.
+
 ## Boundary checker
 
 `check-network-boundary.sh` is a security control. It must inspect exact Cargo

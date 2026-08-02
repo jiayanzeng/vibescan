@@ -1,5 +1,10 @@
 # vibescan — Tier F Close-out Instructions
 
+**Authority:** `vibescan-architecture.md`. This document is a task record and
+closure artifact. It is **not** a status source; current state lives in
+`STATE.md`. Completion claims here were true when recorded and must be
+re-verified against the current checkout.
+
 Reviewed: 2026-07-18
 Status: **complete**. CF1 landed at `f215c6e`; CF2 refreshed `STATE.md` from the
 actual committed baseline and metrics. A same-day re-audit found every CF1/CF2
@@ -27,7 +32,7 @@ is unpinned) then **CF2** (P2 — hygiene; records CF1's landing).
 - **§11.1 clause 5 (Failure semantics):** registry failures are *"non-fatal and
   distinguishable,"* a network outage *"must not manufacture a High finding,"*
   and an unreachable registry must never be conflated with a nonexistent package.
-- **Tier F, F2 acceptance criterion 4** (`docs/vibescan-tierF-instructions.md`):
+- **Tier F, F2 acceptance criterion 4** (`docs/tracks/vibescan-tierF-instructions.md`):
   a mocked registry outage yields `RegistryUnavailable`, **not**
   `NonexistentPackage`; a mocked OSV download failure yields
   `OsvSnapshotUnavailable` and **no** false clean; **§11.0 structural findings

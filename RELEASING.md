@@ -139,17 +139,7 @@ reused.
    bash scripts/test-publish-crates.sh
    dist generate --check
    dist plan
-   cargo fmt --all -- --check
-   cargo clippy --workspace --all-targets --locked -- -D warnings
-   cargo clippy --workspace --all-targets --features network --locked -- -D warnings
-   cargo clippy --workspace --all-targets --features registry --locked -- -D warnings
-   cargo clippy --workspace --all-targets --features network,registry --locked -- -D warnings
-   cargo test --workspace --locked
-   cargo test --workspace --features network --locked
-   cargo test --workspace --features registry --locked
-   cargo test --workspace --features network,registry --locked
-   bash scripts/check-network-boundary.sh
-   git diff --check
+   bash scripts/verify-all.sh
    ```
 
 5. Merge the version change, create an annotated `v<version>` tag on that merge,

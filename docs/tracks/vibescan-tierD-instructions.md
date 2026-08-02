@@ -1,5 +1,10 @@
 # vibescan — Codex Instructions: Tier D (v1 closeout / assurance)
 
+**Authority:** `vibescan-architecture.md`. This document is a task record and
+closure artifact. It is **not** a status source; current state lives in
+`STATE.md`. Completion claims here were true when recorded and must be
+re-verified against the current checkout.
+
 Reviewed: 2026-07-13
 Author: architecture review (Claude), for implementation by Codex
 

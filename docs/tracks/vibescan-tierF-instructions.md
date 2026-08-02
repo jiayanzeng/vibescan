@@ -1,5 +1,10 @@
 # vibescan — Codex Instructions: Track F (registry egress & `vibescan-registry`)
 
+**Authority:** `vibescan-architecture.md`. This document is a task record and
+closure artifact. It is **not** a status source; current state lives in
+`STATE.md`. Completion claims here were true when recorded and must be
+re-verified against the current checkout.
+
 Reviewed: 2026-07-18
 Author: architecture review (Claude), for implementation by Codex
 Status: **complete and close-out verified** at the `f215c6e` implementation

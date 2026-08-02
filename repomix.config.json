@@ -1,4 +1,9 @@
 {
+    "ignore": {
+        "customPatterns": [
+            "content/**"
+        ]
+    },
     "security": {
         "enableSecurityCheck": false
     }

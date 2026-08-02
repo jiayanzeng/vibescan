@@ -1,5 +1,10 @@
 # Track G closeout — rollout instructions (G4)
 
+**Authority:** `vibescan-architecture.md`. This document is a task record and
+closure artifact. It is **not** a status source; current state lives in
+`STATE.md`. Completion claims here were true when recorded and must be
+re-verified against the current checkout.
+
 **Status basis:** PR #5 merged the G3 publishers, provenance wiring, Homebrew
 formula, and `RELEASING.md` to `main` at `cb048b9` (26/26 checks green). Its
 initial rollout was 0% because publishers fire only on a tag. G4.3 is now
