@@ -3,14 +3,14 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-02
-head_commit: e899d4fb9b670bcd6fbe4b986d214b7776107a0b
-branch: codex/track-j-assurance-hygiene
+head_commit: c423ef50ae4bdbfae390094ac9c003cb2261cc60
+branch: main
 worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
 released_version: 0.2.0
 released_tag: v0.2.0
-integration_status: committed-not-merged
+integration_status: merged
 corpus_version: tier-h2-live-v1
 corpus_tp: 15
 corpus_fp: 0
@@ -32,9 +32,7 @@ Historical verification evidence is preserved in
 
 The current repository checkpoint is `0.2.0`, tagged by the annotated
 `v0.2.0` tag. Track H is merged to `main` at `e9390be`; Track J and its
-J10–J12 addendum are committed through `e899d4f` on the branch named above but
-are not merged. J0 refreshed `origin` and confirmed that local
-`main`, `origin/main`, and the Track H closeout commit agree. The six npm
+J10–J12 addendum are merged to `main` at `c423ef5`. The six npm
 packages and all eight Cargo crates declare version `0.2.0`. Public release
 channels were not queried during J0, so `released_version` uses the workspace
 version and must not be read as fresh proof that every registry channel
@@ -118,7 +116,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 | Reporting and gates | Implemented | JSON, SARIF, TTY, and HTML are redacted and deterministic; baseline-suppressed findings do not affect stats or exit policy. |
 | Configuration and CLI | Implemented | Defaults < repository TOML < explicit CLI precedence and repository-root relative paths are tested; repository config alone cannot enable Network work. |
 | Distribution | Track G complete | The static five-target build, ships-only npm wrapper, crates.io/npm/Homebrew publishers, checksums, and attestations are implemented. Live channel state was not re-verified in Track J J0. |
-| Assurance | Track J plus addendum committed, not merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency now verifies Repomix hygiene and Git truth, four-graph CI and release structure run on pull requests, immutable workflow actions remain enforced, and the canonical offline matrix covers these controls without changing scanner results. |
+| Assurance | Track J plus addendum merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency now verifies Repomix hygiene and Git truth, four-graph CI and release structure run on pull requests, immutable workflow actions remain enforced, and the canonical offline matrix covers these controls without changing scanner results. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner is authorized here. |
 
 ## Strict gaps and known risks
@@ -154,13 +152,11 @@ structural verifier on both the canonical matrix and pull-request CI path.
 
 ## Detailed next steps
 
-1. Review and merge the Track J pull request without squashing away the
-   repository-history-preserving document moves.
-2. Keep real-repository validation explicit and sanitized; never point the
+1. Keep real-repository validation explicit and sanitized; never point the
    optional leg at user data without authorization.
-3. Continue clean-control and planted-positive real-repository sampling before
+2. Continue clean-control and planted-positive real-repository sampling before
    expanding generic detection breadth.
-4. Keep Track I gated on explicit user demand, ownership-proof ratification,
+3. Keep Track I gated on explicit user demand, ownership-proof ratification,
    and a non-persisting design. No Track J work enters that deferred track.
 
 ## Closeout gate for future milestone claims
