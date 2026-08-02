@@ -3,7 +3,7 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-02
-head_commit: b08f693912a932ba6f4d9a3d64de985262a60e53
+head_commit: e899d4fb9b670bcd6fbe4b986d214b7776107a0b
 branch: codex/track-j-assurance-hygiene
 worktree: clean
 workspace_version: 0.2.0
@@ -27,9 +27,9 @@ Historical verification evidence is preserved in
 [`docs/STATE-HISTORY.md`](docs/STATE-HISTORY.md).
 
 The current repository checkpoint is `0.2.0`, tagged by the annotated
-`v0.2.0` tag. Track H is merged to `main` at `e9390be`, and the Track J
-implementation is committed at `b08f693` on the branch named above but is not
-merged. J0 refreshed `origin` and confirmed that local
+`v0.2.0` tag. Track H is merged to `main` at `e9390be`; Track J and its
+J10–J12 addendum are committed through `e899d4f` on the branch named above but
+are not merged. J0 refreshed `origin` and confirmed that local
 `main`, `origin/main`, and the Track H closeout commit agree. The six npm
 packages and all eight Cargo crates declare version `0.2.0`. Public release
 channels were not queried during J0, so `released_version` uses the workspace
@@ -114,7 +114,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 | Reporting and gates | Implemented | JSON, SARIF, TTY, and HTML are redacted and deterministic; baseline-suppressed findings do not affect stats or exit policy. |
 | Configuration and CLI | Implemented | Defaults < repository TOML < explicit CLI precedence and repository-root relative paths are tested; repository config alone cannot enable Network work. |
 | Distribution | Track G complete | The static five-target build, ships-only npm wrapper, crates.io/npm/Homebrew publishers, checksums, and attestations are implemented. Live channel state was not re-verified in Track J J0. |
-| Assurance | Track J committed, not merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency, four-graph CI, immutable workflow actions, and the canonical offline matrix are enforced without changing scanner results. |
+| Assurance | Track J plus addendum committed, not merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency now verifies Repomix hygiene and Git truth, four-graph CI and release structure run on pull requests, immutable workflow actions remain enforced, and the canonical offline matrix covers these controls without changing scanner results. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner is authorized here. |
 
 ## Strict gaps and known risks
@@ -131,7 +131,10 @@ No open P1 assurance-infrastructure gap is recorded. Track J added the
 machine-readable current-state contract and offline consistency checker,
 pinned the corpus's exact Unknown classification set, added explicit combined
 `network,registry` clippy and test jobs, SHA-pinned every third-party workflow
-action, and made `scripts/verify-all.sh` the canonical full offline matrix.
+action, and made `scripts/verify-all.sh` the canonical full offline matrix. The
+J10–J12 addendum prevents Repomix bundles from being tracked, verifies branch
+and integration claims against local Git state, and puts the release-channel
+structural verifier on both the canonical matrix and pull-request CI path.
 
 ### P2 — measured product depth
 
@@ -147,8 +150,8 @@ action, and made `scripts/verify-all.sh` the canonical full offline matrix.
 
 ## Detailed next steps
 
-1. Review and integrate the completed Track J branch without squashing away
-   the repository-history-preserving document moves.
+1. Review and merge the Track J pull request without squashing away the
+   repository-history-preserving document moves.
 2. Keep real-repository validation explicit and sanitized; never point the
    optional leg at user data without authorization.
 3. Continue clean-control and planted-positive real-repository sampling before
@@ -168,7 +171,8 @@ The optional sanitized real-repository leg requires
 `--real-repo /absolute/path`; it is skipped by default. The default matrix is
 offline and includes formatting, all four clippy graphs, all four test graphs,
 the real-repository oracle self-test, Network-boundary checks, status
-consistency, the offline hardening aggregate, and `git diff --check`.
+consistency, release-publishing structure, the offline hardening aggregate,
+and `git diff --check`.
 
 Use `UPDATE_GOLDEN=1` or `UPDATE_METRICS=1` only after an intentional result
 change, inspect every artifact diff, then rerun without the variable. Do not
@@ -190,3 +194,31 @@ the exact failing step for both a format defect and a combined-feature-only
 clippy warning. No live probe, public registry query, or user real-repository
 scan was run. The optional real-repository leg was explicitly reported as
 skipped because no fixture was supplied.
+
+## Track J addendum verification observed on 2026-08-02
+
+J10 generated a real Repomix bundle at the pinned `repomix-output.xml` path;
+all root, Markdown, and nested variants matched the ignore rule, and generation
+on committed checkout `e899d4f` left `git status --porcelain` empty. The
+required force-stage negative control made the status checker fail with the
+tracked bundle path, after which the bundle was removed from the index and
+remained only as an ignored local artifact. JSON parsing confirmed that
+`content/**` remains excluded and the security-check setting is unchanged.
+
+J11's self-tests and real repository check passed. Independent negative
+controls rejected a false `merged` claim and a wrong branch while printing the
+claimed and observed Git facts; both edits were reverted byte-for-byte. A
+depth-one local clone with no `origin/main` exited successfully and printed
+explicit skip messages for the branch and integration truth checks.
+
+J12's release-publishing verifier now runs in the canonical matrix and pull-
+request CI. Its preflight exposed a stale mutable-tag assertion left by J8; the
+user authorized replacing that assertion with a requirement for the same
+action identity at an immutable 40-character SHA with its `v1.x.y` comment.
+Negative controls proved that both a mutable action tag and a missing publish
+permission fail with precise messages, then restored the source hashes.
+
+On `e899d4f`, `bash scripts/verify-all.sh`, `dist generate --check`, and
+`shellcheck scripts/verify-all.sh` passed. The optional real-repository leg was
+skipped because no fixture was supplied. No live probe, public registry query,
+credentialed test, or target-project write was performed.
