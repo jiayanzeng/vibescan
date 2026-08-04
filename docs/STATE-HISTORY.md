@@ -9,6 +9,54 @@ Errata notes are inline, dated, and never replace the historical record they ann
 
 ---
 
+## Track K post-merge reconciliation observed on 2026-08-04
+
+PR #15 merged Track K to `main` as merge commit
+`134b49f4e89c197d8de816875ad1dfd0a3c58e12`, with parents
+`e1acd83572411043242e0a374133ae51f4e4db68` and
+`983b2b2c5b2a5d66bcfe0aae39517ae489426e69`. The first main-branch
+`status-consistency` job then failed exactly as designed because the merged
+tree still recorded `integration_status: committed-not-merged`. Its output was:
+
+```text
+status-consistency: integration_status: STATE.md='committed-not-merged' contradicts git: head_commit_resolves=true, merged_into_origin/main=true, worktree_dirty=false
+```
+
+After fetching origin and fast-forwarding a clean local `main` to the merge
+commit, the same command reproduced that exit-1 result before any edit. This
+was the post-merge negative control: it proved the checker detects the precise
+transition that requires reconciliation rather than indicating a checker or
+workflow defect.
+
+The current-state block was then re-derived from repository sources. Version,
+license, release, and corpus fields remain unchanged; `head_commit` now records
+the Track K merge commit, `integration_status` is `merged`, and `open_tracks`
+is `none`. The workspace-structure matrix and current integration prose now
+record Track K as merged. The existing head-commit contract remains unchanged:
+the value is a last-reconciled ancestor marker, not a current-HEAD guarantee.
+
+Commands actually run were:
+
+```sh
+git fetch origin
+git show -s --format='%H%n%P%n%s' origin/main
+git merge-base --is-ancestor 983b2b2c5b2a5d66bcfe0aae39517ae489426e69 origin/main
+git switch main
+git merge --ff-only origin/main
+python3 scripts/check-status-consistency.py
+python3 scripts/check-status-consistency.py --self-test
+python3 scripts/check-public-api.py
+bash scripts/verify-all.sh
+git diff --check
+```
+
+The pre-edit status command exited 1 with the contradiction above. After
+reconciliation, the status self-test and repository gate, public-API gate, full
+offline matrix, and whitespace check passed. No production source, fixture,
+golden, snapshot, metrics baseline, workflow, checker logic, dependency edge,
+feature gate, or egress path changed. The optional real-repository leg was
+skipped because no fixture was supplied.
+
 ## Track K public-API gate scope follow-up observed on 2026-08-04
 
 This follow-up remained an assurance-only amendment to the open, unmerged

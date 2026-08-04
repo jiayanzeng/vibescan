@@ -3,13 +3,13 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-04
-head_commit: e746ec8ea59f709a387e64ec5ceb80529d9a849e
+head_commit: 134b49f4e89c197d8de816875ad1dfd0a3c58e12
 worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
 released_version: 0.2.0
 released_tag: v0.2.0
-integration_status: committed-not-merged
+integration_status: merged
 corpus_version: tier-h2-live-v1
 corpus_tp: 15
 corpus_fp: 0
@@ -17,7 +17,7 @@ corpus_fn: 0
 corpus_precision: 1.0
 corpus_recall: 1.0
 classification_coverage: 0.7777777777777778
-open_tracks: Track K
+open_tracks: none
 ```
 
 `head_commit` records the commit at which status was last reconciled; because a
@@ -31,8 +31,8 @@ Historical verification evidence is preserved in
 
 The current repository checkpoint is `0.2.0`, tagged by the annotated
 `v0.2.0` tag. Track H is merged to `main` at `e9390be`; Track J final
-closeout is merged to `main` at `e1acd83`. Track K is committed on its
-feature branch through `e746ec8` and is not yet merged. The six npm
+closeout is merged to `main` at `e1acd83`. Track K is merged to `main` at
+`134b49f`. The six npm
 packages and all eight Cargo crates declare version `0.2.0`. On 2026-08-02,
 identified anonymous read-only HTTPS GETs confirmed that all eight crates.io
 identities have maximum published version `0.2.0` and all six npm `latest`
@@ -91,6 +91,8 @@ identical while the authorized module prefixes are recorded.
 pull-request CI. The detailed layout, architecture citations, prefix changes,
 derivation blind spots, and negative-control evidence are in
 [`docs/tracks/vibescan-trackK-instructions.md`](docs/tracks/vibescan-trackK-instructions.md).
+PR #15 merged these changes at `134b49f`; the post-merge reconciliation records
+that merge commit as the last status-reconciliation marker.
 
 Track J began from `main` at `e9390beeb5bc8bbdb8550da3c58434d63d62faf7`,
 which equals refreshed `origin/main`. J0 found one pre-existing change: the
@@ -122,7 +124,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 |---|---|---|
 | Design and privacy invariants | Safety core verified | LocalStatic is the default; raw secrets do not cross the candidate-to-finding boundary; Network actions are separately gated and read-only or catalog-read-only. |
 | Crate graph | Verified eight-crate post-v1 graph | The only post-v1 crate is `vibescan-registry`; the exact dependency and transport-parent boundaries are machine-checked. |
-| Workspace structure | Track K committed, pending merge | Every crate whose pre-track `src/lib.rs` exceeded 800 lines is decomposed into architecture-owned private modules and architecture-named real test modules; all scoped source files are at most 788 lines. Exact crate-root re-exports preserve all 144 legacy inventory entries, while the expanded offline gate measures 477 records across all seven library crates and all 199 test basenames remain identical. |
+| Workspace structure | Track K merged | Every crate whose pre-track `src/lib.rs` exceeded 800 lines is decomposed into architecture-owned private modules and architecture-named real test modules; all scoped source files are at most 788 lines. Exact crate-root re-exports preserve all 144 legacy inventory entries, while the expanded offline gate measures 477 records across all seven library crates and all 199 test basenames remain identical. |
 | Collection and identity | Implemented | Full-content identity retains all distinct paths, provenances, and location classes; the pipeline remains materialized rather than streamed. |
 | Location classification | Track H complete | Segment-aware precedence, monorepo depth, content-sensitive `src/api/`, and independent oracle behavior are pinned by fixtures and truth-table tests. |
 | Detection and Supabase semantics | Implemented | The embedded generic substrate, exact-revision enrichment, new/legacy key classes, and conservative project-aware coalescing are covered. |
@@ -174,13 +176,11 @@ checker rather than silently approximated.
 
 ## Detailed next steps
 
-1. Review and merge Track K through its pull request, then reconcile this
-   status record against merged `origin/main`.
-2. Keep real-repository validation explicit and sanitized; never point the
+1. Keep real-repository validation explicit and sanitized; never point the
    optional leg at user data without authorization.
-3. Continue clean-control and planted-positive real-repository sampling before
+2. Continue clean-control and planted-positive real-repository sampling before
    expanding generic detection breadth.
-4. Keep Track I gated on explicit user demand, ownership-proof ratification,
+3. Keep Track I gated on explicit user demand, ownership-proof ratification,
    and a non-persisting design. No Track J work enters that deferred track.
 
 ## Closeout gate for future milestone claims
