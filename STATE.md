@@ -3,7 +3,7 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-04
-head_commit: 134b49f4e89c197d8de816875ad1dfd0a3c58e12
+head_commit: 17053d0c8f0a958b7f5e95d5d16ffd23eb750bfb
 worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
@@ -91,8 +91,9 @@ identical while the authorized module prefixes are recorded.
 pull-request CI. The detailed layout, architecture citations, prefix changes,
 derivation blind spots, and negative-control evidence are in
 [`docs/tracks/vibescan-trackK-instructions.md`](docs/tracks/vibescan-trackK-instructions.md).
-PR #15 merged these changes at `134b49f`; the post-merge reconciliation records
-that merge commit as the last status-reconciliation marker.
+PR #15 merged these changes at `134b49f`. PR #16 merged the post-merge status
+reconciliation at `17053d0`; the current-state block records that follow-up
+merge as the last status-reconciliation marker.
 
 Track J began from `main` at `e9390beeb5bc8bbdb8550da3c58434d63d62faf7`,
 which equals refreshed `origin/main`. J0 found one pre-existing change: the
