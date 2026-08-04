@@ -9,6 +9,55 @@ Errata notes are inline, dated, and never replace the historical record they ann
 
 ---
 
+## Track K final status reconciliation observed on 2026-08-04
+
+PR #16 merged the Track K post-merge status record to `main` as merge commit
+`17053d0c8f0a958b7f5e95d5d16ffd23eb750bfb`, with parents
+`134b49f4e89c197d8de816875ad1dfd0a3c58e12` and
+`b31008956739e8361f1cb9848c1f826a7efeb3bb`. The clean, up-to-date merged
+checkout contained `integration_status: merged` and recorded `134b49f` as its
+last reconciliation marker.
+
+Contrary to the anticipated post-merge failure, the pre-edit status checker
+passed. That is the correct result under the Track J final contract:
+`integration_status` describes whether the recorded `head_commit` is reachable
+from `origin/main`, not whether it equals the checkout tip. The recorded
+`134b49f` remained a merged ancestor after PR #16, so no contradiction existed
+and no artificial failure was introduced. `head_commit` was then refreshed to
+the PR #16 merge commit while `integration_status` correctly remained `merged`.
+
+The version, license, tag, release, corpus, and open-track fields were
+re-derived from their repository sources and remained unchanged. Repomix
+v1.17.0 regenerated the configured `repomix-output.xml` bundle after the merge;
+the J10 ignore rule kept it out of Git, and the committed reconciliation branch
+remained clean afterward.
+
+Commands actually run were:
+
+```sh
+gh pr merge 16 --merge --delete-branch
+git show -s --format='%H%n%P%n%s' origin/main
+git merge-base --is-ancestor b31008956739e8361f1cb9848c1f826a7efeb3bb origin/main
+python3 scripts/check-status-consistency.py
+git switch -c codex/track-k-final-status-reconciliation origin/main
+rg -n '^version =|^license =' Cargo.toml crates/*/Cargo.toml
+jq '{corpus_version, totals}' tests/fixtures/corpus-metrics-baseline.json
+git tag --points-at c707ce6
+NPM_CONFIG_USERCONFIG=/dev/null NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem \
+  npx --yes repomix@1.17.0
+python3 scripts/check-status-consistency.py --self-test
+python3 scripts/check-status-consistency.py
+bash scripts/verify-all.sh
+git diff --check
+git status --porcelain
+```
+
+The status self-test and repository check, complete offline verification
+matrix, and whitespace check passed. The optional real-repository leg was
+skipped because no fixture was supplied. No production source, fixture,
+golden, snapshot, metrics baseline, workflow, checker logic, dependency edge,
+feature gate, egress path, release tag, or published artifact changed.
+
 ## Track K post-merge reconciliation observed on 2026-08-04
 
 PR #15 merged Track K to `main` as merge commit
