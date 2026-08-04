@@ -9,6 +9,180 @@ Errata notes are inline, dated, and never replace the historical record they ann
 
 ---
 
+## Track K public-API gate scope follow-up observed on 2026-08-04
+
+This follow-up remained an assurance-only amendment to the open, unmerged
+PR #15 branch. It corrected two scope gaps in the standing public-API gate:
+`vibescan-types`, the architecture §§3–4 shared and serialized vocabulary, was
+absent from `SCOPED_CRATES`, and the source parser ignored declarations below
+module brace depth zero. `vibescan-cli` remains excluded because it is a binary
+crate with no library surface.
+
+The source-derived artifact now records public fields of public named and tuple
+structs, public inherent methods and associated functions/constants/types, and
+source-declared trait implementations on public local types. Records are
+qualified by parent type and sorted. All 144 prior lines are present unchanged:
+`comm` found 144 shared and zero removed. The artifact expanded by 333 existing
+surface records to 477 total: 10 associated functions, 4 constants, 31 enums,
+168 fields, 23 functions, 13 methods, 7 modules, 47 structs, 5 traits, 24 trait
+implementations, and 145 variants. `vibescan-types` accounts for 206 records,
+including 78 named public fields and six public tuple positions.
+
+The checker header documents the source-text limits instead of approximating
+them: macro-generated items and derive impls are invisible; cfg declarations
+form one textual union rather than per-feature surfaces; external items are
+measured in the defining scoped crate and renamed re-exports are unresolved;
+complex or blanket impl self types that do not resolve to one inventoried
+local public type are omitted; and enum payload fields and public-trait members
+are not separate records. The derivation remains standard-library-only,
+offline, deterministic, and independent of build output.
+
+The commands actually run for the baseline, derivation, and focused evidence
+were:
+
+```sh
+gh pr view 15 --json number,state,isDraft,mergedAt,headRefName,headRefOid,baseRefName,url
+git status --porcelain=v1 --branch
+python3 scripts/check-public-api.py
+bash scripts/verify-all.sh
+python3 scripts/check-public-api.py --self-test
+python3 scripts/check-public-api.py --write
+comm -23 /tmp/vibescan-public-api-144.txt docs/public-api-inventory.txt
+comm -12 /tmp/vibescan-public-api-144.txt docs/public-api-inventory.txt
+python3 scripts/check-public-api.py
+git diff -- crates
+```
+
+After documentation reconciliation, the final acceptance commands were:
+
+```sh
+python3 scripts/check-public-api.py --self-test
+python3 scripts/check-public-api.py
+python3 scripts/check-status-consistency.py
+bash scripts/verify-all.sh
+dist generate --check
+git ls-files -z -- '*.sh' | xargs -0 shellcheck
+git diff --check
+git diff -- crates tests/fixtures
+```
+
+The API self-test and repository gate, status-consistency gate, full four-graph
+offline matrix, cargo-dist generated-file check, and every tracked shell script
+passed. The final crate/fixture diff and whitespace check were empty. The
+optional real-repository leg was explicitly skipped because no fixture was
+supplied.
+
+Three controls temporarily edited crate source and were reverted immediately.
+Adding
+`ScannableUnit::track_k_api_gate_field_control` made the expanded checker exit
+1 and name the field; adding
+`Severity::track_k_api_gate_method_control` made it exit 1 and name the method.
+The method control was then repeated as
+`vibescan_core::ScanConfig::track_k_api_gate_method_control`, an already-
+scoped type, to isolate the former brace-depth defect independently from the
+`vibescan-types` omission. For every temporary tree, the frozen pre-follow-up
+checker passed against its original 144-line inventory, proving each widening
+was genuinely invisible to the old gate. Reversion restored the exact types
+source SHA-256
+`8c3bfd974fb21f1477ec9f006e8314fcc6fc92261c6348d3798020d75ebca7f0`;
+`git diff -- crates` and `git diff -- tests/fixtures` were empty.
+
+No crate source, visibility, behavior, serialized shape, fixture, golden,
+snapshot, metrics baseline, crate edge, feature gate, or egress path changed.
+`UPDATE_GOLDEN` and `UPDATE_METRICS` were never set. No network capability,
+credential, real-repository scan, or target-project access was involved.
+
+## Track K addendum observed on 2026-08-04
+
+The addendum remained a behavior-preserving `LocalStatic` source-layout and
+assurance change on the open, unmerged PR #15 branch. It corrected two defects
+in the original Track K instruction. First, requiring identical Cargo test
+paths made genuine test modules impossible because Cargo includes the module
+path in each name. The authorized replacement preserves the exact set of test-
+function basenames and records every changed prefix. Second, crate-root
+`pub use module::*` left the API implicit: a later `pub` definition could join
+the public surface without a crate-root diff. Replacing every public glob with
+exact named re-exports is an authorized correction to that defective layout,
+not a deviation from a still-valid instruction.
+
+The real test layout mirrors production ownership and architecture vocabulary:
+
+- core uses `baseline`, `config`, `correlation`, `dependencies`, `error`,
+  `findings`, and `pipeline` modules from architecture §§6 and 12;
+- Supabase uses `classifier`, `tier0`, `tier1`, and `catalog` from §§7 and 10;
+- Git uses `collector`, `history`, `ignore_policy`, and `location` from §§5,
+  6, and 8;
+- Registry uses `checks`, `model`, `cache`, and `transport` from §§11.1–11.2;
+- Report uses `output`, `presentation`, `sarif`, and `summaries` from
+  §§13.3–13.4; and
+- Secrets uses `config` and `detector` from §9. Section 14 governs every test
+  module and the unchanged crate-level integration tests.
+
+The former core `registry_failure_tests.rs` now lives at
+`src/tests/pipeline_registry.rs`: it proves that core pipeline findings survive
+degraded Registry results, so it is a feature-gated orchestration test rather
+than a production module. No `pub(crate)` item was added, and no visibility was
+widened.
+
+The addendum independently re-derived both original invariants from Git rather
+than trusting Track K capture files. The current
+`scripts/check-public-api.py` implementation read clean `git archive` trees at
+pre-Track-K `e1acd835` and post-Track-K/pre-addendum `ffb62f9`, then the
+addendum worktree. All three local crate-root inventories contain 144 items and
+are byte-identical at SHA-256
+`6fc333af1ac6329fd28669a887e5875d2e54c6dea082c0cd219e53002fb42805`.
+The same archived pre-Track-K tree and current Cargo list method both contain
+199 unique test basenames at SHA-256
+`570948a00fed888fb1dacf4d0f2a047a2a8399599c66b10e5287381ec1ae826f`.
+The complete prefix/count mapping is preserved in the Track K instruction
+record. The generated API artifact is now checked by the canonical matrix and
+pull-request CI; intentional changes use
+`python3 scripts/check-public-api.py --write` followed by review of the diff.
+
+The following commands were actually run:
+
+```sh
+gh pr view 15 --json state,mergedAt,mergeable,mergeStateStatus,headRefName,baseRefName,url
+git status --short
+git merge-base origin/main HEAD
+bash scripts/verify-all.sh
+cargo test --workspace --all-features -- --list
+python3 scripts/check-public-api.py --self-test
+python3 scripts/check-public-api.py
+python3 scripts/check-public-api.py --write
+cargo test --workspace --all-features --no-run
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test -p vibescan-core --test golden_corpus --locked
+dist generate --check
+shellcheck scripts/verify-all.sh
+bash scripts/verify-all.sh
+git diff --check
+```
+
+For the Git-derived comparisons, `git archive` extracted `e1acd835` and
+`ffb62f9` into isolated temporary directories. The current public checker ran
+against both trees. Cargo listed tests from the extracted merge-base tree with
+an isolated ignored target directory, and the same basename normalization ran
+on the addendum checkout.
+
+Two required controls were observed and reverted byte-for-byte. A temporary
+crate-root function named `track_k_public_inventory_negative_control` made the
+new checker exit 1 and print that exact added path; restoring the file restored
+its SHA-256 and the gate passed. A temporary change to the moved core
+`fingerprint` function made `golden_corpus_matches_expected_manifests` fail on
+`vendor-chunks-noise/expected.json`, with both the stable key and fingerprint
+contradictions shown. Restoring the function restored its exact SHA-256 and the
+golden corpus passed without updating an artifact. `UPDATE_GOLDEN` and
+`UPDATE_METRICS` were never set.
+
+No detection, correlation, classifier, severity, identifier, serialization,
+exit, dependency, feature, or egress behavior changed. The fixture tree,
+metrics baseline, report snapshots, Cargo DAG, and
+`scripts/check-network-boundary.sh` remain untouched. No live Network request,
+credential read, Registry probe, real-repository scan, or target-project access
+was performed. PR #15 remains the owner-controlled integration boundary.
+
 ## Track J final closeout observed on 2026-08-02
 
 Track J was assurance and repository hygiene in the `LocalStatic` capability

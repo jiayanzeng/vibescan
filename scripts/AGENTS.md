@@ -36,6 +36,14 @@ is offline and composes every graph and assurance gate required by root
 `verify-hardening-checks.sh` is the narrower hardening composition used by CI
 and by that full matrix. It does not replace `verify-all.sh`.
 
+`check-public-api.py` is the offline crate-root API-surface gate for the six
+crates decomposed by Track K. It derives local named public items and enum
+variants directly from source, resolves private-module crate-root re-exports,
+and compares them with `docs/public-api-inventory.txt`. Intentional API changes
+require architecture review followed by the single regeneration command
+`python3 scripts/check-public-api.py --write`; inspect the generated diff before
+committing it. A source-layout change must pass without regeneration.
+
 `repomix.config.json` deliberately disables Repomix's security check because
 the default ruleset and committed fixtures contain synthetic credential-shaped
 strings that must remain byte-exact in an audit bundle. Repomix redaction would
