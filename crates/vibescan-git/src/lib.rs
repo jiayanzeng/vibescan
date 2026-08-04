@@ -37,8 +37,11 @@ use ignore_policy::*;
 use location::*;
 use working_tree::*;
 
-pub use error::*;
-pub use repository::*;
+pub use error::GitWalkError;
+pub use repository::{
+    DEFAULT_MAX_BYTES, HistoryWalkStats, WalkOptions, WalkOutput, WalkStats, collect_repository,
+    discover_repository_root,
+};
 
 #[cfg(test)]
 mod tests;

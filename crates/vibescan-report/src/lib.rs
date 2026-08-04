@@ -19,7 +19,9 @@ use presentation::*;
 use sarif::*;
 use summaries::*;
 
-pub use output::*;
+pub use output::{
+    ReportFormat, TtyStyle, exit_code, render, render_html, render_json, render_sarif, render_tty,
+};
 
 #[cfg(test)]
 mod tests;

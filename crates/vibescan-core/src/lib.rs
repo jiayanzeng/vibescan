@@ -46,18 +46,26 @@ mod findings;
 mod pipeline;
 
 use baseline::*;
-use correlation::*;
-use dependencies::*;
+use correlation::{
+    ClassifiedKeyFact, ClassifiedKeySource, absorb_correlated_constituents,
+    coalesce_classified_key_facts, resolve_generic_candidates,
+};
+#[cfg(feature = "network")]
+use correlation::{
+    associate_api_references, harvest_api_references, tier0_probe_inputs, tier1_credential_location,
+};
+use dependencies::scan_dependency_integrity;
+#[cfg(feature = "registry")]
+use dependencies::{private_registry_ecosystems, registry_eligible_dependencies};
 use findings::*;
 
-pub use config::*;
-pub use correlation::*;
-pub use dependencies::*;
-pub use error::*;
-pub use pipeline::*;
-
-#[cfg(all(test, feature = "registry"))]
-mod registry_failure_tests;
+pub use config::{
+    OutputFormat, OutputStyle, ScanConfig, TIER1_DB_URL_ENV, TOOL_VERSION, resolve_repository_path,
+};
+pub use correlation::correlate_findings;
+pub use dependencies::parse_dependencies;
+pub use error::CoreError;
+pub use pipeline::{exit_code, scan, scan_and_render};
 
 #[cfg(test)]
 mod tests;

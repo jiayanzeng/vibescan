@@ -32,15 +32,24 @@ mod tier1;
 #[cfg(test)]
 #[cfg(feature = "network")]
 use catalog::*;
-use classifier::*;
+use classifier::{SUPABASE_URL_SUFFIX, is_valid_project_ref};
 #[cfg(feature = "network")]
 use tier1::*;
 
 #[cfg(feature = "network")]
-pub use catalog::*;
-pub use classifier::*;
-pub use tier0::*;
-pub use tier1::*;
+pub use catalog::{PostgresPgCatalogSource, introspect_tier1};
+pub use classifier::SupabaseClassifier;
+#[cfg(feature = "network")]
+pub use tier0::{ReqwestRlsHttpClient, probe_tier0_read};
+pub use tier0::{
+    RlsHttpClient, RlsHttpResponse, RlsProbeError, Tier0RlsProbeInput, Tier0RlsProbeOutput,
+    Tier0RlsProbeWarning, probe_tier0_read_with_client,
+};
+pub use tier1::{
+    CatalogQueryKind, GrantRow, IntrospectError, PgCatalogSource, PolicyRow, TableRls,
+    Tier1IntrospectInput, Tier1IntrospectOutput, Tier1IntrospectWarning,
+    introspect_tier1_with_source, project_from_db_url,
+};
 
 #[cfg(test)]
 mod tests;

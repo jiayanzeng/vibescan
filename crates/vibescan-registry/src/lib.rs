@@ -35,13 +35,15 @@ mod transport;
 
 #[cfg(feature = "transport")]
 use cache::*;
-#[cfg(test)]
-use checks::*;
+use checks::{exact_version, normalize_package_name};
 
-pub use checks::*;
-pub use model::*;
+pub use checks::run_registry_checks;
+pub use model::{
+    AdvisorySet, RegistryCheckInput, RegistryCheckOutput, RegistryError, RegistryResolution,
+    RegistrySource, RegistryWarning,
+};
 #[cfg(feature = "transport")]
-pub use transport::*;
+pub use transport::ReqwestRegistrySource;
 
 #[cfg(test)]
 mod tests;

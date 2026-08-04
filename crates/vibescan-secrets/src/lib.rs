@@ -22,13 +22,13 @@ mod content;
 mod detector;
 mod error;
 
-use content::*;
-use detector::*;
+use content::{byte_to_one_based_col, compile_regexes, normalize_keywords};
+use detector::{CompiledAllowlist, CompiledRule};
 
-pub use config::*;
-pub use content::*;
-pub use detector::*;
-pub use error::*;
+pub use config::{AllowlistConfig, CandidateKindConfig, ContentPolicy, RuleConfig, RulesetConfig};
+pub use content::{is_binary, shannon_entropy, working_tree_unit};
+pub use detector::{DEFAULT_RULESET_TOML, Detector};
+pub use error::DetectorError;
 
 #[cfg(test)]
 mod tests;

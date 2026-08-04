@@ -2,8 +2,8 @@
 
 ```yaml
 # vibescan:current-state
-reviewed: 2026-08-02
-head_commit: 5c2f2965e0ef0e95931d70dabf1e0ed2b0256964
+reviewed: 2026-08-04
+head_commit: ffb62f9f856565b1e869e979f0d87a621cb86ee2
 worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
@@ -79,12 +79,14 @@ Use these three lenses when discussing completion:
 
 Track K began from clean `origin/main` at `e1acd835`. The six crates whose
 `src/lib.rs` exceeded 800 lines were decomposed largest-first in six commits.
-The final scoped source file maximum is 667 lines. The normalized 144-item
-public inventory, the sorted 199-test inventory, and the SHA-256 manifest of
-all 32 fixture/snapshot/metrics files are byte-identical before and after.
-Each final crate commit passed `bash scripts/verify-all.sh` before work
-advanced to the next crate. The detailed layout, architecture citations, and
-negative-control evidence are recorded in
+The addendum replaced textual test fragments with architecture-named real
+modules and replaced crate-root public globs with exact named re-exports. The
+final scoped source file maximum is 788 lines. The source-derived 144-item
+public inventory is byte-identical at pre-Track-K, post-Track-K, and addendum
+points; all 199 test-function basenames are identical while the authorized
+module prefixes are recorded. `scripts/check-public-api.py` now gates that
+surface offline in `verify-all.sh` and pull-request CI. The detailed layout,
+architecture citations, prefix changes, and negative-control evidence are in
 [`docs/tracks/vibescan-trackK-instructions.md`](docs/tracks/vibescan-trackK-instructions.md).
 
 Track J began from `main` at `e9390beeb5bc8bbdb8550da3c58434d63d62faf7`,
@@ -117,7 +119,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 |---|---|---|
 | Design and privacy invariants | Safety core verified | LocalStatic is the default; raw secrets do not cross the candidate-to-finding boundary; Network actions are separately gated and read-only or catalog-read-only. |
 | Crate graph | Verified eight-crate post-v1 graph | The only post-v1 crate is `vibescan-registry`; the exact dependency and transport-parent boundaries are machine-checked. |
-| Workspace structure | Track K committed, pending merge | Every crate whose pre-track `src/lib.rs` exceeded 800 lines is decomposed into architecture-owned private modules; all scoped source files are at most 667 lines, while the 144-item public surface and 199 test names remain identical. |
+| Workspace structure | Track K committed, pending merge | Every crate whose pre-track `src/lib.rs` exceeded 800 lines is decomposed into architecture-owned private modules and architecture-named real test modules; all scoped source files are at most 788 lines. Exact crate-root re-exports and the offline generated gate preserve the 144-item public surface, while all 199 test basenames remain identical. |
 | Collection and identity | Implemented | Full-content identity retains all distinct paths, provenances, and location classes; the pipeline remains materialized rather than streamed. |
 | Location classification | Track H complete | Segment-aware precedence, monorepo depth, content-sensitive `src/api/`, and independent oracle behavior are pinned by fixtures and truth-table tests. |
 | Detection and Supabase semantics | Implemented | The embedded generic substrate, exact-revision enrichment, new/legacy key classes, and conservative project-aware coalescing are covered. |
@@ -149,6 +151,8 @@ action, and made `scripts/verify-all.sh` the canonical full offline matrix. The
 J10–J12 addendum prevents Repomix bundles from being tracked, verifies the
 integration claim against local Git state, and puts the release-channel
 structural verifier on both the canonical matrix and pull-request CI path.
+Track K adds the same generated-artifact discipline for crate-root public API
+drift, with an offline checker on the matrix and pull-request path.
 
 ### P2 — measured product depth
 
@@ -185,8 +189,8 @@ The optional sanitized real-repository leg requires
 `--real-repo /absolute/path`; it is skipped by default. The default matrix is
 offline and includes formatting, all four clippy graphs, all four test graphs,
 the real-repository oracle self-test, Network-boundary checks, status
-consistency, release-publishing structure, the offline hardening aggregate,
-and `git diff --check`.
+consistency, public-API inventory consistency, release-publishing structure,
+the offline hardening aggregate, and `git diff --check`.
 
 Use `UPDATE_GOLDEN=1` or `UPDATE_METRICS=1` only after an intentional result
 change, inspect every artifact diff, then rerun without the variable. Do not

@@ -15,12 +15,12 @@ Actual pre-refactor `src/lib.rs` counts selected six crates:
 
 | Order | Crate | Before `lib.rs` | After `lib.rs` | Largest after file |
 |---:|---|---:|---:|---:|
-| 1 | `vibescan-core` | 4,881 | 63 | 653 |
-| 2 | `vibescan-supabase` | 2,881 | 46 | 658 |
-| 3 | `vibescan-git` | 1,851 | 44 | 667 |
-| 4 | `vibescan-registry` | 1,538 | 47 | 583 |
-| 5 | `vibescan-report` | 993 | 25 | 305 |
-| 6 | `vibescan-secrets` | 825 | 34 | 310 |
+| 1 | `vibescan-core` | 4,881 | 71 | 788 |
+| 2 | `vibescan-supabase` | 2,881 | 55 | 622 |
+| 3 | `vibescan-git` | 1,851 | 47 | 423 |
+| 4 | `vibescan-registry` | 1,538 | 49 | 398 |
+| 5 | `vibescan-report` | 993 | 27 | 305 |
+| 6 | `vibescan-secrets` | 825 | 34 | 239 |
 
 `vibescan-types/src/lib.rs` was 653 lines and therefore outside scope. No
 scoped `lib.rs`, production module, or test source now exceeds 800 lines.
@@ -38,7 +38,7 @@ scoped `lib.rs`, production module, or test source now exceeds 800 lines.
 | `findings.rs` | §6.6 and §13.3 | Finding coalescing, stable identity helpers, sorting, statistics, history scope, fingerprinting, and redaction. |
 | `baseline.rs` | §§6.1 and 6.6 | Baseline loading/application and custom detector loading. |
 | `error.rs` | §§3 and 6 | Crate-owned orchestration error boundary. |
-| `registry_failure_tests.rs`, `tests/` | §14 | Existing root test modules and names, physically extracted from `lib.rs`. |
+| `tests/{baseline,config,correlation,dependencies,error,findings,pipeline,pipeline_registry}.rs` | §14 | Real modules colocated by the production behavior they exercise; registry failure preservation is a feature-gated pipeline concern. |
 
 ### `vibescan-supabase`
 
@@ -48,7 +48,7 @@ scoped `lib.rs`, production module, or test source now exceeds 800 lines.
 | `tier0.rs` | §§7.1 and 10.2 | Tier 0 input/output, read-only HTTP boundary, degraded outcomes, audit records, and RLS evidence. |
 | `tier1.rs` | §§7.2–7.3 and 10.2 | Catalog vocabulary, validated Supabase DB targets, read-only introspection semantics, and inferred policy/grant evidence. |
 | `catalog.rs` | §§7.2 and 10.2 | The rustls-backed PostgreSQL catalog source and fixed SELECT-only query construction. |
-| `tests/` | §14 | Existing root test module split into include fragments without changing test paths. |
+| `tests/{classifier,tier0,tier1,catalog}.rs` | §14 | Real modules mirroring the classifier, probe, introspection, and catalog boundaries. |
 
 ### `vibescan-git`
 
@@ -61,7 +61,7 @@ scoped `lib.rs`, production module, or test source now exceeds 800 lines.
 | `ignore_policy.rs` | §§5, 6.1, and 8 | Config, Git, hard-skip, and force-scan policy. |
 | `collector.rs` | §§5, 6.1, and 6.6 | Content-ID deduplication, location/provenance merging, and deterministic materialization counters. |
 | `error.rs` | §§3 and 8 | Git/discovery/object/path error boundary. |
-| `tests.rs` | §14 | Existing root test module extracted intact. |
+| `tests/{collector,history,ignore_policy,location}.rs` | §14 | Real modules matching collection, history, ignore-policy, and classification ownership. |
 
 ### `vibescan-registry`
 
@@ -71,7 +71,7 @@ scoped `lib.rs`, production module, or test source now exceeds 800 lines.
 | `checks.rs` | §11.1 | Name-egress precision guards, existence/advisory orchestration, auditing, and finding evidence. |
 | `transport.rs` | §11.2 | Feature-gated rustls HTTP registry/OSV source. |
 | `cache.rs` | §§11.1–11.2 | Existence and OSV snapshot caches, local snapshot parsing, expiry, and atomic cache writes. |
-| `tests.rs` | §14 | Existing root test module extracted intact. |
+| `tests/{checks,model,cache,transport}.rs` | §14 | Real modules matching check orchestration, vocabulary, cache, and transport ownership. |
 
 ### `vibescan-report`
 
@@ -81,7 +81,7 @@ scoped `lib.rs`, production module, or test source now exceeds 800 lines.
 | `sarif.rs` | §§13.3–13.4 | Deterministic SARIF object and location construction. |
 | `summaries.rs` | §13.3 | Redacted evidence, provenance, warning, Network action, and history summaries. |
 | `presentation.rs` | §13.3 | Stable severity/category/confidence names and HTML escaping; deliberately named for its domain rather than as a catch-all utility module. |
-| `tests.rs` | §14 | Existing root renderer tests extracted intact; integration snapshots remain under `tests/`. |
+| `tests/{output,presentation,sarif,summaries}.rs` | §14 | Real renderer modules; integration snapshots remain under the crate-level `tests/`. |
 
 ### `vibescan-secrets`
 
@@ -91,22 +91,23 @@ scoped `lib.rs`, production module, or test source now exceeds 800 lines.
 | `config.rs` | §9 | TOML ruleset surface, additive merge, configured candidate kinds, and allowlist compilation. |
 | `content.rs` | §§5 and 9 | Binary/size policy, entropy and span helpers, regex/keyword normalization, and working-tree test-unit construction. |
 | `error.rs` | §§3 and 9 | Detector configuration/regex/TOML error boundary. |
-| `tests.rs` | §14 | Existing root test module extracted intact. |
+| `tests/{config,detector}.rs` | §14 | Real modules separating ruleset configuration from detector execution. |
 
 ## Placement judgment calls
 
-- Public definitions live in private implementation modules and are re-exported
-  at each crate root. This keeps every pre-existing external path such as
-  `vibescan_core::ScanConfig` while avoiding new public modules.
-- Rustdoc JSON reports canonical definition paths after extraction. The public
-  inventory therefore resolves each private-module crate-root glob re-export
-  before comparison; otherwise a source-location change would be mistaken for
-  an API-path change.
-- Exact test names include their module path. Conventional nested
-  `module::tests` moves would rename them, so the original root
-  `tests::...` modules remain root declarations while their bodies live in
-  adjacent `src/tests.rs` or size-bounded `src/tests/` include fragments.
-  Integration tests under `tests/` did not move.
+- Public definitions live in private implementation modules and each crate
+  root now re-exports the exact named surface explicitly. This keeps every
+  pre-existing external path such as `vibescan_core::ScanConfig`, avoids public
+  modules, and ensures a new `pub` definition cannot silently join the crate
+  API through a glob.
+- `scripts/check-public-api.py` resolves those private-module re-exports and
+  gates the generated `docs/public-api-inventory.txt` without a build, network,
+  nightly toolchain, or captured Track K artifact.
+- The original criterion requiring byte-identical full test paths was
+  defective: Cargo embeds module paths, making genuine module moves
+  impossible. The authorized correction preserves the exact 199 test-function
+  basenames while allowing, and recording, architecture-named prefix changes.
+  Integration tests under crate-level `tests/` did not move.
 - Core API-reference harvesting stays with correlation because its output is
   project-associated enrichment used to construct same-project correlation
   and Tier 0 inputs, not generic filesystem collection.
@@ -128,34 +129,38 @@ empty.
 
 ## Public inventory
 
-Method:
+The durable method is now `python3 scripts/check-public-api.py`. It parses the
+six scoped crate roots and private implementation modules, resolves glob or
+named local re-exports, emits sorted `<kind>\t<public path>` records, and
+compares them with `docs/public-api-inventory.txt`. It is deterministic,
+offline, independent of `target/`, and has the intentional-regeneration path:
 
-1. Run nightly rustdoc JSON without private items for each scoped crate:
-   `cargo +nightly rustdoc -q -p <crate> --all-features -- -Z unstable-options --output-format json`.
-2. Select local-crate entries from `target/doc/<crate>.json` where
-   `crate_id == 0`.
-3. Resolve private implementation-module crate-root glob re-exports, normalize
-   each reachable item as `<kind>\t<public path>`, and sort.
-4. Compare the captured baseline from `e1acd835` with the final checkout.
+```sh
+python3 scripts/check-public-api.py --write
+```
 
-| Crate | Before items | After items | Added | Removed |
-|---|---:|---:|---:|---:|
-| `vibescan-core` | 31 | 31 | 0 | 0 |
-| `vibescan-supabase` | 40 | 40 | 0 | 0 |
-| `vibescan-git` | 18 | 18 | 0 | 0 |
-| `vibescan-registry` | 20 | 20 | 0 | 0 |
-| `vibescan-report` | 15 | 15 | 0 | 0 |
-| `vibescan-secrets` | 20 | 20 | 0 | 0 |
-| **Total** | **144** | **144** | **0** | **0** |
+The same current checker implementation was run over clean trees extracted by
+`git archive` at the pre-Track-K merge base and the post-Track-K/pre-addendum
+tip, then over the addendum worktree:
 
-The normalized before and after inventories are byte-identical. Both have
-SHA-256
-`9ba9602c41ea530f3d32d91e5dd52bd5a0efd51b3198e95271c9cf3e831095b5`;
-the unified diff is empty.
+| Crate | Pre-Track-K `e1acd835` | Post-Track-K `ffb62f9` | Post-addendum | Added | Removed |
+|---|---:|---:|---:|---:|---:|
+| `vibescan-core` | 31 | 31 | 31 | 0 | 0 |
+| `vibescan-supabase` | 40 | 40 | 40 | 0 | 0 |
+| `vibescan-git` | 18 | 18 | 18 | 0 | 0 |
+| `vibescan-registry` | 20 | 20 | 20 | 0 | 0 |
+| `vibescan-report` | 15 | 15 | 15 | 0 | 0 |
+| `vibescan-secrets` | 20 | 20 | 20 | 0 | 0 |
+| **Total** | **144** | **144** | **144** | **0** | **0** |
+
+All three generated artifacts are byte-identical at SHA-256
+`6fc333af1ac6329fd28669a887e5875d2e54c6dea082c0cd219e53002fb42805`.
+The original nightly-rustdoc capture also reported the same 144 paths; its
+different SHA serialized the same paths with the one-off Track K collector.
 
 ## Test inventory
 
-The before and after commands were both:
+The original before and post-Track-K commands were both:
 
 ```sh
 cargo test --workspace --all-features -- --list \
@@ -163,13 +168,33 @@ cargo test --workspace --all-features -- --list \
   | sort
 ```
 
-| Inventory | Count | SHA-256 |
-|---|---:|---|
-| Before (`e1acd835`) | 199 | `fe8562e57b8259ff428d139960da52ff6450bcbef2b8efcf25dd9ecaf61c4173` |
-| After (`5c2f296`) | 199 | `fe8562e57b8259ff428d139960da52ff6450bcbef2b8efcf25dd9ecaf61c4173` |
+The addendum independently reran that command from a `git archive` extraction
+of `e1acd835`, at `ffb62f9`, and on the addendum worktree. The defective exact-
+path requirement is superseded by exact basename equality:
 
-The byte comparison and unified diff are empty. This is the shared sorted list
-for both captures:
+| Inventory | Full names | Full-name SHA-256 | Basenames | Basename SHA-256 |
+|---|---:|---|---:|---|
+| Pre-Track-K (`e1acd835`) | 199 | `fe8562e57b8259ff428d139960da52ff6450bcbef2b8efcf25dd9ecaf61c4173` | 199 | `570948a00fed888fb1dacf4d0f2a047a2a8399599c66b10e5287381ec1ae826f` |
+| Post-Track-K / pre-addendum (`ffb62f9`) | 199 | `fe8562e57b8259ff428d139960da52ff6450bcbef2b8efcf25dd9ecaf61c4173` | 199 | `570948a00fed888fb1dacf4d0f2a047a2a8399599c66b10e5287381ec1ae826f` |
+| Post-addendum | 199 | `d9c5c1196e125b19a6f0c642e946e43b39bcad821669e3a91f3b9b58c587b55b` | 199 | `570948a00fed888fb1dacf4d0f2a047a2a8399599c66b10e5287381ec1ae826f` |
+
+There are no duplicate basenames at any point. Of the old `tests::` prefix,
+9 tests remain there and 152 move to these complete new prefix/count pairs:
+`baseline_tests` (1), `cache_tests` (4), `catalog_tests` (1), `checks_tests`
+(10), `classifier_tests` (10), `collector_tests` (1), `config_tests` (11),
+`correlation_tests` (22), `dependencies_tests` (11), `detector_tests` (8),
+`error_tests` (1), `findings_tests` (4), `history_tests` (7),
+`ignore_policy_tests` (5), `location_tests` (3), `model_tests` (1),
+`output_tests` (3), `pipeline_tests` (21), `presentation_tests` (2),
+`sarif_tests` (1), `summaries_tests` (1), `tier0_tests` (10), `tier1_tests`
+(13), and `transport_tests` (1), each below `tests::`. The two old
+`registry_failure_tests::` paths move to
+`tests::pipeline_registry_tests::`; `<root>`, `registry_tests::`, and the
+remaining `tests::` prefixes are unchanged.
+
+The following list is the historical shared sorted full-path inventory for the
+pre-Track-K and post-Track-K/pre-addendum captures. Its basenames remain the
+post-addendum inventory:
 
 <details>
 <summary>199 identical test names</summary>

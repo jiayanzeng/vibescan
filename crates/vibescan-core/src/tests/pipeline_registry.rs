@@ -1,4 +1,5 @@
 use super::*;
+use crate::pipeline::apply_registry_findings;
 use vibescan_registry::{
     AdvisorySet, RegistryError, RegistryResolution, RegistrySource, RegistryWarning,
 };
