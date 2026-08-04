@@ -9,6 +9,89 @@ Errata notes are inline, dated, and never replace the historical record they ann
 
 ---
 
+## Track K public-API gate scope follow-up observed on 2026-08-04
+
+This follow-up remained an assurance-only amendment to the open, unmerged
+PR #15 branch. It corrected two scope gaps in the standing public-API gate:
+`vibescan-types`, the architecture §§3–4 shared and serialized vocabulary, was
+absent from `SCOPED_CRATES`, and the source parser ignored declarations below
+module brace depth zero. `vibescan-cli` remains excluded because it is a binary
+crate with no library surface.
+
+The source-derived artifact now records public fields of public named and tuple
+structs, public inherent methods and associated functions/constants/types, and
+source-declared trait implementations on public local types. Records are
+qualified by parent type and sorted. All 144 prior lines are present unchanged:
+`comm` found 144 shared and zero removed. The artifact expanded by 333 existing
+surface records to 477 total: 10 associated functions, 4 constants, 31 enums,
+168 fields, 23 functions, 13 methods, 7 modules, 47 structs, 5 traits, 24 trait
+implementations, and 145 variants. `vibescan-types` accounts for 206 records,
+including 78 named public fields and six public tuple positions.
+
+The checker header documents the source-text limits instead of approximating
+them: macro-generated items and derive impls are invisible; cfg declarations
+form one textual union rather than per-feature surfaces; external items are
+measured in the defining scoped crate and renamed re-exports are unresolved;
+complex or blanket impl self types that do not resolve to one inventoried
+local public type are omitted; and enum payload fields and public-trait members
+are not separate records. The derivation remains standard-library-only,
+offline, deterministic, and independent of build output.
+
+The commands actually run for the baseline, derivation, and focused evidence
+were:
+
+```sh
+gh pr view 15 --json number,state,isDraft,mergedAt,headRefName,headRefOid,baseRefName,url
+git status --porcelain=v1 --branch
+python3 scripts/check-public-api.py
+bash scripts/verify-all.sh
+python3 scripts/check-public-api.py --self-test
+python3 scripts/check-public-api.py --write
+comm -23 /tmp/vibescan-public-api-144.txt docs/public-api-inventory.txt
+comm -12 /tmp/vibescan-public-api-144.txt docs/public-api-inventory.txt
+python3 scripts/check-public-api.py
+git diff -- crates
+```
+
+After documentation reconciliation, the final acceptance commands were:
+
+```sh
+python3 scripts/check-public-api.py --self-test
+python3 scripts/check-public-api.py
+python3 scripts/check-status-consistency.py
+bash scripts/verify-all.sh
+dist generate --check
+git ls-files -z -- '*.sh' | xargs -0 shellcheck
+git diff --check
+git diff -- crates tests/fixtures
+```
+
+The API self-test and repository gate, status-consistency gate, full four-graph
+offline matrix, cargo-dist generated-file check, and every tracked shell script
+passed. The final crate/fixture diff and whitespace check were empty. The
+optional real-repository leg was explicitly skipped because no fixture was
+supplied.
+
+Three controls temporarily edited crate source and were reverted immediately.
+Adding
+`ScannableUnit::track_k_api_gate_field_control` made the expanded checker exit
+1 and name the field; adding
+`Severity::track_k_api_gate_method_control` made it exit 1 and name the method.
+The method control was then repeated as
+`vibescan_core::ScanConfig::track_k_api_gate_method_control`, an already-
+scoped type, to isolate the former brace-depth defect independently from the
+`vibescan-types` omission. For every temporary tree, the frozen pre-follow-up
+checker passed against its original 144-line inventory, proving each widening
+was genuinely invisible to the old gate. Reversion restored the exact types
+source SHA-256
+`8c3bfd974fb21f1477ec9f006e8314fcc6fc92261c6348d3798020d75ebca7f0`;
+`git diff -- crates` and `git diff -- tests/fixtures` were empty.
+
+No crate source, visibility, behavior, serialized shape, fixture, golden,
+snapshot, metrics baseline, crate edge, feature gate, or egress path changed.
+`UPDATE_GOLDEN` and `UPDATE_METRICS` were never set. No network capability,
+credential, real-repository scan, or target-project access was involved.
+
 ## Track K addendum observed on 2026-08-04
 
 The addendum remained a behavior-preserving `LocalStatic` source-layout and

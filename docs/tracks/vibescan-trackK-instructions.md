@@ -129,19 +129,22 @@ empty.
 
 ## Public inventory
 
-The durable method is now `python3 scripts/check-public-api.py`. It parses the
-six scoped crate roots and private implementation modules, resolves glob or
-named local re-exports, emits sorted `<kind>\t<public path>` records, and
-compares them with `docs/public-api-inventory.txt`. It is deterministic,
-offline, independent of `target/`, and has the intentional-regeneration path:
+The durable method is now `python3 scripts/check-public-api.py`. It parses all
+seven library crate roots and their private implementation modules, resolves
+named local re-exports, emits sorted, parent-qualified records, and compares
+them with `docs/public-api-inventory.txt`. `vibescan-cli` remains out of scope
+because it is a binary crate and has no library API surface. The derivation is
+deterministic, offline, independent of `target/`, and has the intentional-
+regeneration path:
 
 ```sh
 python3 scripts/check-public-api.py --write
 ```
 
-The same current checker implementation was run over clean trees extracted by
-`git archive` at the pre-Track-K merge base and the post-Track-K/pre-addendum
-tip, then over the addendum worktree:
+The addendum checker was run over clean trees extracted by `git archive` at the
+pre-Track-K merge base and the post-Track-K/pre-addendum tip, then over the
+addendum worktree. This table is the original crate-root named-item and enum-
+variant inventory, before the scope follow-up added nested surface records:
 
 | Crate | Pre-Track-K `e1acd835` | Post-Track-K `ffb62f9` | Post-addendum | Added | Removed |
 |---|---:|---:|---:|---:|---:|
@@ -157,6 +160,72 @@ All three generated artifacts are byte-identical at SHA-256
 `6fc333af1ac6329fd28669a887e5875d2e54c6dea082c0cd219e53002fb42805`.
 The original nightly-rustdoc capture also reported the same 144 paths; its
 different SHA serialized the same paths with the one-off Track K collector.
+
+### API-gate scope follow-up
+
+The 2026-08-04 follow-up corrected two standing-gate scope defects without
+changing a crate source file or any visibility. First, it brought
+`vibescan-types` into scope because architecture §§3–4 assign that crate the
+shared serializable vocabulary used by every other library. Second, it used
+the existing brace-depth parser to add parent-qualified records for public
+named and tuple-struct fields, public inherent methods and associated items,
+and source-declared trait implementations on public local types. The inventory
+format is stable and line-diffable: `<kind>\t<crate::parent::item>` for fields
+and inherent items, and `trait_impl\t<crate::self-type>\t<trait>` for trait
+implementations.
+
+All 144 prior lines survive byte-for-byte in the expanded 477-line artifact;
+`comm` reported 144 shared lines and zero removed lines. The 333 newly observed
+records are a measurement of existing source, not API additions:
+
+| Kind | Prior | Added by scope expansion | Current |
+|---|---:|---:|---:|
+| `associated_constant` | 0 | 0 | 0 |
+| `associated_function` | 0 | 10 | 10 |
+| `associated_type` | 0 | 0 | 0 |
+| `constant` | 4 | 0 | 4 |
+| `enum` | 15 | 16 | 31 |
+| `field` | 0 | 168 | 168 |
+| `function` | 23 | 0 | 23 |
+| `method` | 0 | 13 | 13 |
+| `module` | 6 | 1 | 7 |
+| `struct` | 26 | 21 | 47 |
+| `trait` | 3 | 2 | 5 |
+| `trait_impl` | 0 | 24 | 24 |
+| `variant` | 67 | 78 | 145 |
+| **Total** | **144** | **333** | **477** |
+
+`vibescan-types` contributes 206 records, including 84 public struct fields:
+78 named fields plus six public tuple positions. The complete artifact is
+SHA-256 `69f3c240c858a33beb0879e39ae7effd077b870f7992bb0589d994b5758255f0`.
+
+The source-only derivation deliberately names its remaining blind spots in the
+checker header: macro-generated items (including derive impls) do not exist as
+source declarations; cfg predicates are inventoried as one textual union, not
+separate feature surfaces; external items are measured in their defining
+scoped crate and renamed re-exports are unresolved; complex or blanket impl
+self types that cannot be tied to one inventoried local public type are
+omitted; and enum payload fields plus public-trait members are not separate
+records. These are explicit limits rather than silent approximations.
+
+The required controls demonstrated that the old gap was real. A temporary
+`pub track_k_api_gate_field_control` on `ScannableUnit` made the expanded gate
+exit 1 and name that field, while the frozen pre-follow-up checker still
+passed its 144-line artifact. A temporary public
+`ScanConfig::track_k_api_gate_method_control` in already-scoped
+`vibescan-core` produced the same new-fails/old-passes result, independently
+isolating the former brace-depth defect from the `vibescan-types` omission. A
+preliminary method control on `Severity` had also produced that outcome. Every
+edit was immediately removed, the types source returned to SHA-256
+`8c3bfd974fb21f1477ec9f006e8314fcc6fc92261c6348d3798020d75ebca7f0`,
+and `git diff -- crates` returned empty. The synthetic self-test separately
+covers acceptance and rejection for fields, inherent items, and trait impls.
+
+The final `python3 scripts/check-public-api.py --self-test`, repository API
+gate, status-consistency gate, `bash scripts/verify-all.sh`,
+`dist generate --check`, ShellCheck over every tracked shell script, and
+`git diff --check` all passed. `git diff -- crates tests/fixtures` was empty;
+the optional real-repository leg was skipped because no fixture was supplied.
 
 ## Test inventory
 
