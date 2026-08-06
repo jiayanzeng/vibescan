@@ -18,6 +18,11 @@ matrix, public-API gate, and status-consistency gate passed before corpus work.
 The prior `tier-h2-live-v1` baseline was 15 TP / 0 FP / 0 FN, precision and
 recall 1.0, and classification coverage 7/9.
 
+The complete implementation is committed on
+`codex/track-l-adversarial-precision` at
+`aead2ed90cbc47a90fdaecd0132e219413966cb2`. It is intentionally not merged;
+the repository owner retains the merge decision.
+
 The new adversarial clean fixture initially produced seven false positives,
 recorded before any behavior fix: four generic high-entropy assignments
 (content hash, base64 fixture payload, commit SHA, and UUIDv4) and three

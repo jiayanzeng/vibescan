@@ -3,13 +3,13 @@
 ```yaml
 # vibescan:current-state
 reviewed: 2026-08-06
-head_commit: 17053d0c8f0a958b7f5e95d5d16ffd23eb750bfb
-worktree: dirty
+head_commit: aead2ed90cbc47a90fdaecd0132e219413966cb2
+worktree: clean
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
 released_version: 0.2.0
 released_tag: v0.2.0
-integration_status: working-tree-only
+integration_status: committed-not-merged
 corpus_version: track-l-adversarial-v1
 corpus_tp: 20
 corpus_fp: 0
