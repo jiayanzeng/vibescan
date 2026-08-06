@@ -277,11 +277,11 @@ def validate(
             if (
                 expected_class is not None
                 and isinstance(location_class, str)
-                and location_class.lower() == "unknown"
+                and location_class.lower() != expected_class
             ):
                 violations.append(
                     "classification: classifiable path "
-                    f"{path!r} is Unknown (expected {expected_class})"
+                    f"{path!r} is {location_class} (expected {expected_class})"
                 )
 
         category = finding.get("category")
@@ -430,9 +430,25 @@ def run_self_tests() -> None:
     unknown["locations"][0]["location_class"] = "unknown"
     _expect_failure("classifiable Unknown", {"findings": [unknown]}, "classifiable path")
 
+    wrong_class = copy.deepcopy(sample)
+    wrong_class["locations"][0]["location_class"] = "server_only"
+    _expect_failure(
+        "wrong known class",
+        {"findings": [wrong_class]},
+        "expected client_reachable",
+    )
+
     assert _expected_location_class("src/api/client.ts") is None
     assert _expected_location_class("packages/web/src/api/client.ts") is None
     assert _expected_location_class("api/handler.ts") == "server_only"
+    assert _expected_location_class("public/server/config.json") == "server_only"
+    assert _expected_location_class("app/server/page.tsx") == "server_only"
+    assert _expected_location_class("services/worker/dist/index.js") == "client_reachable"
+    assert _expected_location_class("app/api/(admin)/route.ts") == "server_only"
+    assert (
+        _expected_location_class("src/app/@modal/(.)photo/page.tsx")
+        == "client_reachable"
+    )
 
     ambiguous = copy.deepcopy(sample)
     ambiguous["locations"][0] = {

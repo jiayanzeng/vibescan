@@ -1,0 +1,89 @@
+{
+  "findings": [
+    {
+      "stable_key": "secret-26961106447a5402d5e1ea4e",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "high",
+      "locations": [
+        "src/aws-production-shape.ts"
+      ],
+      "location_classes": [
+        "src/aws-production-shape.ts=unknown"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "3bccfe53474751edbcaee22a8bcb0ef4"
+      }
+    },
+    {
+      "stable_key": "secret-43ede40a4493159a6321d217",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "high",
+      "locations": [
+        "tests/stripe.test.ts"
+      ],
+      "location_classes": [
+        "tests/stripe.test.ts=unknown"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "daeb28e351f4c85fc339745e5c155610"
+      }
+    },
+    {
+      "stable_key": "secret-98ea6e22a38b72f6fcd4f0e1",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "high",
+      "locations": [
+        "src/aws-preceding-comment.ts"
+      ],
+      "location_classes": [
+        "src/aws-preceding-comment.ts=unknown"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "50fe0dbf1f8945b6cb8115797f70f1ae"
+      }
+    },
+    {
+      "stable_key": "secret-7ca635ef7f0c08b0feb38961",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "medium",
+      "locations": [
+        "docs/my-node_modules-notes.md"
+      ],
+      "location_classes": [
+        "docs/my-node_modules-notes.md=unknown"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "2103cf7100179dec038e9bbaea9f2c8e"
+      }
+    },
+    {
+      "stable_key": "secret-efb9f17c776b9c32f808069e",
+      "rule_id": "generic-secret",
+      "category": "secret_exposure",
+      "severity": "medium",
+      "locations": [
+        ".env.local"
+      ],
+      "location_classes": [
+        ".env.local=server_only"
+      ],
+      "provenance_kind": "working_tree",
+      "evidence": {
+        "kind": "secret",
+        "fingerprint": "4989ca0dc8e00c3e769a0504aac7a4c2"
+      }
+    }
+  ]
+}

@@ -173,3 +173,69 @@ fn reports_one_based_spans() {
     assert!(anthropic.span.col_start > 1);
     assert!(anthropic.span.col_end > anthropic.span.col_start);
 }
+
+#[test]
+fn track_l_stopwords_are_ascii_case_insensitive_and_secret_local() {
+    let documentation = detect(r#"const awsAccessKeyId = "AKIAIOSFODNN7EXAMPLE";"#);
+    assert!(
+        !documentation
+            .iter()
+            .any(|candidate| candidate.rule_id.0 == "aws-access-key-id")
+    );
+
+    let preceding_comment = detect(
+        "// example key follows on the next line\n\
+         const awsKey = \"ASIAZ6X5C4V3B2N1M0LK\";",
+    );
+    assert_eq!(
+        preceding_comment
+            .iter()
+            .filter(|candidate| candidate.rule_id.0 == "aws-access-key-id")
+            .count(),
+        1,
+        "a stopword outside the captured secret must not suppress the next line"
+    );
+}
+
+#[test]
+fn track_l_generic_near_misses_are_suppressed() {
+    let cases = [
+        r#"const assetToken = "a4f9c2e78b1d6035f7a8e9c0d2b4f681";"#,
+        r#"const testCredential = "VGhpcy1pcy1hLXN5bnRoZXRpYy1maXh0dXJlLXBheWxvYWQ=";"#,
+        r#"const buildToken = "f39a92c7b8d14e65a0f3c21d9876be45ca10d2ef";"#,
+        r#"const sessionToken = "6f9619ff-8b86-4a5a-b7c1-2d3e4f5a6b7c";"#,
+        r#"const publicSearchApiKey = "A7bC2dE9fG4hJ6kL8mN1pQ3rS5tU0vWx";"#,
+    ];
+
+    for content in cases {
+        assert!(
+            !detect(content)
+                .iter()
+                .any(|candidate| candidate.rule_id.0 == "generic-high-entropy-assignment"),
+            "near-miss should be suppressed: {content}"
+        );
+    }
+}
+
+#[test]
+fn track_l_documentation_near_misses_do_not_hide_provider_controls() {
+    assert!(
+        detect("Never commit `-----BEGIN PRIVATE KEY-----`.").is_empty(),
+        "a backtick-quoted header is not a key block"
+    );
+    assert!(
+        detect(r#"const storyId = "sk-proj-StorybookAuthFlowIdentifier000001";"#).is_empty(),
+        "the captured Storybook marker should suppress the OpenAI-shaped story id"
+    );
+
+    let controls = detect(
+        "const awsAccessKeyId = \"AKIAQ7W8E9R2T3Y4U5I6\";\n\
+         const stripeKey = \"sk_test_SyntheticTestCredential1234567890\";",
+    );
+    let rule_ids = controls
+        .iter()
+        .map(|candidate| candidate.rule_id.0.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(rule_ids.contains("aws-access-key-id"));
+    assert!(rule_ids.contains("stripe-secret-key"));
+}

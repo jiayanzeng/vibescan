@@ -33,6 +33,14 @@ pub(crate) const LIVE_FIXTURES: &[LiveFixture] = &[
         history: false,
     },
     LiveFixture {
+        name: "adversarial-clean-control",
+        history: false,
+    },
+    LiveFixture {
+        name: "adversarial-positive-controls",
+        history: false,
+    },
+    LiveFixture {
         name: "history-only-elevated-key",
         history: true,
     },

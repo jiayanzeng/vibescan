@@ -53,6 +53,9 @@ regex = '''(sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,})'''
 keywords = ["openai", "sk-", "api_key", "apikey"]
 entropy = 3.0
 
+[[rules.allowlists]]
+stopwords = ["storybook"]
+
 [[rules]]
 id = "anthropic-api-key"
 kind = "provider_secret"
@@ -86,6 +89,11 @@ kind = "private_key"
 regex = '''(-----BEGIN (?:RSA |EC |OPENSSH |DSA |PRIVATE )?PRIVATE KEY-----)'''
 keywords = ["begin", "private key"]
 
+[[rules.allowlists]]
+regexes = [
+  '''`-----BEGIN (?:RSA |EC |OPENSSH |DSA |PRIVATE )?PRIVATE KEY-----`''',
+]
+
 [[rules]]
 id = "generic-high-entropy-assignment"
 kind = "generic_high_entropy"
@@ -97,4 +105,11 @@ entropy = 3.5
 stopwords = [
   "sb_publishable_",
   "sb_secret_",
+]
+regexes = [
+  '''(?i)\basset[_-]?token\s*[:=]\s*['"][0-9a-f]{16,64}['"]''',
+  '''(?i)\btest[_-]?credential\s*[:=]\s*['"][A-Za-z0-9+/]{24,}={0,2}['"]''',
+  '''(?i)\bbuild[_-]?token\s*[:=]\s*['"][0-9a-f]{40}['"]''',
+  '''(?i)\bsession[_-]?token\s*[:=]\s*['"][0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}['"]''',
+  '''(?i)\bpublic[_-]?search[_-]?api[_-]?key\s*[:=]\s*['"][A-Za-z0-9_./+=-]{24,}['"]''',
 ]

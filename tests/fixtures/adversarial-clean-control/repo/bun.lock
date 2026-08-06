@@ -1,0 +1,2 @@
+[packages]
+synthetic = { integrity = "sha512-VGhpcy1pcy1zeW50aGV0aWMtaW50ZWdyaXR5LW1hdGVyaWFs" }

@@ -137,7 +137,11 @@ impl AllowlistConfig {
             paths: compile_regexes(self.paths)?,
             regexes: compile_regexes(self.regexes)?,
             commits: self.commits.into_iter().collect(),
-            stopwords: self.stopwords.into_iter().collect(),
+            stopwords: self
+                .stopwords
+                .into_iter()
+                .map(|stopword| stopword.to_ascii_lowercase())
+                .collect(),
         })
     }
 }

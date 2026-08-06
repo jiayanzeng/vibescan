@@ -417,7 +417,10 @@ fn assert_tier1_fixture(name: &str) {
 }
 
 fn include_location_classes(fixture: &LiveFixture) -> bool {
-    matches!(fixture.name, "monorepo-layout" | "src-api-client-wrapper")
+    matches!(
+        fixture.name,
+        "monorepo-layout" | "src-api-client-wrapper" | "adversarial-positive-controls"
+    )
 }
 
 fn manifest_from_result(result: &ScanResult, include_location_classes: bool) -> GoldenManifest {

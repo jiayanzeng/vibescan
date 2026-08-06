@@ -74,7 +74,7 @@ fn configured_allowlist_suppresses_stopword() {
             "#,
     )
     .expect("ruleset compiles");
-    let unit = working_tree_unit("src/app.ts", br#"token = "PLACEHOLDER_TOKEN""#.to_vec());
+    let unit = working_tree_unit("src/app.ts", br#"token = "placeholder_TOKEN""#.to_vec());
 
     assert!(detector.detect_unit(&unit).is_empty());
 }

@@ -153,3 +153,24 @@ fn classify_location_preserves_flat_repo_behavior() {
         );
     }
 }
+
+#[test]
+fn track_l_classifier_hypotheses_match_architecture_precedence() {
+    let cases = [
+        ("public/server/config.json", LocationClass::ServerOnly),
+        ("app/server/page.tsx", LocationClass::ServerOnly),
+        (
+            "services/worker/dist/index.js",
+            LocationClass::ClientReachable,
+        ),
+        ("app/api/(admin)/route.ts", LocationClass::ServerOnly),
+        (
+            "src/app/@modal/(.)photo/page.tsx",
+            LocationClass::ClientReachable,
+        ),
+    ];
+
+    for (path, expected) in cases {
+        assert_eq!(classify_location(path, b""), expected, "{path}");
+    }
+}

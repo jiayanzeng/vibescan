@@ -224,10 +224,12 @@ impl CompiledAllowlist {
                 .additional_provenance
                 .iter()
                 .any(|provenance| self.matches_commit(provenance))
-            || self
-                .stopwords
-                .iter()
-                .any(|stopword| context.secret.contains(stopword))
+            || (!self.stopwords.is_empty() && {
+                let secret = context.secret.to_ascii_lowercase();
+                self.stopwords
+                    .iter()
+                    .any(|stopword| secret.contains(stopword))
+            })
     }
 
     fn matches_commit(&self, provenance: &Provenance) -> bool {
