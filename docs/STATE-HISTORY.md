@@ -9,6 +9,108 @@ Errata notes are inline, dated, and never replace the historical record they ann
 
 ---
 
+## Track L adversarial precision and real-repository sampling observed on 2026-08-06
+
+Track L started from refreshed, synchronized `main`/`origin/main` at
+`59344707da92cd4bee8611334a8e54d1e3723fd5`; the only initial worktree item was
+the user-authored Track L instruction document. The preflight full offline
+matrix, public-API gate, and status-consistency gate passed before corpus work.
+The prior `tier-h2-live-v1` baseline was 15 TP / 0 FP / 0 FN, precision and
+recall 1.0, and classification coverage 7/9.
+
+The new adversarial clean fixture initially produced seven false positives,
+recorded before any behavior fix: four generic high-entropy assignments
+(content hash, base64 fixture payload, commit SHA, and UUIDv4) and three
+provider-shaped documentation/story cases (AWS example ID, quoted private-key
+header, and Storybook ID). The final clean corpus contains 25 scanned files and
+50 scanned lines, exceeds the 17 scanned vulnerable files, and produces zero
+findings. Five separately labeled positive controls preserve `.env.local`,
+whole-segment path matching, Stripe test-key, AWS non-placeholder, and
+captured-secret-only behavior.
+
+The L2 output hypotheses were confirmed but the proposed defect conclusion was
+disproved by architecture §6.2: `server/` is expressly decisive before client
+roots, while `dist/` is expressly client-reachable at any depth. Classifier
+behavior therefore did not change. Rust and independent Python truth cases now
+pin the two disputed paths plus Next.js route-group/intercepting-route cases.
+The oracle now rejects any wrong known class rather than only `Unknown`, and
+strict comparison passed over all ten repo-backed clean/vulnerable fixtures;
+the four harness-only vulnerable fixtures do not invoke filesystem
+classification.
+
+Under architecture §§9 and 14, L3 makes captured-value stopwords
+ASCII-case-insensitive and adds only measured rule-local stopword/line
+allowlists. It does not widen suppression to preceding-line context or add the
+broad speculative stopwords named in the instruction. The permanent AWS and
+Stripe controls keep vulnerable recall at 1.0. Temporarily reverting the
+case-insensitive comparison made the AWS regression test fail; restoration
+returned the detector file to its exact prior hash.
+
+The metrics schema is now `track-l-adversarial-v1` and separates vulnerable
+and clean fixture totals and populations. Vulnerable is 12 fixtures / 17 files
+/ 46 scanned lines / 20 TP / 0 FP / 0 FN. Clean is 2 fixtures / 25 files / 50
+scanned lines / 0 findings, with exact zero FP per file and per line. Overall
+precision/recall remain 1.0; coverage is the new 8/14 corpus ceiling, with six
+exact Unknown identities pinned. A deliberate invalid dependency in the clean
+fixture made the harness fail at one clean FP, and a temporary baseline claim
+of that FP made the status gate reject `clean_corpus_fp`; both mutations were
+restored byte-for-byte.
+
+Ten public GitHub repositories at exact recorded commits were shallow-cloned
+outside the worktree and scanned working-tree-only with LocalStatic vibescan.
+The independent invariant oracle passed all ten results. Across 2,627 files,
+the redacted worklist contains one confirmed FP and one uncertain finding. The
+confirmed file-normalized rate is about 0.0381%; treating the uncertain finding
+as FP yields an upper bound of about 0.0761%, compared with synthetic clean
+0/25. Both patterns were re-authored from scratch in the synthetic clean
+fixture. No locally established TP appeared, so the sample supports a bounded
+noise observation and no real-world recall claim.
+
+Golden review found no change to an existing final golden. The two new
+manifests are an empty clean manifest and a five-finding positive-control
+manifest with stable ID, severity, path/class, working-tree provenance,
+fingerprint-only evidence, and ordering reviewed individually. An authorized
+regeneration attempted to drop two hand-authored truth fields from the existing
+malformed-dependency manifest; because that change was unrelated and
+unexplained, it was restored immediately and has no final diff. Report
+snapshots and the public API inventory remain unchanged.
+
+Commands actually run include:
+
+```sh
+git fetch --prune origin
+bash scripts/verify-all.sh
+python3 scripts/check-public-api.py
+python3 scripts/check-status-consistency.py
+cargo test -p vibescan-git --locked track_l_classifier_hypotheses_match_architecture_precedence
+python3 scripts/real-repo-invariants.py --self-test
+cargo test -p vibescan-secrets --locked
+UPDATE_GOLDEN=1 cargo test -p vibescan-core --test golden_corpus --features network,registry --locked golden_corpus_matches_expected_manifests
+UPDATE_METRICS=1 cargo test -p vibescan-core --test precision_recall --features network,registry --locked live_corpus_metrics_match_committed_baseline
+cargo test -p vibescan-core --test golden_corpus --features network,registry --locked
+cargo test -p vibescan-core --test precision_recall --features network,registry --locked
+python3 scripts/check-status-consistency.py --self-test
+python3 scripts/check-track-l-triage.py
+bash scripts/verify-all.sh
+dist generate --check
+shellcheck scripts/verify-all.sh
+python3 scripts/check-public-api.py
+git diff --check
+```
+
+The final complete offline matrix passed across all four feature graphs,
+Network boundary, hardening, release, public-API, status, and whitespace gates.
+`dist generate --check` passed with its pre-existing warnings, shellcheck was
+clean, and the triage redaction checker passed two rows. The optional default
+real-repository leg was skipped because L5 had already run its separately
+authorized ten-repository sample.
+
+External activity was limited to `git fetch` plus the authorized public HTTPS
+GitHub repository clones. The scans ran LocalStatic working-tree collection
+only. No Tier 0/Tier 1 Supabase probe, Registry-class request, credential use,
+sample-repository write, publish, or matched-value verification occurred. No
+clone or third-party source is present in the worktree.
+
 ## Track K final status reconciliation observed on 2026-08-04
 
 PR #16 merged the Track K post-merge status record to `main` as merge commit

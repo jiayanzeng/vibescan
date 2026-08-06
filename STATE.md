@@ -2,22 +2,34 @@
 
 ```yaml
 # vibescan:current-state
-reviewed: 2026-08-04
+reviewed: 2026-08-06
 head_commit: 17053d0c8f0a958b7f5e95d5d16ffd23eb750bfb
-worktree: clean
+worktree: dirty
 workspace_version: 0.2.0
 license: PolyForm-Noncommercial-1.0.0
 released_version: 0.2.0
 released_tag: v0.2.0
-integration_status: merged
-corpus_version: tier-h2-live-v1
-corpus_tp: 15
+integration_status: working-tree-only
+corpus_version: track-l-adversarial-v1
+corpus_tp: 20
 corpus_fp: 0
 corpus_fn: 0
 corpus_precision: 1.0
 corpus_recall: 1.0
-classification_coverage: 0.7777777777777778
-open_tracks: none
+classification_coverage: 0.5714285714285714
+vulnerable_corpus_fixtures: 12
+vulnerable_corpus_tp: 20
+vulnerable_corpus_fp: 0
+vulnerable_corpus_fn: 0
+clean_corpus_fixtures: 2
+clean_corpus_file_count: 25
+clean_corpus_scanned_line_count: 50
+clean_corpus_tp: 0
+clean_corpus_fp: 0
+clean_corpus_fn: 0
+clean_corpus_false_positives_per_file: 0.0
+clean_corpus_false_positives_per_scanned_line: 0.0
+open_tracks: track-l
 ```
 
 `head_commit` records the commit at which status was last reconciled; because a
@@ -50,6 +62,13 @@ detection or correlation rule, serialization, a crate edge, a feature gate,
 an egress path, credential handling, or target-project access. It remains in
 the `LocalStatic` capability class.
 
+Track L is an unmerged `LocalStatic` assurance and precision change. It makes
+captured-secret stopwords ASCII-case-insensitive, adds only measured narrow
+near-miss allowlists, expands the synthetic corpus, separates clean and
+vulnerable metrics, and records a redacted ten-repository working-tree sample.
+No Supabase probe, Registry request, credential use, target write, or publish
+is part of the track.
+
 ## Executive verdict
 
 vibescan is a substantial, runnable local-first Rust CLI. Architecture §15
@@ -76,6 +95,24 @@ Use these three lenses when discussing completion:
   remain outside the completed product surface.
 
 ## Current integration context
+
+Track L started from synchronized `main`/`origin/main` at `5934470` with only
+the user-authored instruction document untracked. The pre-fix adversarial clean
+fixture produced seven false positives across 20 scanned files. After the
+measured allowlist changes and two re-authored real-sample cases, the clean
+population contains 25 scanned files / 50 scanned lines and exactly zero
+findings. The vulnerable population contains 12 fixtures and 20/20 true
+positives. Overall precision/recall remain 1.0; classification coverage is the
+new pinned corpus ceiling of 8/14, with six exact Unknown identities.
+
+Ten public repositories at recorded commits contributed 2,627 LocalStatic
+working-tree files. The redacted triage has one confirmed FP and one uncertain
+finding, for a confirmed file-normalized FP rate of about 0.0381% and an upper
+bound of about 0.0761%. No real-world TP was established, so this sample
+supports a bounded noise observation, not a recall claim. The selection,
+procedure, worklist, hypothesis results, negative controls, and field-by-field
+golden review are in
+[`docs/tracks/vibescan-trackL-instructions.md`](docs/tracks/vibescan-trackL-instructions.md).
 
 Track K began from clean `origin/main` at `e1acd835`. The six crates whose
 `src/lib.rs` exceeded 800 lines were decomposed largest-first in six commits.
@@ -106,18 +143,20 @@ historical status was disputed are now preserved at
 `docs/vibescan-trackI-security-design.md`; J0 confirmed all three were tracked
 and not ignored before J4 reorganized them.
 
-J0 derived, rather than copied, the repository facts in the current-state
+J0 derived, rather than copied, the repository facts in its then-current state
 block. The annotated `v0.2.0` tag peels to `c707ce6`; Track H is the following
-merged commit. The corpus baseline is `tier-h2-live-v1` with 15 true positives,
-zero false positives, zero false negatives, precision 1.0, recall 1.0, and
-classification coverage 7/9. `.github/workflows/release.yml` carries dist's
+merged commit. The Track J-era corpus baseline was `tier-h2-live-v1` with 15
+true positives, zero false positives, zero false negatives, precision 1.0,
+recall 1.0, and classification coverage 7/9.
+`.github/workflows/release.yml` carries dist's
 generated-file marker. Track J pinned its action revisions through supported
 cargo-dist configuration rather than hand-editing the generated workflow, and
 `dist generate --check` passed with warnings only.
 
-The 7/9 classification coverage is this corpus's pinned ceiling: the exact
-Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
-`nested-gitignore` at `packages/nested/ignored-but-scanned/secret.ts`.
+The Track J-era 7/9 classification ceiling pinned the exact Unknown remainder
+as `history-only-elevated-key` at `src/history.ts` and `nested-gitignore` at
+`packages/nested/ignored-but-scanned/secret.ts`. Track L supersedes that metric
+with the explicitly expanded 8/14 ceiling described above.
 
 ## Architecture completion matrix
 
@@ -136,7 +175,7 @@ Unknown remainder is `history-only-elevated-key` at `src/history.ts` and
 | Reporting and gates | Implemented | JSON, SARIF, TTY, and HTML are redacted and deterministic; baseline-suppressed findings do not affect stats or exit policy. |
 | Configuration and CLI | Implemented | Defaults < repository TOML < explicit CLI precedence and repository-root relative paths are tested; repository config alone cannot enable Network work. |
 | Distribution | Track G complete | The static five-target build, ships-only npm wrapper, crates.io/npm/Homebrew publishers, checksums, and attestations are implemented. The final Track J closeout verified all eight crates.io and six npm identities at `0.2.0` with identified read-only GETs. |
-| Assurance | Track J plus addendum merged | The corpus records 15 TP, 0 FP, 0 FN, precision/recall 1.0, and classification coverage 7/9. The exact two-member Unknown set is pinned; status consistency now verifies Repomix hygiene and Git truth, four-graph CI and release structure run on pull requests, immutable workflow actions remain enforced, and the canonical offline matrix covers these controls without changing scanner results. |
+| Assurance | Track L complete, unmerged | The corpus records 20 TP, 0 FP, 0 FN and separates 25 clean files / 50 clean lines from 12 vulnerable fixtures. Precision/recall remain 1.0 and the expanded exact Unknown set pins the 8/14 coverage ceiling. Ten public working-tree samples add a redacted two-row triage and bounded real-code noise measurement. Existing Track J/K status, CI, release, Repomix, and public-API gates remain in force. |
 | Explicit non-goals | Preserved | No live writes, active DAST, BOLA, dashboard, accounts, billing, or client-auth heuristic scanner is authorized here. |
 
 ## Strict gaps and known risks
@@ -165,9 +204,10 @@ checker rather than silently approximated.
 
 ### P2 — measured product depth
 
-- The live corpus is intentionally small and self-authored. Precision and
-  recall are saturated; continued sanitized real-repository sampling is the
-  appropriate expansion path.
+- Synthetic precision and recall remain saturated after the adversarial clean
+  expansion. The ten-repository sample found one FP and one uncertain result
+  but no locally established TP, so it measures noise over 2,627 files and
+  cannot establish real-world recall.
 - The materialized pipeline records deterministic counters and duration, but
   longer-term timing and peak-memory trends are not gated.
 - Provider-corpus licensing and attribution should remain a durable review
@@ -177,10 +217,11 @@ checker rather than silently approximated.
 
 ## Detailed next steps
 
-1. Keep real-repository validation explicit and sanitized; never point the
-   optional leg at user data without authorization.
-2. Continue clean-control and planted-positive real-repository sampling before
-   expanding generic detection breadth.
+1. Review and merge Track L; then reconcile `integration_status` and the last
+   merged `head_commit` on `main`.
+2. Continue explicit, sanitized real-repository sampling; prioritize samples
+   likely to contain locally labelable TPs before making a real-world recall
+   claim.
 3. Keep Track I gated on explicit user demand, ownership-proof ratification,
    and a non-persisting design. No Track J work enters that deferred track.
 

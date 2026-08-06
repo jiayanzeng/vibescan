@@ -39,6 +39,18 @@ STATE_FIELDS = (
     "corpus_precision",
     "corpus_recall",
     "classification_coverage",
+    "vulnerable_corpus_fixtures",
+    "vulnerable_corpus_tp",
+    "vulnerable_corpus_fp",
+    "vulnerable_corpus_fn",
+    "clean_corpus_fixtures",
+    "clean_corpus_file_count",
+    "clean_corpus_scanned_line_count",
+    "clean_corpus_tp",
+    "clean_corpus_fp",
+    "clean_corpus_fn",
+    "clean_corpus_false_positives_per_file",
+    "clean_corpus_false_positives_per_scanned_line",
     "open_tracks",
 )
 INTEGRATION_STATUSES = {
@@ -123,6 +135,19 @@ def metric_records(metrics: dict[str, object]) -> list[tuple[str, str, str]]:
     totals = metrics.get("totals")
     if not isinstance(totals, dict):
         raise ValueError("corpus metrics artifact is missing an object-valued totals field")
+    corpora = metrics.get("corpora")
+    if not isinstance(corpora, dict):
+        raise ValueError("corpus metrics artifact is missing an object-valued corpora field")
+    vulnerable = corpora.get("vulnerable")
+    if not isinstance(vulnerable, dict):
+        raise ValueError(
+            "corpus metrics artifact is missing an object-valued corpora.vulnerable field"
+        )
+    clean = corpora.get("clean")
+    if not isinstance(clean, dict):
+        raise ValueError(
+            "corpus metrics artifact is missing an object-valued corpora.clean field"
+        )
     mappings = (
         ("corpus_version", metrics.get("corpus_version"), "corpus_version"),
         ("corpus_tp", totals.get("tp"), "totals.tp"),
@@ -131,6 +156,42 @@ def metric_records(metrics: dict[str, object]) -> list[tuple[str, str, str]]:
         ("corpus_precision", totals.get("precision"), "totals.precision"),
         ("corpus_recall", totals.get("recall"), "totals.recall"),
         ("classification_coverage", totals.get("coverage"), "totals.coverage"),
+        (
+            "vulnerable_corpus_fixtures",
+            vulnerable.get("fixture_count"),
+            "corpora.vulnerable.fixture_count",
+        ),
+        ("vulnerable_corpus_tp", vulnerable.get("tp"), "corpora.vulnerable.tp"),
+        ("vulnerable_corpus_fp", vulnerable.get("fp"), "corpora.vulnerable.fp"),
+        ("vulnerable_corpus_fn", vulnerable.get("fn"), "corpora.vulnerable.fn"),
+        (
+            "clean_corpus_fixtures",
+            clean.get("fixture_count"),
+            "corpora.clean.fixture_count",
+        ),
+        (
+            "clean_corpus_file_count",
+            clean.get("file_count"),
+            "corpora.clean.file_count",
+        ),
+        (
+            "clean_corpus_scanned_line_count",
+            clean.get("scanned_line_count"),
+            "corpora.clean.scanned_line_count",
+        ),
+        ("clean_corpus_tp", clean.get("tp"), "corpora.clean.tp"),
+        ("clean_corpus_fp", clean.get("fp"), "corpora.clean.fp"),
+        ("clean_corpus_fn", clean.get("fn"), "corpora.clean.fn"),
+        (
+            "clean_corpus_false_positives_per_file",
+            clean.get("false_positives_per_file"),
+            "corpora.clean.false_positives_per_file",
+        ),
+        (
+            "clean_corpus_false_positives_per_scanned_line",
+            clean.get("false_positives_per_scanned_line"),
+            "corpora.clean.false_positives_per_scanned_line",
+        ),
     )
     records = []
     for field, value, source_field in mappings:
@@ -453,6 +514,18 @@ def sample_state() -> dict[str, str]:
         "corpus_precision": "1.0",
         "corpus_recall": "1.0",
         "classification_coverage": "0.5",
+        "vulnerable_corpus_fixtures": "1",
+        "vulnerable_corpus_tp": "2",
+        "vulnerable_corpus_fp": "0",
+        "vulnerable_corpus_fn": "0",
+        "clean_corpus_fixtures": "1",
+        "clean_corpus_file_count": "4",
+        "clean_corpus_scanned_line_count": "12",
+        "clean_corpus_tp": "0",
+        "clean_corpus_fp": "0",
+        "clean_corpus_fn": "0",
+        "clean_corpus_false_positives_per_file": "0.0",
+        "clean_corpus_false_positives_per_scanned_line": "0.0",
         "open_tracks": "none",
     }
 
@@ -467,6 +540,24 @@ def sample_metrics() -> dict[str, object]:
             "precision": 1.0,
             "recall": 1.0,
             "coverage": 0.5,
+        },
+        "corpora": {
+            "vulnerable": {
+                "fixture_count": 1,
+                "tp": 2,
+                "fp": 0,
+                "fn": 0,
+            },
+            "clean": {
+                "fixture_count": 1,
+                "file_count": 4,
+                "scanned_line_count": 12,
+                "tp": 0,
+                "fp": 0,
+                "fn": 0,
+                "false_positives_per_file": 0.0,
+                "false_positives_per_scanned_line": 0.0,
+            },
         },
     }
 
@@ -517,6 +608,21 @@ def run_self_tests() -> None:
         "metrics mismatch",
         check_metrics(state, bad_metrics),
         "classification_coverage",
+    )
+    bad_clean_metrics = sample_metrics()
+    bad_clean_metrics["corpora"] = {
+        **bad_clean_metrics["corpora"],
+        "clean": {
+            **bad_clean_metrics["corpora"]["clean"],
+            "fp": 1,
+            "false_positives_per_file": 0.25,
+            "false_positives_per_scanned_line": 1 / 12,
+        },
+    }
+    require_error(
+        "clean metrics mismatch",
+        check_metrics(state, bad_clean_metrics),
+        "clean_corpus_fp",
     )
 
     git_errors, _ = evaluate_git_check(

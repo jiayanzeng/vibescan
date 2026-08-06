@@ -1,0 +1,3 @@
+repository	commit	rule_id	path	location_class	severity	label	rationale
+t3-oss/create-t3-app	4709861f7e67a15564c0460c13e7b4b6cfcae40d	generic-high-entropy-assignment	www/src/config.ts	Unknown	Medium	FP	Public-search configuration makes the generic secret label inapplicable; matched value suppressed and not verified.
+supabase-community/flutter-stripe-payments-with-supabase-functions	6442c9e8a5836b6eaf1b12657abba1cd25ac8b52	supabase-legacy-jwt	supabase/functions/hello/index.ts	ServerOnly	Low	uncertain	Commented bearer example lacks a local placeholder proof; live-looking matched value suppressed and not verified.

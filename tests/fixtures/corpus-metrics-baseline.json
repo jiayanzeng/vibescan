@@ -1,15 +1,65 @@
 {
-  "corpus_version": "tier-h2-live-v1",
+  "corpus_version": "track-l-adversarial-v1",
   "totals": {
-    "tp": 15,
+    "tp": 20,
     "fp": 0,
     "fn": 0,
     "precision": 1.0,
     "recall": 1.0,
-    "coverage": 0.7777777777777778
+    "coverage": 0.5714285714285714
+  },
+  "corpora": {
+    "vulnerable": {
+      "fixture_count": 12,
+      "file_count": 17,
+      "scanned_line_count": 46,
+      "expected": 20,
+      "observed": 20,
+      "tp": 20,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "false_positives_per_file": 0.0,
+      "false_positives_per_scanned_line": 0.0
+    },
+    "clean": {
+      "fixture_count": 2,
+      "file_count": 25,
+      "scanned_line_count": 50,
+      "expected": 0,
+      "observed": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "false_positives_per_file": 0.0,
+      "false_positives_per_scanned_line": 0.0
+    }
   },
   "per_fixture": {
+    "adversarial-clean-control": {
+      "file_count": 22,
+      "scanned_line_count": 37,
+      "expected": 0,
+      "observed": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0
+    },
+    "adversarial-positive-controls": {
+      "file_count": 5,
+      "scanned_line_count": 6,
+      "expected": 5,
+      "observed": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0
+    },
     "clean-control": {
+      "file_count": 3,
+      "scanned_line_count": 13,
       "expected": 0,
       "observed": 0,
       "tp": 0,
@@ -17,6 +67,8 @@
       "fn": 0
     },
     "hallucinated-dependency": {
+      "file_count": 1,
+      "scanned_line_count": 8,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -24,6 +76,8 @@
       "fn": 0
     },
     "history-only-elevated-key": {
+      "file_count": 3,
+      "scanned_line_count": 2,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -31,6 +85,8 @@
       "fn": 0
     },
     "malformed-dependency": {
+      "file_count": 1,
+      "scanned_line_count": 6,
       "expected": 2,
       "observed": 2,
       "tp": 2,
@@ -38,6 +94,8 @@
       "fn": 0
     },
     "monorepo-layout": {
+      "file_count": 1,
+      "scanned_line_count": 6,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -45,6 +103,8 @@
       "fn": 0
     },
     "nested-gitignore": {
+      "file_count": 2,
+      "scanned_line_count": 2,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -52,6 +112,8 @@
       "fn": 0
     },
     "offline-composite-exposed-public-key-chain": {
+      "file_count": 0,
+      "scanned_line_count": 0,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -59,6 +121,8 @@
       "fn": 0
     },
     "permissive-using-true-policy": {
+      "file_count": 0,
+      "scanned_line_count": 0,
       "expected": 4,
       "observed": 4,
       "tp": 4,
@@ -66,6 +130,8 @@
       "fn": 0
     },
     "publishable-client-reachable": {
+      "file_count": 1,
+      "scanned_line_count": 6,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -73,6 +139,8 @@
       "fn": 0
     },
     "rls-off-table": {
+      "file_count": 0,
+      "scanned_line_count": 0,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -80,6 +148,8 @@
       "fn": 0
     },
     "src-api-client-wrapper": {
+      "file_count": 1,
+      "scanned_line_count": 8,
       "expected": 1,
       "observed": 1,
       "tp": 1,
@@ -87,6 +157,8 @@
       "fn": 0
     },
     "vendor-chunks-noise": {
+      "file_count": 2,
+      "scanned_line_count": 2,
       "expected": 1,
       "observed": 1,
       "tp": 1,

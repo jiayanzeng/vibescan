@@ -10,13 +10,15 @@ use common::{
     tier1_fixture_findings,
 };
 #[cfg(feature = "registry")]
-use common::{REGISTRY_FIXTURES, registry_fixture_findings};
+use common::{LiveFixture, REGISTRY_FIXTURES, registry_fixture_findings};
 use serde::{Deserialize, Serialize};
 use vibescan_core::{ScanConfig, scan};
+use vibescan_git::{WalkOptions, collect_repository};
 use vibescan_types::{Category, Evidence, Finding, LocationClass, Severity};
 
-const CORPUS_VERSION: &str = "tier-h2-live-v1";
+const CORPUS_VERSION: &str = "track-l-adversarial-v1";
 const CLEAN_CONTROL: &str = "clean-control";
+const ADVERSARIAL_CLEAN_CONTROL: &str = "adversarial-clean-control";
 const OFFLINE_COMPOSITE: &str = "offline-composite-exposed-public-key-chain";
 #[cfg(not(feature = "registry"))]
 const HALLUCINATED_DEPENDENCY: &str = "hallucinated-dependency";
@@ -82,7 +84,32 @@ struct StableIdentity {
 struct MetricsReport {
     corpus_version: String,
     totals: TotalMetrics,
+    #[serde(default)]
+    corpora: CorpusBreakdown,
     per_fixture: BTreeMap<String, FixtureMetrics>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+struct CorpusBreakdown {
+    vulnerable: CorpusMetrics,
+    clean: CorpusMetrics,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+struct CorpusMetrics {
+    fixture_count: u64,
+    file_count: u64,
+    scanned_line_count: u64,
+    expected: u64,
+    observed: u64,
+    tp: u64,
+    fp: u64,
+    #[serde(rename = "fn")]
+    fn_count: u64,
+    precision: f64,
+    recall: f64,
+    false_positives_per_file: f64,
+    false_positives_per_scanned_line: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -98,6 +125,10 @@ struct TotalMetrics {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct FixtureMetrics {
+    #[serde(default)]
+    file_count: u64,
+    #[serde(default)]
+    scanned_line_count: u64,
     expected: u64,
     observed: u64,
     tp: u64,
@@ -106,12 +137,18 @@ struct FixtureMetrics {
     fn_count: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FixturePopulation {
+    file_count: u64,
+    scanned_line_count: u64,
+}
+
 #[test]
 fn live_corpus_metrics_match_committed_baseline() {
     let report = compute_report();
     assert_eq!(
-        report.totals.coverage, 0.777_777_777_777_777_8,
-        "classification coverage should be exactly 7/9: the src/api client-wrapper adds one classified key while the two Unknown findings remain the intentionally generic src/history.ts and packages/nested/ignored-but-scanned/secret.ts paths"
+        report.totals.coverage, 0.571_428_571_428_571_4,
+        "classification coverage should be exactly 8/14: the five Track L positive controls add one classified .env.local finding and four intentionally framework-neutral Unknown findings"
     );
 
     let path = baseline_path();
@@ -150,6 +187,38 @@ fn live_corpus_metrics_match_committed_baseline() {
 fn classification_coverage_unknown_set_is_pinned() {
     let expected = BTreeSet::from([
         (
+            "adversarial-positive-controls".to_owned(),
+            StableIdentity {
+                rule_id: "generic-secret".to_owned(),
+                fingerprint: "2103cf7100179dec038e9bbaea9f2c8e".to_owned(),
+                project: String::new(),
+            },
+        ),
+        (
+            "adversarial-positive-controls".to_owned(),
+            StableIdentity {
+                rule_id: "generic-secret".to_owned(),
+                fingerprint: "3bccfe53474751edbcaee22a8bcb0ef4".to_owned(),
+                project: String::new(),
+            },
+        ),
+        (
+            "adversarial-positive-controls".to_owned(),
+            StableIdentity {
+                rule_id: "generic-secret".to_owned(),
+                fingerprint: "50fe0dbf1f8945b6cb8115797f70f1ae".to_owned(),
+                project: String::new(),
+            },
+        ),
+        (
+            "adversarial-positive-controls".to_owned(),
+            StableIdentity {
+                rule_id: "generic-secret".to_owned(),
+                fingerprint: "daeb28e351f4c85fc339745e5c155610".to_owned(),
+                project: String::new(),
+            },
+        ),
+        (
             "history-only-elevated-key".to_owned(),
             StableIdentity {
                 rule_id: "supabase-key:secret_new".to_owned(),
@@ -167,10 +236,9 @@ fn classification_coverage_unknown_set_is_pinned() {
         ),
     ]);
 
-    // history-only-elevated-key exists to exercise commit provenance at the
-    // intentionally framework-neutral src/history.ts path. nested-gitignore
-    // exists to exercise ignore layering at another path with no framework
-    // signal. Both should remain Unknown unless the corpus changes deliberately.
+    // The two legacy Unknown cases and the four Track L provider/generic
+    // controls all live at deliberately framework-neutral paths. They should
+    // remain Unknown unless the corpus changes deliberately.
     assert_eq!(unknown_classification_set(), expected);
 }
 
@@ -178,13 +246,19 @@ fn classification_coverage_unknown_set_is_pinned() {
 fn bogus_expected_identity_is_an_fn_and_trips_the_recall_gate() {
     let real = test_identity("real");
     let bogus = test_identity("bogus");
-    let fixture = measure_fixture(&[real.clone(), bogus], &[real]);
+    let fixture = measure_fixture(
+        &[real.clone(), bogus],
+        &[real],
+        FixturePopulation::default(),
+    );
     assert_eq!(fixture.fn_count, 1);
 
     let report = test_report("perturbed-fixture", fixture);
     let baseline = test_report(
         "perturbed-fixture",
         FixtureMetrics {
+            file_count: 0,
+            scanned_line_count: 0,
             expected: 2,
             observed: 2,
             tp: 2,
@@ -202,13 +276,19 @@ fn bogus_expected_identity_is_an_fn_and_trips_the_recall_gate() {
 
 #[test]
 fn injected_clean_control_fp_fails_independently_of_baseline_rates() {
-    let clean = measure_fixture(&[], &[test_identity("injected-fp")]);
+    let clean = measure_fixture(
+        &[],
+        &[test_identity("injected-fp")],
+        FixturePopulation::default(),
+    );
     assert_eq!(clean.fp, 1);
 
     let report = test_report(CLEAN_CONTROL, clean);
     let mut baseline = test_report(
         CLEAN_CONTROL,
         FixtureMetrics {
+            file_count: 0,
+            scanned_line_count: 0,
             expected: 0,
             observed: 0,
             tp: 0,
@@ -221,7 +301,7 @@ fn injected_clean_control_fp_fails_independently_of_baseline_rates() {
     let error =
         assert_hard_gates(&report, &baseline).expect_err("clean-control FP must always fail");
     assert!(
-        error.contains("clean-control false positives: expected 0, got 1"),
+        error.contains("clean-corpus false positives: expected 0, got 1"),
         "unexpected error: {error}"
     );
 }
@@ -251,9 +331,11 @@ fn compute_report() -> MetricsReport {
         let (classified, eligible) = classification_coverage(&result.findings);
         coverage_classified += classified;
         coverage_total += eligible;
+        let population = fixture_population(&repo, fixture.history);
+        assert_eq!(population.file_count, result.stats.paths_walked);
         per_fixture.insert(
             fixture.name.to_owned(),
-            measure_fixture(&expected, &observed),
+            measure_fixture(&expected, &observed, population),
         );
     }
 
@@ -268,7 +350,7 @@ fn compute_report() -> MetricsReport {
     coverage_total += eligible;
     per_fixture.insert(
         OFFLINE_COMPOSITE.to_owned(),
-        measure_fixture(&expected, &observed),
+        measure_fixture(&expected, &observed, FixturePopulation::default()),
     );
 
     for name in TIER1_FIXTURES {
@@ -278,7 +360,10 @@ fn compute_report() -> MetricsReport {
         let (classified, eligible) = classification_coverage(&findings);
         coverage_classified += classified;
         coverage_total += eligible;
-        per_fixture.insert((*name).to_owned(), measure_fixture(&expected, &observed));
+        per_fixture.insert(
+            (*name).to_owned(),
+            measure_fixture(&expected, &observed, FixturePopulation::default()),
+        );
     }
 
     #[cfg(feature = "registry")]
@@ -286,7 +371,16 @@ fn compute_report() -> MetricsReport {
         let findings = registry_fixture_findings(name);
         let expected = read_expected_identities(name);
         let observed = findings.iter().map(observed_identity).collect::<Vec<_>>();
-        per_fixture.insert((*name).to_owned(), measure_fixture(&expected, &observed));
+        let fixture = LiveFixture {
+            name,
+            history: false,
+        };
+        let repo = materialize_fixture(&fixture);
+        let population = fixture_population(&repo, false);
+        per_fixture.insert(
+            (*name).to_owned(),
+            measure_fixture(&expected, &observed, population),
+        );
     }
 
     report_from_metrics(per_fixture, ratio(coverage_classified, coverage_total))
@@ -443,7 +537,11 @@ fn correlation_subject(rule_id: &str, reproduction: Option<&str>) -> (String, St
     )
 }
 
-fn measure_fixture(expected: &[StableIdentity], observed: &[StableIdentity]) -> FixtureMetrics {
+fn measure_fixture(
+    expected: &[StableIdentity],
+    observed: &[StableIdentity],
+    population: FixturePopulation,
+) -> FixtureMetrics {
     let expected_counts = identity_counts(expected);
     let observed_counts = identity_counts(observed);
     let tp = expected_counts
@@ -455,11 +553,39 @@ fn measure_fixture(expected: &[StableIdentity], observed: &[StableIdentity]) -> 
     let expected_total = expected.len() as u64;
     let observed_total = observed.len() as u64;
     FixtureMetrics {
+        file_count: population.file_count,
+        scanned_line_count: population.scanned_line_count,
         expected: expected_total,
         observed: observed_total,
         tp,
         fp: observed_total - tp,
         fn_count: expected_total - tp,
+    }
+}
+
+fn fixture_population(repo: &Path, include_history: bool) -> FixturePopulation {
+    let output = collect_repository(
+        repo,
+        WalkOptions {
+            include_working_tree: true,
+            include_history,
+            ..WalkOptions::default()
+        },
+    )
+    .unwrap_or_else(|error| {
+        panic!(
+            "population collection failed for {}: {error}",
+            repo.display()
+        )
+    });
+    let scanned_line_count = output
+        .units
+        .iter()
+        .map(|unit| String::from_utf8_lossy(&unit.content).lines().count() as u64)
+        .sum();
+    FixturePopulation {
+        file_count: output.stats.paths_walked,
+        scanned_line_count,
     }
 }
 
@@ -536,13 +662,10 @@ fn collect_unknown_classifications(
 }
 
 fn assert_hard_gates(report: &MetricsReport, baseline: &MetricsReport) -> Result<(), String> {
-    let clean = report
-        .per_fixture
-        .get(CLEAN_CONTROL)
-        .ok_or_else(|| "clean-control metrics missing".to_owned())?;
-    if clean.fp != 0 {
+    let clean = &report.corpora.clean;
+    if clean.fp != 0 || clean.observed != 0 {
         return Err(format!(
-            "clean-control false positives: expected 0, got {}",
+            "clean-corpus false positives: expected 0, got {}",
             clean.fp
         ));
     }
@@ -578,13 +701,67 @@ fn report_from_metrics(
             recall: ratio(tp, tp + fn_count),
             coverage,
         },
+        corpora: CorpusBreakdown {
+            vulnerable: corpus_metrics(
+                per_fixture
+                    .iter()
+                    .filter(|(name, _)| !is_clean_fixture(name))
+                    .map(|(_, metrics)| metrics),
+            ),
+            clean: corpus_metrics(
+                per_fixture
+                    .iter()
+                    .filter(|(name, _)| is_clean_fixture(name))
+                    .map(|(_, metrics)| metrics),
+            ),
+        },
         per_fixture,
     }
+}
+
+fn corpus_metrics<'a>(fixtures: impl Iterator<Item = &'a FixtureMetrics>) -> CorpusMetrics {
+    let fixtures = fixtures.collect::<Vec<_>>();
+    let file_count = fixtures.iter().map(|metrics| metrics.file_count).sum();
+    let scanned_line_count = fixtures
+        .iter()
+        .map(|metrics| metrics.scanned_line_count)
+        .sum();
+    let expected = fixtures.iter().map(|metrics| metrics.expected).sum();
+    let observed = fixtures.iter().map(|metrics| metrics.observed).sum();
+    let tp = fixtures.iter().map(|metrics| metrics.tp).sum();
+    let fp = fixtures.iter().map(|metrics| metrics.fp).sum();
+    let fn_count = fixtures.iter().map(|metrics| metrics.fn_count).sum();
+    CorpusMetrics {
+        fixture_count: fixtures.len() as u64,
+        file_count,
+        scanned_line_count,
+        expected,
+        observed,
+        tp,
+        fp,
+        fn_count,
+        precision: ratio(tp, tp + fp),
+        recall: ratio(tp, tp + fn_count),
+        false_positives_per_file: rate(fp, file_count),
+        false_positives_per_scanned_line: rate(fp, scanned_line_count),
+    }
+}
+
+fn is_clean_fixture(name: &str) -> bool {
+    matches!(name, CLEAN_CONTROL | ADVERSARIAL_CLEAN_CONTROL)
 }
 
 fn ratio(numerator: u64, denominator: u64) -> f64 {
     if denominator == 0 {
         1.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn rate(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
     } else {
         numerator as f64 / denominator as f64
     }
@@ -650,6 +827,8 @@ fn test_report(name: &str, fixture: FixtureMetrics) -> MetricsReport {
     let mut per_fixture = BTreeMap::from([(
         CLEAN_CONTROL.to_owned(),
         FixtureMetrics {
+            file_count: 0,
+            scanned_line_count: 0,
             expected: 0,
             observed: 0,
             tp: 0,
